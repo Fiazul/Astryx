@@ -1,0 +1,13 @@
+# Godot 4+ — generated import cache (regenerated on open; never commit)
+.godot/
+
+# Secrets — the real NASA key lives only in your local .env, never in git.
+# (Astryx doesn't actually need it: positions come from the keyless JPL
+# Horizons API. See .env.example.)
+.env
+
+# Editor / OS cruft
+.DS_Store
+Thumbs.db
+*~
+*.tmp
