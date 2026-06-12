@@ -1,77 +1,39 @@
-# Astryx
+# Astryx · v0.2.0
 
-A small, third‑person space explorer built in **Godot 4** with **GDScript**. You
-launch from Earth, fly out through the solar system, and watch distant bodies
-grow from glowing dots into real worlds as you approach. Built to run on a
-potato — emissive bodies and glow instead of heavy lighting, a single instanced
-star field, low‑poly meshes only.
+A potato-friendly **third-person space explorer** in Godot 4 / GDScript. Launch
+from Earth, fly the **real** solar system, wormhole to a real exoplanet, and
+dogfight aliens. Everything is spawned from code; no detailed assets, just
+emissive bodies, glow, and a few low-poly GLBs.
 
-> Cast: **Rook** flies the ship **Lyra**, launching from **Earth** with the
-> **Sun** at the heart of the system.
+## Features
+- **Real positions** — Sun + planets from live **JPL Horizons**, nearby stars from
+  the J2000 catalog. Earth is the origin (floating-origin engine for AU↔ly scale).
+- **Wormhole travel** — fly to a portal, press **J**, transit the tunnel, emerge
+  at the real **K2-18** system (M-dwarf + **K2-18b** at its real 0.143 AU orbit).
+- **Combat** — left-click machine-gun bolts (aim by flying); alien ships hunt and
+  fire back. Hull / Kills on the HUD.
+- **Ships** — 4 selectable hulls at the station (dock with **F**, pick **1–4**).
+- **Looping music** while travelling.
 
-## ✨ What makes it tick
+## Controls
+`WASD` thrust · `Space/Ctrl` up·down · `Q/E` roll · `Shift` boost · `mouse` aim ·
+**`L-click` fire** · **`J`** wormhole · **`H`** / button → teleport to Earth ·
+`F` dock · `Esc` free cursor
 
-- **Real positions, not eyeballed.** The Sun and all eight planets are placed
-  from their *actual* coordinates, fetched live from **NASA/JPL Horizons** for
-  today's date (keyless), with constants verified against Horizons to 4 decimals
-  as an offline fallback. Earth is the geocentric origin; nearby stars
-  (Proxima, Sirius, Tau Ceti…) are placed from the real J2000 catalog.
-- **Floating origin.** At astronomical scale 32‑bit floats fall apart, so the
-  ship stays pinned at `(0,0,0)` and the universe moves around it. Each body's
-  true position is tracked as data and rendered relative to the ship.
-- **Dot → body LOD.** Far away, a body is a soft billboard dot; up close it
-  crossfades into a real model (Earth, the Sun) or an emissive sphere.
-- **Arcade 6DOF flight.** Mouse aims, `WASD` thrusts, the hull banks into turns,
-  momentum eases to a stop — simple but with character. Dock at the station to
-  swap ships.
-- **Minimal, code‑spawned HUD.** Distance from Earth, speed, and the nearest
-  body — just labels on a `CanvasLayer`.
+## Run
+Install **Godot 4.6+** (GDScript, no C#), open this folder as a project, press **F5**.
+No keys or build steps. *(Optional `bgm.mp3` is gitignored — drop your own in the
+project root for music.)*
 
-## 🎮 Controls
+## Layout
+`main.gd` orchestrator · `ephemeris.gd` real data + Horizons fetch ·
+`systems.gd` star systems · `planet_system.gd` body LOD · `wormhole.gd` transit ·
+`combat.gd` dogfight · `ship.gd` flight/visuals · `props.gd` station · `hud.gd` UI ·
+`starfield.gd` backdrop · `tools/real_positions.py` coordinate verifier.
+Design spec: [`CLAUDE.md`](CLAUDE.md).
 
-| Input | Action |
-|---|---|
-| `Mouse` | Aim |
-| `W` / `S` | Thrust forward / back |
-| `A` / `D` | Strafe |
-| `Space` / `Ctrl` | Up / down |
-| `Q` / `E` | Roll |
-| `Shift` | Boost |
-| `Mouse wheel` | Zoom the chase camera |
-| `F` | Dock / undock at the station |
-| `Esc` | Free the cursor |
-
-## ▶️ Running it
-
-1. Install **Godot 4.6+** (standard build, GDScript — no C# needed).
-2. Open this folder as a project in Godot.
-3. Press **F5** (or the Play button).
-
-No API keys, accounts, or build steps required.
-
-## 🧱 How it's put together
-
-Everything is spawned from code; `Main.tscn` is a one‑node stub. The root
-`main.gd` wires the pieces and drives update order each frame:
-
-| File | Role |
-|---|---|
-| `main.gd` | Root orchestrator, lighting, docking |
-| `ephemeris.gd` | Real body data + live JPL Horizons fetch + offline fallback |
-| `planet_system.gd` | Dot↔body LOD, gravity, approach speed‑zones, star backdrop |
-| `ship.gd` | Ship model, materials, arcade flight, boosters, speed streaks |
-| `props.gd` | Hand‑placed GLB landmarks (the station, an astronaut) |
-| `hud.gd` | Code‑spawned HUD labels |
-| `starfield.gd` | Instanced background star field |
-| `tools/real_positions.py` | Standalone script that prints/verifies the real coordinates |
-
-The design spec and the decisions behind it live in [`CLAUDE.md`](CLAUDE.md).
-
-## 📜 Data sources
-
-- **Solar‑system positions** — [JPL Horizons](https://ssd.jpl.nasa.gov/horizons/) (keyless).
-- **Nearby stars** — J2000 RA/Dec/parallax from the HYG / SIMBAD catalogs.
+## Data
+[JPL Horizons](https://ssd.jpl.nasa.gov/horizons/) (solar system) · HYG/SIMBAD (stars).
 
 ---
-
-A hobby / educational project. Built with [Claude Code](https://claude.com/claude-code).
+Hobby / educational project. Built with [Claude Code](https://claude.com/claude-code).

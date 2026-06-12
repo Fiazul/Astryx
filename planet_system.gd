@@ -40,9 +40,27 @@ var _dot_tex: Texture2D
 
 func _ready() -> void:
 	_dot_tex = _make_dot_texture()
-	for p in Ephemeris.PLANETS:
-		_build_planet(p)
+	load_system(SystemDB.bodies(SystemDB.SOL))
 	_build_star_shell()
+
+
+# Swap the rendered bodies to a different star system (used on wormhole arrival).
+# Clears the current bodies and rebuilds from the given specs.
+func load_system(specs: Array) -> void:
+	for b in _bodies:
+		b.dot.queue_free()
+		b.label.queue_free()
+		if b.sphere != null:
+			b.sphere.queue_free()
+		if b.model != null:
+			b.model.queue_free()
+	_bodies.clear()
+	for spec in specs:
+		_build_planet(spec)
+	# reset transient readouts so a stale name doesn't linger one frame
+	nearest_name = ""
+	nearest_dist = INF
+	speed_limit = INF
 
 
 func _build_planet(p: Dictionary) -> void:
@@ -95,6 +113,8 @@ func _build_planet(p: Dictionary) -> void:
 
 	_bodies.append({
 		"name": p.name, "radius": float(p.radius),
+		"live": p.get("live", true),          # Sol bodies read live positions; others are static
+		"pos": p.get("pos", Vector3.ZERO),    # local position when not live
 		"dot": dot, "sphere": sphere, "mat": mat, "model": model, "label": label,
 		"spin": randf_range(0.05, 0.2),
 	})
@@ -155,7 +175,9 @@ func refresh(ship_pos: Vector3, delta: float) -> void:
 
 	for b in _bodies:
 		var rad: float = b.radius
-		var rel: Vector3 = eph.scene_pos(b.name) - ship_pos  # real pos, floating origin
+		# Sol's bodies read live Horizons positions; other systems are static local.
+		var bpos: Vector3 = eph.scene_pos(b.name) if b.live else b.pos
+		var rel: Vector3 = bpos - ship_pos  # floating origin
 		var dist := rel.length()
 
 		if GRAVITY_ENABLED and dist > 0.001 and dist < rad * GRAVITY_RANGE_MULT:

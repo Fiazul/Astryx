@@ -11,3 +11,7 @@
 Thumbs.db
 *~
 *.tmp
+
+# Background music (your local track — likely copyrighted; not pushed)
+bgm.mp3
+bgm.mp3.import

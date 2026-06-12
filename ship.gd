@@ -21,14 +21,16 @@ extends Node3D
 #   pitch  tip nose up/down if the model imports laid flat
 #   glow   hull self-illumination (no scene lights, so the hull lights itself)
 const SHIP_MODELS := [
-	{ "name": "Lyra",   "path": "res://Lyra.glb",      "tint": Color(0.98, 0.98, 1.08), "length": 3.5, "yaw": 180.0, "pitch": 0.0, "glow": 0.08 },
-	{ "name": "Stella", "path": "res://Spaceship.glb", "tint": Color(0.70, 0.62, 0.95), "length": 3.5, "yaw": 180.0, "pitch": 0.0, "glow": 0.08 },
+	{ "name": "Lyra",   "path": "res://Lyra.glb",          "tint": Color(0.98, 0.98, 1.08), "length": 3.5, "yaw": 180.0, "pitch": 0.0, "glow": 0.08, "chrome": true },
+	{ "name": "Stella", "path": "res://Spaceship.glb",     "tint": Color(0.70, 0.62, 0.95), "length": 3.5, "yaw": 180.0, "pitch": 0.0, "glow": 0.08 },
+	{ "name": "Vortex", "path": "res://Spaceship (1).glb", "tint": Color(0.95, 0.80, 0.65), "length": 3.8, "yaw": 180.0, "pitch": 0.0, "glow": 0.08 },
+	{ "name": "Raptor", "path": "res://Spaceship (2).glb", "tint": Color(0.70, 0.90, 0.95), "length": 3.8, "yaw": 180.0, "pitch": 0.0, "glow": 0.08 },
 ]
 const BOOSTER_COLOR := Color(0.35, 0.8, 1.0)
 # Booster nozzle placement (fractions of the fitted model's size). Nudge these
 # to snap the plumes onto Lyra's actual engines.
-const BOOSTER_BACK := 0.18          # how far back (0 = center, 0.5 = tail). Lower = closer to hull.
-const BOOSTER_SPREAD := 0.16        # sideways gap between the two nozzles
+const BOOSTER_BACK := 0.34          # how far back (0 = center, 0.5 = tail). Lower = closer to hull.
+const BOOSTER_SPREAD := 0.10        # sideways gap between the two nozzles (tight, near the body)
 const BOOSTER_RISE := 0.0           # vertical nudge (+ up, - down)
 const BOOSTER_FADE_FLIP := false    # if the plume fades at the wrong end, flip this
 # Camera zoom (mouse wheel)
@@ -60,6 +62,7 @@ var true_pos := Vector3.ZERO   # absolute position in game units (floating origi
 var speed_limit := INF         # set by main from PlanetSystem; eases us down near a body
 var gravity := Vector3.ZERO    # set by main from PlanetSystem; gentle pull toward bodies
 var frozen := false            # docked at a station — motion held, mouse freed
+var transiting := false        # in a wormhole tunnel — motion held, view locked forward
 var camera: Camera3D           # assigned by main; driven from fly()
 
 var _current_model := 0        # index into SHIP_MODELS
@@ -102,6 +105,15 @@ func _input(event: InputEvent) -> void:
 
 # Called every frame by main.gd, before the world is rebuilt around the ship.
 func fly(delta: float) -> void:
+	# Wormhole transit: motion held, view locked forward, streaks at full tilt.
+	if transiting:
+		velocity = Vector3.ZERO
+		_mouse_delta = Vector2.ZERO
+		_update_boosters(1.0, delta)
+		_update_streaks(1.0)
+		_update_camera(delta)
+		return
+
 	# Docked: hold position, idle the boosters, keep the camera steady.
 	if frozen:
 		velocity = Vector3.ZERO
@@ -185,7 +197,7 @@ func _update_boosters(throttle: float, delta: float) -> void:
 	for b in _boosters:
 		# Plume length stretches with throttle; nozzle stays anchored.
 		var sc: Vector3 = b.pivot.scale
-		sc.y = lerpf(sc.y, 0.4 + throttle * 1.6, k)
+		sc.y = lerpf(sc.y, 0.35 + throttle * 0.7, k)   # less stretch under thrust
 		b.pivot.scale = sc
 		# Plume transparency (additive) tracks throttle.
 		var pcol: Color = b.plume_mat.albedo_color
@@ -294,7 +306,7 @@ func _build_ship_model(idx: int) -> void:
 	_mesh_root.add_child(model)
 	model.rotation = Vector3(deg_to_rad(float(info.pitch)), deg_to_rad(float(info.yaw)), 0.0)
 	var box := _fit_model(model, float(info.length))
-	_recolor(model, info.tint, float(info.glow))
+	_recolor(model, info.tint, float(info.glow), info.get("chrome", false))
 	_build_boosters(box)
 
 
@@ -377,7 +389,7 @@ func _gather_mesh_instances(node: Node) -> Array[MeshInstance3D]:
 # shine comes from the reflective sky (see main._setup_environment) plus a
 # fresnel rim; a gentle emission keeps it from ever going fully dark in deep
 # space. The model's own texture stays as surface detail.
-func _recolor(model: Node3D, tint: Color, glow: float) -> void:
+func _recolor(model: Node3D, tint: Color, glow: float, chrome := false) -> void:
 	for mi in _gather_mesh_instances(model):
 		if mi.mesh == null:
 			continue
@@ -388,24 +400,36 @@ func _recolor(model: Node3D, tint: Color, glow: float) -> void:
 				m = orig.duplicate() as BaseMaterial3D
 			else:
 				m = StandardMaterial3D.new()
-			# Painted hull (NOT chrome): low metalness so the model's own colour
-			# texture shows, lit by the Sun key light — which is what reveals the
-			# panels and blue detail. NO texture-driven emission: this hull is
-			# white in the texture, and emitting it just blooms the whole ship to
-			# a flat white blob and erases the detail. Emission is only a dim flat
-			# floor so the shadowed side isn't pure black in deep space.
 			m.transparency = BaseMaterial3D.TRANSPARENCY_DISABLED
-			m.albedo_color = tint
-			m.metallic = 0.1                       # painted, not chrome — albedo shows under fill light
-			m.metallic_specular = 0.5
-			m.roughness = 0.5
-			m.rim_enabled = true
-			m.rim = 0.25
-			m.rim_tint = 0.5
-			m.emission_enabled = true
-			m.emission_texture = null
-			m.emission = tint
-			m.emission_energy_multiplier = glow
+			if chrome:
+				# Pure sci-fi white brushed metal with a cyan edge glow — drop the
+				# model's own (purple) texture and make a clean polished hull.
+				m.albedo_texture = null
+				m.albedo_color = Color(0.86, 0.90, 0.96)
+				m.metallic = 0.85
+				m.metallic_specular = 0.85
+				m.roughness = 0.3
+				m.rim_enabled = true
+				m.rim = 0.7
+				m.rim_tint = 0.0                    # bright white fresnel edge
+				m.emission_enabled = true
+				m.emission_texture = null
+				m.emission = Color(0.15, 0.7, 1.0)  # cyan self-glow accent
+				m.emission_energy_multiplier = 0.25
+			else:
+				# Painted hull: low metalness so the model's own colour texture
+				# shows under the key+fill lights; dim flat emission floor only.
+				m.albedo_color = tint
+				m.metallic = 0.1
+				m.metallic_specular = 0.5
+				m.roughness = 0.5
+				m.rim_enabled = true
+				m.rim = 0.25
+				m.rim_tint = 0.5
+				m.emission_enabled = true
+				m.emission_texture = null
+				m.emission = tint
+				m.emission_energy_multiplier = glow
 			mi.set_surface_override_material(si, m)
 
 
@@ -415,8 +439,8 @@ func _build_boosters(box: AABB) -> void:
 	var mount_z := s.z * BOOSTER_BACK  # +Z is behind the ship (forward is -Z)
 	var mount_y := s.y * BOOSTER_RISE
 	var x_off := s.x * BOOSTER_SPREAD
-	var r := clampf(s.x * 0.09, 0.04, 0.22)
-	var length := maxf(s.z * 0.4, 0.5)
+	var r := clampf(s.x * 0.06, 0.04, 0.16)
+	var length := maxf(s.z * 0.22, 0.4)   # shorter base plume so it trails, not splays
 	for sx in [-1.0, 1.0]:
 		_boosters.append(_make_booster(Vector3(sx * x_off, mount_y, mount_z), r, length))
 
