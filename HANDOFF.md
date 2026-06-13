@@ -1,70 +1,76 @@
-# Astryx — Session Handoff
+# Astryx — Session Handoff (v0.3.0)
 
-> Pick-up doc for the next (compact) session. Focus: **ship work** + **audio wiring**.
-> Project: `/home/fiazul/Desktop/godot_game` · Godot 4.6 / GDScript · repo `git@github.com:Fiazul/Astryx.git` (main, tag `v0.2.0`).
+> Pick-up doc for the next session. Project: `/home/fiazul/Desktop/godot_game`
+> Godot 4.6 / GDScript · repo `git@github.com:Fiazul/Astryx.git` (main). All work
+> below is committed + pushed.
 
-## ⚠️ FIRST THING: uncommitted local changes
-`v0.2.0` is pushed, but the **latest ship work is NOT committed yet**. Local edits ready to ship as **`v0.2.1`**:
-- **New Lyra = `Rocket ship.glb`** (a low-poly space shuttle; kept the name "Lyra", dropped the old purple model + chrome override). Colors come from its texture (white/orange/black), `metallic 0`, white tint — rendered faithfully.
-- **5 boosters** (the shuttle's engine cluster) — see `BOOSTER_MOUNTS` in `ship.gd`.
-- **"Glowing bulb" fix** — see below.
-→ Decision pending: commit as `v0.2.1` + **delete now-unused `Lyra.glb` / `Lyra_0.png`** (no longer referenced in any `.gd`). Verify with: `grep -c Lyra.glb *.gd`.
+## State of the game (v0.3.0)
+A real-solar-system third-person explorer with light combat, navigation, and a
+discovery loop. Everything is code-spawned (Main.tscn is a one-node stub).
 
-## Recent ship work (what & where)
-- `ship.gd` `SHIP_MODELS` — 4 ships: **Lyra** (shuttle), **Stella**, **Vortex**, **Raptor** (last two = `Spaceship (1/2).glb`, also reused as aliens). All `yaw 180`, `glow 0.0`.
-- `ship.gd` `BOOSTER_MOUNTS` (5 × `Vector2(x,y)`, fractions of ship width) + `_build_boosters()` + `BOOSTER_BACK 0.40` — nudge these to snap plumes onto each engine bell. `BOOSTER_COLOR` is cyan (line ~29) — change to orange if you want shuttle-like exhaust.
-- `ship.gd` `_recolor(model, tint, glow, chrome)` — `chrome:true` = white-metal+cyan override (currently unused; Lyra no longer uses it). Non-chrome keeps the model's own texture.
+**Ships** (`ship.gd`, `SHIP_MODELS`): Lyra, Stella, Raptor, **Vela**.
+- **Vela** = FTL ship (`warp 1581` → cruise ≈0.5 ly/s). Drive **spools up** over
+  ~9s while holding W (`WARP_FLOOR/WARP_CHARGE_TIME`). Hypersonic (>1500 u/s)
+  disables combat + crosshair. Gold booster.
+- **Raptor** = **dual-mode** (press **X**): Combat (machine-gun, `fire_cd 0.05`)
+  ⇄ Warp (Vela-style FTL). Long **purple-fire** booster trail in Warp mode
+  (`_update_boosters` `fire` branch). `toggle_warp_mode()` flips `warp` 1↔1581.
+- Per-ship boosters: `BOOSTER_LAYOUTS` (count/positions), `BOOSTER_RADIUS_SCALE`,
+  `BOOSTER_LENGTH_SCALE`, `BOOSTER_COLOR_OVERRIDE`. Stella red, Lyra longer.
 
-## The "bulb glow" fix (in `main._setup_environment`)
-Was: everything haloed into glowing bulbs. Root cause = **`glow_bloom`** haloing lit surfaces. Now:
-- `glow_bloom = 0.0` + `glow_hdr_threshold = 1.0` → **only emissive bodies (stars/Sun/portal) glow**, never lit metal.
-- `glow_intensity 0.55`, levels lowered.
-- `tonemap_exposure = 0.7` → global **−30% brightness** (keeps colour + specular shine).
-- All ship `glow` (self-emission) set to **0.0** — they're always lit by the key+fill `DirectionalLight3D`s, so no self-glow needed.
-**Tuning dials:** `tonemap_exposure` (overall brightness), `glow_intensity` (how much stars bloom).
+**Flight feel:** directional approach speed-limit (`ship.fly` cap uses
+`nearest_dir`) — eases down when moving TOWARD a body (stable scan), free to
+escape AWAY (no "stuck at Earth"). Warp ships ignore the limit.
 
-## 🔊 Audio — the dev is making these files; wire them on arrival
-Drop files in project root with these names; wire each to its trigger. **Priority-1 four ≈ 90% of the "alive" feel.**
+**Galaxy / navigation:**
+- Named stars (`Ephemeris.STARS`) are **real floating-origin destinations** at
+  true distances (`star_true_pos`, `UNITS_PER_LY`). Fly toward one → ly counts
+  down → blooms into an emissive sphere (`planet_system.gd` star loop, consts
+  `STAR_SKY/STAR_NEAR/STAR_RADIUS`). Only Vela/Raptor-warp are fast enough.
+- **Waypoint navigator** (Tab) + **3D orientation gizmo** + **off-screen arrow**
+  (`navigator.gd`). **Corner radar** (`minimap.gd`).
+- **Star map** (M, `map.gd`) → click a system to jump. **Wormhole** = **F**
+  (`wormhole.gd`, black-hole visual). **Alien Zone** system holds Vortex boss +
+  aliens; Sol/exoplanet systems are peaceful (`SystemDB.is_hostile`).
 
-**P1 — combat (short `.wav`, dry):**
-| File | Trigger | Where to hook |
-|---|---|---|
-| `sfx_fire.wav` | player bolt (≤0.08s, fires ~16/s) | `combat.gd` `_spawn_bolt` (player branch) / `update()` fire |
-| `sfx_explosion.wav` | alien dies (~0.6s) | `combat.gd` `_damage_alien` → `_boom` |
-| `sfx_hit.wav` | alien bolt hits you (~0.3s) | `combat.gd` `_step_bolts` player-hit branch |
-| `sfx_alien_fire.wav` | alien fires (lower pitch) | `combat.gd` `_step_aliens` fire block |
+**Discovery:** hold **V** near a body to scan → persistent **Codex** (C,
+`codex.gd`/`codex_panel.gd`, `user://codex.json`). Details panel (**G**,
+`planet_info.gd`) shows real NASA facts (`planet_data.gd`, cached + 20-day
+refresh from the Exoplanet Archive), **gated behind discovery**.
 
-**P2 — travel:**
-| File | Trigger |
-|---|---|
-| `sfx_engine.ogg` (**loop**) | while thrusting/boost — `ship.fly()` throttle |
-| `sfx_warp.wav` | press J / enter portal — `main._input` J / `wormhole.start_transit` |
-| `sfx_tunnel.ogg` (**loop**) | during transit — `wormhole.update()` transiting |
-| `sfx_teleport.wav` | teleport home — `main.teleport_home` |
+**Combat** (`combat.gd`): straight bolts, hitmarker + enemy flash + explosive
+bursts, Vortex boss (his old ship hull, scaled huge, red). `ship.fire_cooldown`
+drives rate.
 
-**P3 — polish:** `sfx_click.wav` (teleport button), `sfx_alarm.wav` (Hull < 20%).
+**UI:** Settings overlay (`settings.gd`, volume/sensitivity/glow/render-scale/
+fullscreen) opened by the **⚙ button**. Styled top-right control bar (Map/Codex/
+Settings). **Esc** = release/recapture cursor & "back" (no longer opens
+settings). Bigger HUD + 3D names. `project.godot` stretch = `canvas_items`.
 
-**Wiring pattern:** make a small `audio.gd` (a pool of `AudioStreamPlayer`s) or add players in `combat.gd`/`ship.gd`; one-shots = `.play()` on a fresh/pooled player (gun needs several voices for rapid fire), loops = one player toggled. Bus: keep SFX above music (music is at −14 dB in `main._setup_music`, gated to play only while moving).
+## Controls
+WASD thrust · Shift boost · Q/E roll · Space/Ctrl up·down · L-click fire ·
+**Tab** waypoint · **V** scan · **C** codex · **G** details · **M** map ·
+**F** dock/wormhole · **X** Raptor mode · **H** home · **Esc** cursor/back ·
+mouse-wheel zoom · **1–4** swap ship (docked).
 
-## How to "see" without a GPU (the dev runs the game; assistant can't)
-Headless can't render. Use xvfb + software GL:
+## ⭐ NEXT VERSION — Plan C: double-precision (the big one)
+The galaxy is navigable now, but at ly-scale `true_pos` (millions of units)
+float32 precision wobbles distant bodies (the "warp wall"). **Plan C** = rebuild
+Godot with `precision=double` (64-bit coords) so the *entire* galaxy is flyable
+with no jitter — the foundation for **real planet sizes** and **actual landable
+surfaces**. This was explicitly deferred to next version.
+
+Also queued (from the brainstorm): **proximity inflation** (planets tower over
+you up close), **combat stakes** (Hull 0 currently does nothing → death/respawn),
+moons/sub-planets, more real systems (TRAPPIST done; add neutron stars).
+
+## Headless workflow (assistant can't see a GPU)
+Render via xvfb + software GL to verify geometry/composition (NOT final colour):
 ```
 LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a -s "-screen 0 1280x720x24" \
   godot --rendering-driver opengl3 --resolution 1280x720 res://tools/<scene>.tscn
 ```
-A tiny scene-script loads `res://Main.tscn`, awaits ~20 frames, `get_viewport().get_texture().get_image().save_png("user://x.png")`, `get_tree().quit()`. Copy the png out of `~/.local/share/godot/app_userdata/Astryx/` and Read it. **Caveat: llvmpipe misrepresents colour/exposure** — trust it for geometry/composition, NOT final colour. Always delete `tools/*` afterwards (keep only `real_positions.py`).
-**New `class_name` scripts:** run `godot --headless --import` once so the global class registry picks them up, or you'll get false "Identifier not declared" parse errors.
-
-## State of the game (v0.2.x)
-Real solar system (live JPL Horizons) · **wormhole** Sol↔K2-18/K2-18b (press J at portal; transit `SEC_PER_LY=0.15`≈18s, set `2.9` for ~6 min) · **combat** (L-click machine-gun, aliens hunt+fire, Hull/Kills HUD) · **teleport** (H key / button) · **music** (gated to travel). Floating-origin engine; each system is local small-coord space → no precision issues (double-precision refactor is MOOT, don't do it).
-
-## Next-phase options (dev was choosing)
-1. **A — combat feel:** wire SFX (above) + **death/respawn** (Hull 0 currently does nothing) + **off-screen target arrow** to nearest alien + hit-flash/shake.
-2. **B — more galaxy:** map + click-to-jump (not just one portal) + more real exoplanet systems (TRAPPIST-1, Proxima b).
-3. **C — polish:** animated ship-select table; confirm Earth renders blue on real GPU.
-Dev leaned toward **A** (it's demo day; combat is the freshest). Also pending: commit `v0.2.1`, delete old `Lyra.glb`, optional rocket-orange boosters.
-
-## Quick start for next session
-1. Read this file + `git status` (uncommitted shuttle work).
-2. If audio files present → wire P1 first.
-3. Verify via xvfb render; commit `v0.2.1` when the dev's happy.
+A tiny tool scene loads/builds, awaits frames, saves to `user://x.png`; copy from
+`~/.local/share/godot/app_userdata/Astryx/` and read it. **Always delete
+`tools/*` afterwards (keep only `real_positions.py`).** Run `godot --headless
+--import` after adding a `class_name` so the registry updates.

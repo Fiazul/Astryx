@@ -65,7 +65,7 @@ const BOOSTER_LAYOUTS := {
 const BOOSTER_FALLBACK := [Vector2(-0.08, 0.0), Vector2(0.08, 0.0)]  # if a name isn't listed
 # Per-ship plume shaping. Raptor: long/thin/small. Vela: long, thin, golden.
 const BOOSTER_RADIUS_SCALE := { "Raptor": 1.9, "Vela": 0.45, "Stella": 0.40 }   # Raptor: strong
-const BOOSTER_LENGTH_SCALE := { "Raptor": 4.6, "Vela": 4.2,  "Stella": 3.6, "Lyra": 1.5 }  # longer trails
+const BOOSTER_LENGTH_SCALE := { "Raptor": 7.0, "Vela": 4.2,  "Stella": 3.6, "Lyra": 1.5 }  # long trails
 const BOOSTER_COLOR_OVERRIDE := {
 	"Vela": Color(1.0, 0.82, 0.32),    # transparent gold
 	"Stella": Color(1.0, 0.26, 0.20),  # sharp transparent red
@@ -281,20 +281,26 @@ func fly(delta: float) -> void:
 
 func _update_boosters(throttle: float, delta: float) -> void:
 	var k := clampf(10.0 * delta, 0.0, 1.0)
+	# Warp/travel mode (Raptor): a long, bright, flickering purple FIRE trail.
+	var fire := is_warp_mode()
+	var t := Time.get_ticks_msec() * 0.001
+	var flick := 1.0 + 0.18 * sin(t * 33.0) + 0.12 * sin(t * 71.0) if fire else 1.0
+	var len_mul := 2.4 * flick if fire else 1.0
+	var max_alpha := 0.95 if fire else 0.6
 	for b in _boosters:
 		# Plume length stretches with throttle; nozzle stays anchored.
 		var sc: Vector3 = b.pivot.scale
-		sc.y = lerpf(sc.y, 0.35 + throttle * 0.7, k)   # less stretch under thrust
+		sc.y = lerpf(sc.y, (0.35 + throttle * 0.7) * len_mul, k)
 		b.pivot.scale = sc
-		# Plume transparency (additive) tracks throttle.
+		# Plume transparency (additive) tracks throttle (fire = much brighter).
 		var pcol: Color = b.plume_mat.albedo_color
-		pcol.a = lerpf(pcol.a, clampf(0.05 + throttle * 0.35, 0.0, 0.6), k)
+		pcol.a = lerpf(pcol.a, clampf((0.05 + throttle * 0.45) * (1.7 if fire else 1.0), 0.0, max_alpha), k)
 		b.plume_mat.albedo_color = pcol
-		# Soft core glow at the nozzle.
-		var cs := 0.35 + throttle * 0.7
+		# Soft core glow at the nozzle (bigger + flickering in fire mode).
+		var cs := (0.35 + throttle * 0.7) * (1.6 * flick if fire else 1.0)
 		b.core.scale = Vector3(cs, cs, cs)
 		var ccol: Color = b.core_mat.albedo_color
-		ccol.a = lerpf(ccol.a, clampf(0.12 + throttle * 0.5, 0.0, 0.85), k)
+		ccol.a = lerpf(ccol.a, clampf(0.12 + throttle * 0.5, 0.0, 0.95), k)
 		b.core_mat.albedo_color = ccol
 
 
