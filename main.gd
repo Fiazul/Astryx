@@ -38,7 +38,9 @@ var docked := false
 var _dock_in_range := false
 var current_system := SystemDB.SOL
 var _music: AudioStreamPlayer
-var _slow_t := 0.0   # how long we've been near-stationary (for music gating)
+const MUSIC_DB := -24.0    # bgm backdrop level once faded in (engine/SFX sit on top)
+const MUSIC_OFF_DB := -60.0  # silent end of the fade
+const MUSIC_FADE := 1.2    # fade speed (per second) for the gentle in/out
 
 # Where the player starts, in absolute scene units (1u = 0.1 AU). You launch
 # FROM Earth (the origin), parked just off it on the side away from the Sun, so
@@ -113,6 +115,7 @@ func _ready() -> void:
 	# Code-spawned SFX (fire / engine / explosion).
 	audio = GameAudio.new()
 	add_child(audio)
+	ship.audio = audio   # the ship drives the engine voice from fly()
 
 	# Combat: alien dogfighters + your bolts (left-click to fire).
 	combat = Combat.new()
@@ -201,13 +204,18 @@ func _process(delta: float) -> void:
 func _update_music(delta: float) -> void:
 	if _music == null:
 		return
-	var spd := ship.velocity.length()
-	if spd < 4.0:
-		_slow_t += delta
-	else:
-		_slow_t = 0.0
-	var should_play := spd > 12.0 or (_music.stream_paused == false and _slow_t < 1.5)
-	_music.stream_paused = not should_play
+	# The bgm is gated by the engine's continuous-drive clock: silent for the first
+	# MUSIC_IN_TIME (8s) of a run — engine only — then it fades in. It never plays on
+	# the platform or in a wormhole (drive_time resets to 0 there).
+	var want := audio != null and not docked and not ship.transiting \
+		and audio.drive_time() >= GameAudio.MUSIC_IN_TIME
+	if want and _music.stream_paused:
+		_music.stream_paused = false
+	# Fade in/out smoothly rather than snapping on.
+	var target_db := MUSIC_DB if want else MUSIC_OFF_DB
+	_music.volume_db = lerpf(_music.volume_db, target_db, clampf(MUSIC_FADE * delta, 0.0, 1.0))
+	if not want and _music.volume_db <= MUSIC_OFF_DB + 1.0:
+		_music.stream_paused = true   # fully faded out — pause to idle
 
 
 # Jump straight to a system from the star map (fast-travel, no tunnel).
@@ -416,21 +424,25 @@ func _on_hangar_pick(index: int) -> void:
 		ship.swap_ship(index)
 
 
-# Looping background music, spawned from code like everything else. Kept low so
-# the dogfight/SFX sit on top of it later.
+# Looping background music, spawned from code like everything else.
+# Mix hierarchy (loudest/most present first): gunfire/SFX > engine > music.
+# Music is a backdrop that only plays while flying outside (not on the platform);
+# the engine has real weight over it (see audio.gd ENGINE_*), SFX punch over both.
 func _setup_music() -> void:
-	var stream := load("res://bgm.mp3")
+	# OGG Vorbis, not MP3: MP3 carries encoder padding that leaves an audible gap at
+	# the loop point. Vorbis loops seamlessly, so the track repeats cleanly.
+	var stream := load("res://bgm.ogg")
 	if stream == null:
 		return
-	if stream is AudioStreamMP3:
-		(stream as AudioStreamMP3).loop = true   # seamless loop
+	if stream is AudioStreamOggVorbis:
+		(stream as AudioStreamOggVorbis).loop = true   # seamless loop, no gap
 	_music = AudioStreamPlayer.new()
 	_music.stream = stream
-	_music.volume_db = -24.0   # background music is low priority — sits well under engine/SFX
+	_music.volume_db = MUSIC_OFF_DB   # starts silent; _update_music fades it in once driving
 	_music.bus = "Master"
 	add_child(_music)
 	_music.play()
-	_music.stream_paused = true   # silent until you're actually travelling
+	_music.stream_paused = true   # silent until you've been flying for MUSIC_IN_TIME
 
 
 func _setup_environment() -> void:

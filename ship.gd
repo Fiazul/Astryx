@@ -21,13 +21,16 @@ extends Node3D
 #   pitch  tip nose up/down if the model imports laid flat
 #   glow   hull self-illumination (no scene lights, so the hull lights itself)
 const SHIP_MODELS := [
-	{ "name": "Lyra",   "path": "res://Rocket ship.glb",   "tint": Color(1.0, 1.0, 1.0),    "length": 4.0, "yaw": 180.0, "pitch": 0.0, "glow": 0.0 },
-	{ "name": "Stella", "path": "res://Spaceship.glb",     "tint": Color(0.70, 0.62, 0.95), "length": 3.5, "yaw": 180.0, "pitch": 0.0, "glow": 0.0 },
-	{ "name": "Raptor", "path": "res://Spaceship (2).glb", "tint": Color(0.70, 0.90, 0.95), "length": 3.8, "yaw": 180.0, "pitch": 0.0, "glow": 0.0, "fire_cd": 0.05, "dual": true },
+	# engine_pitch gives each hull a distinct engine voice: Lyra neutral, Stella a
+	# warm mid, Raptor a deep growl, Vela a high sleek whine. (Dedicated per-ship
+	# loops can be dropped in later via gen_engine_audio.py; this shapes the shared one.)
+	{ "name": "Lyra",   "path": "res://Rocket ship.glb",   "tint": Color(1.0, 1.0, 1.0),    "length": 4.0, "yaw": 180.0, "pitch": 0.0, "glow": 0.0, "engine_pitch": 1.0 },
+	{ "name": "Stella", "path": "res://Spaceship.glb",     "tint": Color(0.70, 0.62, 0.95), "length": 3.5, "yaw": 180.0, "pitch": 0.0, "glow": 0.0, "engine_pitch": 0.92 },
+	{ "name": "Raptor", "path": "res://Spaceship (2).glb", "tint": Color(0.70, 0.90, 0.95), "length": 3.8, "yaw": 180.0, "pitch": 0.0, "glow": 0.0, "fire_cd": 0.05, "dual": true, "engine_pitch": 0.82 },
 	# Vela: the FTL ship. warp 1581 -> max cruise ≈ 0.5 ly/s at full charge
 	# (THRUST·warp/DAMPING, 1 ly = 632,411 units). Her drive spools up over time
 	# (see WARP_CHARGE_*), so she eases into warp rather than snapping to it.
-	{ "name": "Vela",   "path": "res://Spaceship (3).glb", "tint": Color(0.55, 0.80, 1.0),  "length": 3.8, "yaw": 180.0, "pitch": 0.0, "glow": 0.0, "warp": 1581.0 },
+	{ "name": "Vela",   "path": "res://Spaceship (3).glb", "tint": Color(0.55, 0.80, 1.0),  "length": 3.8, "yaw": 180.0, "pitch": 0.0, "glow": 0.0, "warp": 1581.0, "engine_pitch": 1.14 },
 	# Vortex retired as a player ship — it's a boss enemy now (see combat.gd boss).
 ]
 const BOOSTER_COLOR := Color(0.35, 0.8, 1.0)
@@ -110,6 +113,7 @@ var dock_approach := 0.0       # 0 outside the station's landing zone, 1 at the 
 var frozen := false            # docked at a station — motion held, mouse freed
 var transiting := false        # in a wormhole tunnel — motion held, view locked forward
 var camera: Camera3D           # assigned by main; driven from fly()
+var audio: GameAudio           # assigned by main; the engine voice is driven from fly()
 var mouse_sens := MOUSE_SENS   # live mouse sensitivity (Settings menu adjusts this)
 var warp := 1.0                # per-ship MAX speed multiplier; >1 = breaks physics (Vela)
 var _warp_charge := 0.0        # 0..1 spool-up; ramps while thrusting forward
@@ -147,6 +151,7 @@ func is_warp_mode() -> bool:
 	return _dual and warp > 1.0
 
 var _current_model := 0        # index into SHIP_MODELS
+var _engine_pitch := 1.0       # per-ship engine voice character (set on build)
 var _mesh_root: Node3D
 var _engine_mat: StandardMaterial3D   # only used by the primitive fallback
 var _boosters: Array = []
@@ -200,6 +205,8 @@ func fly(delta: float) -> void:
 		_update_boosters(1.0, delta)
 		_update_streaks(1.0)
 		_update_camera(delta)
+		if audio:
+			audio.engine_off()   # silent in the wormhole
 		return
 
 	# Docked: hold position, idle the boosters, keep the camera steady, and slowly
@@ -213,6 +220,8 @@ func fly(delta: float) -> void:
 		_update_boosters(0.0, delta)
 		_update_streaks(0.0)
 		_update_camera(delta)
+		if audio:
+			audio.engine_off()   # engine cut while docked
 		return
 
 	# --- Look vs. steer ---
@@ -312,6 +321,12 @@ func fly(delta: float) -> void:
 	if boost > 1.0:
 		throttle *= 1.4
 	_update_boosters(throttle, delta)
+
+	# --- Engine voice: loop while we're on the gas, with start/stop whooshes ---
+	if audio:
+		var thrusting := local_accel != Vector3.ZERO
+		var ship_name: String = SHIP_MODELS[_current_model].name
+		audio.update_engine(ship_name, thrusting, clampf(throttle, 0.0, 1.0), boost > 1.0, _engine_pitch, delta)
 	if _engine_mat:  # fallback ship only
 		var e := 2.0 + throttle * 4.0
 		_engine_mat.emission_energy_multiplier = lerpf(
@@ -441,6 +456,7 @@ func _build_ship_model(idx: int) -> void:
 	warp = float(info.get("warp", 1.0))
 	fire_cooldown = float(info.get("fire_cd", 0.22))
 	_dual = info.get("dual", false)
+	_engine_pitch = float(info.get("engine_pitch", 1.0))
 	_warp_charge = 0.0
 	var packed := load(info.path) as PackedScene
 	if packed == null:
