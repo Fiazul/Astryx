@@ -30,10 +30,9 @@ project root for music.)*
 `systems.gd` star systems · `planet_system.gd` body LOD · `wormhole.gd` transit ·
 `combat.gd` dogfight · `ship.gd` flight/visuals · `props.gd` station · `hud.gd` UI ·
 `starfield.gd` backdrop · `tools/real_positions.py` coordinate verifier.
-Design spec: [`CLAUDE.md`](CLAUDE.md).
 
 ## Data
 [JPL Horizons](https://ssd.jpl.nasa.gov/horizons/) (solar system) · HYG/SIMBAD (stars).
 
 ---
-Hobby / educational project. Built with [Claude Code](https://claude.com/claude-code).
+Hobby / educational project.
