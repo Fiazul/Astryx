@@ -61,7 +61,7 @@ Do NOT recompile Godot for double precision yet — floating origin alone covers
 3. **Dot→body LOD** — each planet = a billboard `Sprite3D` "dot" (always visible, scales with distance) + a hidden low-poly emissive sphere that only appears when close. (No solid surface — emissive glow only.)
 4. **HUD label** — light-year distance readout via code-spawned `Label` on a `CanvasLayer`.
 5. **Star field** — `MultiMeshInstance3D` background, emissive points, glow via `WorldEnvironment`.
-6. **NASA data (optional, later)** — `HTTPRequest` node pulls real positions (e.g. NASA Exoplanet Archive / HYG star DB) to place bodies. This is just HTTP + JSON; it's the easy part.
+6. **Real data (DONE)** — keyless `HTTPRequest` feeds: live JPL Horizons for Sun+planets, NASA Exoplanet Archive for exoplanet facts, baked HYG/SIMBAD constants for stars. No `api.nasa.gov` / API key. See "Real data sources" below.
 
 ## Reference snippets (starting points, not final)
 
@@ -138,19 +138,18 @@ func _process(_delta):
 	label.text = "Distance: %.2f ly" % dist_ly
 ```
 
-### NASA API (optional, later)
-```gdscript
-func _ready():
-	var http = HTTPRequest.new()
-	add_child(http)
-	http.request_completed.connect(_on_done)
-	http.request("https://api.nasa.gov/planetary/apod?api_key=DEMO_KEY")
+### Real data sources (done — keyless, no API key)
+We do NOT use the `api.nasa.gov` APOD/`DEMO_KEY` API. The real, keyless feeds are:
+- **JPL Horizons** — live Sun + planet positions, `ephemeris.gd`
+  (`https://ssd.jpl.nasa.gov/api/horizons.api`). Baked constants (verified against
+  Horizons) are the offline fallback so the scene is correct from frame 1.
+- **NASA Exoplanet Archive (TAP)** — exoplanet facts refresh, `planet_data.gd`
+  (`https://exoplanetarchive.ipac.caltech.edu/TAP/sync`), cached to
+  `user://planet_data_cache.json`. Curated NASA fact sheets are the bundled fallback.
+- **HYG / SIMBAD** — nearby-star catalog, baked as J2000 constants in `ephemeris.gd`.
 
-func _on_done(result, code, headers, body):
-	var data = JSON.parse_string(body.get_string_from_utf8())
-	print(data["title"])
-```
-Free key: api.nasa.gov. Real positional data: NASA Exoplanet Archive, HYG star database.
+All `HTTPRequest`-based, non-blocking, best-effort. `NASA_API_KEY` in `.env.example`
+is unused — kept only as a placeholder for a possible future key-gated feed.
 
 ## Known time sinks (where effort actually goes)
 - Floating-origin math at scale.
