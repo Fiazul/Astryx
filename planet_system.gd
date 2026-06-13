@@ -15,7 +15,7 @@ extends Node3D
 
 # Approach speed-zone (units/s). Ceiling stays >= cruise so normal flight near a
 # body isn't throttled.
-const APPROACH_MIN_SPEED := 18.0
+const APPROACH_MIN_SPEED := 8.0     # strict speed right at a body — stable for scanning
 const APPROACH_MAX_SPEED := 500.0
 
 # Gravity: a gentle, mass-scaled tug toward each planet (mass ~ radius²), falling
@@ -31,11 +31,32 @@ var eph: Ephemeris
 # Filled in by refresh(), read by the HUD / ship.
 var nearest_name := ""
 var nearest_dist := INF
+var nearest_dir := Vector3.ZERO   # unit vector from ship toward the nearest body
 var speed_limit := INF
 var gravity := Vector3.ZERO
 
 var _bodies := []
+var _stars := []        # named real stars as floating-origin destinations
 var _dot_tex: Texture2D
+var _rel := {}          # body name -> current render-space position (for navigator)
+
+const STAR_RADIUS := 9.0     # visual size when you arrive
+const STAR_SKY := 2800.0     # far dots clamp here so they read as sky points
+const STAR_NEAR := 420.0     # within this -> growing emissive sphere
+
+
+# Names of bodies that can be navigation targets (planets, then named stars).
+func targetables() -> Array:
+	var out := []
+	for b in _bodies:
+		out.append(b.name)
+	for st in _stars:
+		out.append(st.name)
+	return out
+
+# Current render-space position of a body (relative to the ship).
+func rel_of(name: String) -> Vector3:
+	return _rel.get(name, Vector3.ZERO)
 
 
 func _ready() -> void:
@@ -104,10 +125,10 @@ func _build_planet(p: Dictionary) -> void:
 	label.text = p.name
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	label.modulate = Color(1, 1, 1, 0)
-	label.outline_modulate = Color(0, 0, 0, 0.7)
-	label.outline_size = 8
-	label.font_size = 40
-	label.pixel_size = 0.0035
+	label.outline_modulate = Color(0, 0, 0, 0.8)
+	label.outline_size = 16
+	label.font_size = 72
+	label.pixel_size = 0.0058
 	label.no_depth_test = true
 	add_child(label)
 
@@ -137,33 +158,51 @@ func _make_glb_body(p: Dictionary) -> Node3D:
 	return holder
 
 
-# Named real stars as a fixed backdrop: real RA/Dec direction at a constant
-# radius, built once (stars don't move; parallax over our flight range is nil).
+# Named real stars at their TRUE distances — floating-origin destinations you can
+# fly to. Far away they read as labelled sky points (clamped); up close they bloom
+# into an emissive sphere. Positions/labels update every frame in refresh().
 func _build_star_shell() -> void:
 	for s in Ephemeris.STARS:
-		var pos: Vector3 = eph.star_scene_pos(s)
-
 		var dot := Sprite3D.new()
 		dot.texture = _dot_tex
 		dot.modulate = s.color
 		dot.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 		dot.shaded = false
-		dot.pixel_size = 6.0          # big, because it sits 3000u out
+		dot.pixel_size = 5.0
 		dot.no_depth_test = true
-		dot.position = pos
 		add_child(dot)
 
+		var sphere := MeshInstance3D.new()
+		var mesh := SphereMesh.new()
+		mesh.radius = STAR_RADIUS
+		mesh.height = STAR_RADIUS * 2.0
+		mesh.radial_segments = 16
+		mesh.rings = 8
+		sphere.mesh = mesh
+		var mat := StandardMaterial3D.new()
+		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		mat.albedo_color = s.color
+		mat.emission_enabled = true
+		mat.emission = s.color
+		mat.emission_energy_multiplier = 2.2
+		sphere.material_override = mat
+		sphere.visible = false
+		add_child(sphere)
+
 		var label := Label3D.new()
-		label.text = "%s\n%.2f ly" % [s.name, s.ly]
 		label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-		label.modulate = Color(s.color, 0.85)
-		label.outline_modulate = Color(0, 0, 0, 0.7)
-		label.outline_size = 8
-		label.font_size = 40
-		label.pixel_size = 1.2
+		label.modulate = Color(s.color, 0.9)
+		label.outline_modulate = Color(0, 0, 0, 0.8)
+		label.outline_size = 12
+		label.font_size = 46
+		label.pixel_size = 1.0
 		label.no_depth_test = true
-		label.position = pos
 		add_child(label)
+
+		_stars.append({
+			"name": s.name, "true_pos": eph.star_true_pos(s), "ly": s.ly,
+			"dot": dot, "sphere": sphere, "label": label,
+		})
 
 
 func refresh(ship_pos: Vector3, delta: float) -> void:
@@ -187,6 +226,7 @@ func refresh(ship_pos: Vector3, delta: float) -> void:
 
 		b.dot.position = rel
 		b.label.position = rel + Vector3(0.0, rad * 1.5 + 0.5, 0.0)
+		_rel[b.name] = rel        # for the navigator (render-space position)
 
 		if dist < nearest_dist:
 			nearest_dist = dist
@@ -231,11 +271,40 @@ func refresh(ship_pos: Vector3, delta: float) -> void:
 			lc.a = la
 			b.label.modulate = lc
 
-	var slow_start := nearest_radius * 14.0
-	var slow_end := nearest_radius * 3.5
+	# Named stars: floating-origin destinations. Far -> a labelled sky point in the
+	# right direction (clamped); near -> a growing emissive sphere. Live distance.
+	for st in _stars:
+		var srel: Vector3 = st.true_pos - ship_pos
+		var sdist := srel.length()
+		_rel[st.name] = srel
+		if sdist < nearest_dist:
+			nearest_dist = sdist
+			nearest_name = st.name
+			nearest_radius = STAR_RADIUS
+		var sdir: Vector3 = srel.normalized()
+		if sdist < STAR_NEAR:
+			st.sphere.visible = true
+			st.sphere.position = srel
+			st.dot.visible = false
+			st.label.position = srel + Vector3(0.0, STAR_RADIUS * 1.6 + 2.0, 0.0)
+		else:
+			st.sphere.visible = false
+			st.dot.visible = true
+			var rd := minf(sdist, STAR_SKY)         # clamp far dots onto the "sky"
+			st.dot.position = sdir * rd
+			st.dot.pixel_size = clampf(rd * 0.0022, 1.5, 7.0)
+			st.label.position = sdir * rd + Vector3(0.0, 14.0, 0.0)
+		st.label.text = "%s\n%.2f ly" % [st.name, sdist / Ephemeris.UNITS_PER_LY]
+
+	# Approach "platform" zone: begins ~scan range out, eases to a strict crawl at
+	# the body. An absolute floor keeps small bodies usable too.
+	var slow_start := maxf(nearest_radius * 12.0, 55.0)
+	var slow_end := maxf(nearest_radius * 3.0, 8.0)
 	if nearest_dist < slow_start:
 		var tt := clampf((nearest_dist - slow_end) / maxf(slow_start - slow_end, 0.001), 0.0, 1.0)
 		speed_limit = lerpf(APPROACH_MIN_SPEED, APPROACH_MAX_SPEED, tt)
+	# Direction toward the nearest body (ship lets you escape freely AWAY from it).
+	nearest_dir = _rel.get(nearest_name, Vector3.ZERO).normalized()
 
 
 # --- GLB helpers (scale, recenter, self-light) ------------------------------

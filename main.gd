@@ -19,6 +19,20 @@ var hud: HUD
 var eph: Ephemeris
 var wormhole: Wormhole
 var combat: Combat
+var audio: GameAudio
+var settings: SettingsMenu
+var map: StarMap
+var planet_data: PlanetData
+var planet_info: PlanetInfo
+var navigator: Navigator
+var minimap: MiniMap
+var codex: Codex
+var _nav_index := -1          # -1 = no waypoint; else index into nav targets
+var _scan := 0.0             # scan progress 0..1 of the nearest body
+var _scan_name := ""
+const SCAN_SECONDS := 2.0
+const SCAN_RANGE := 55.0      # how close you must be to scan a body
+var _env: Environment
 
 var docked := false
 var _dock_in_range := false
@@ -96,9 +110,15 @@ func _ready() -> void:
 	wormhole.set_ship(ship)
 	wormhole.set_system(current_system)
 
+	# Code-spawned SFX (fire / engine / explosion).
+	audio = GameAudio.new()
+	add_child(audio)
+
 	# Combat: alien dogfighters + your bolts (left-click to fire).
 	combat = Combat.new()
 	add_child(combat)
+	combat.audio = audio
+	combat.reset(SystemDB.is_hostile(current_system))   # Sol starts peaceful
 
 	# HUD labels (light-year distance, speed, nearest body).
 	hud = HUD.new()
@@ -108,11 +128,56 @@ func _ready() -> void:
 	hud.combat = combat
 	hud.teleport_button.pressed.connect(teleport_home)
 
+	# Discovery progress (persisted) + real planet facts + the Details panel.
+	codex = Codex.new()
+	add_child(codex)
+	hud.codex = codex
+	planet_data = PlanetData.new()
+	add_child(planet_data)
+	planet_info = PlanetInfo.new()
+	planet_info.data = planet_data
+	planet_info.planets = planets
+	planet_info.ship = ship
+	planet_info.codex = codex
+	add_child(planet_info)
+	hud.details_button.pressed.connect(planet_info.open_for_nearest)
+	# Codex logbook (C): browse discovered bodies, click to read.
+	var codex_panel := CodexPanel.new()
+	codex_panel.codex = codex
+	codex_panel.info = planet_info
+	codex_panel.ship = ship
+	add_child(codex_panel)
+	# Wire the styled top-right control bar to the panels.
+	hud.codex_button.pressed.connect(codex_panel.toggle)
+
+	# Settings overlay (Esc): volume, sensitivity, glow, render scale, fullscreen.
+	settings = SettingsMenu.new()
+	settings.ship = ship
+	settings.env = _env
+	add_child(settings)
+
+	# Waypoint navigator (Tab) + corner radar.
+	var nav_canvas := CanvasLayer.new()
+	add_child(nav_canvas)
+	navigator = Navigator.new()
+	nav_canvas.add_child(navigator)
+	minimap = MiniMap.new()
+	minimap.position = Vector2(24, 466)
+	nav_canvas.add_child(minimap)
+
+	# Star map (M): click a system to jump.
+	map = StarMap.new()
+	map.main = self
+	add_child(map)
+	hud.map_button.pressed.connect(map.toggle)
+	hud.settings_button.pressed.connect(settings.toggle)
+
 
 func _process(delta: float) -> void:
 	ship.fly(delta)
 	planets.refresh(ship.true_pos, delta)
 	ship.speed_limit = planets.speed_limit   # eases the ship down near a body
+	ship.nearest_dir = planets.nearest_dir   # only ease down when approaching it
 	ship.gravity = planets.gravity           # gentle pull toward bodies
 	props.update(ship.true_pos, delta)
 	if wormhole.update(ship.true_pos, delta):
@@ -120,9 +185,13 @@ func _process(delta: float) -> void:
 	# Combat runs in normal flight (not mid-transit). Left mouse = fire.
 	if not ship.transiting:
 		var firing := Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED \
-			and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
+			and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) \
+			and not ship.is_hypersonic()        # no shooting at hypersonic speed
 		combat.update(ship, firing, delta)
 	_update_dock_ui()
+	_update_navigator()
+	_update_minimap()
+	_update_scan(delta)
 	_update_music(delta)
 	hud.refresh()
 
@@ -140,6 +209,100 @@ func _update_music(delta: float) -> void:
 	_music.stream_paused = not should_play
 
 
+# Jump straight to a system from the star map (fast-travel, no tunnel).
+func travel_to(id: String) -> void:
+	if id == current_system:
+		return
+	_arrive(id)
+	ship._set_capture(true)
+
+
+# --- Corner radar: ship-relative blips for bodies / Earth / nearest / wormhole ---
+func _update_minimap() -> void:
+	if minimap == null:
+		return
+	if ship.transiting:
+		minimap.set_blips([])
+		return
+	var binv := ship.transform.basis.inverse()
+	var blips := []
+	for bname in planets.targetables():
+		var rel: Vector3 = planets.rel_of(bname)
+		var role := MiniMap.BODY
+		if bname == "Earth" and current_system == SystemDB.SOL:
+			role = MiniMap.HOME
+		elif bname == planets.nearest_name:
+			role = MiniMap.NEAREST
+		blips.append({ "local": binv * rel, "dist": rel.length(), "role": role, "name": bname })
+	var wrel: Vector3 = wormhole.portal_rel(ship.true_pos)
+	blips.append({ "local": binv * wrel, "dist": wrel.length(), "role": MiniMap.WORMHOLE, "name": "Wormhole" })
+	minimap.set_blips(blips)
+
+
+# --- Scan-to-discover the nearest body (hold V within range) ---
+func _update_scan(delta: float) -> void:
+	hud.toast_t = maxf(hud.toast_t - delta, 0.0)
+	var name := planets.nearest_name
+	var in_range := not docked and not ship.transiting and name != "" \
+		and planets.nearest_dist < SCAN_RANGE \
+		and Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED
+	var fresh := in_range and not codex.is_discovered(name)
+
+	if fresh and Input.is_physical_key_pressed(KEY_V):
+		if name != _scan_name:
+			_scan_name = name
+			_scan = 0.0
+		_scan = minf(_scan + delta / SCAN_SECONDS, 1.0)
+		if _scan >= 1.0:
+			if codex.discover(name):
+				hud.toast = "✓  %s  DISCOVERED" % name
+				hud.toast_t = 3.0
+			_scan = 0.0
+			_scan_name = ""
+	else:
+		_scan = maxf(_scan - delta * 2.0, 0.0)
+		if _scan <= 0.0:
+			_scan_name = ""
+
+	hud.scan_progress = _scan
+	hud.scan_name = _scan_name
+	hud.scan_hint = "» hold V to scan %s «" % name if (fresh and _scan <= 0.0) else ""
+
+
+# --- Navigation waypoint (Tab cycles: off -> each body -> wormhole -> off) ---
+func _cycle_nav_target() -> void:
+	var count := planets.targetables().size() + 1   # + the wormhole
+	_nav_index += 1
+	if _nav_index >= count:
+		_nav_index = -1
+
+func _update_navigator() -> void:
+	if navigator == null:
+		return
+	var bodies: Array = planets.targetables()
+	var count := bodies.size() + 1
+	if ship.transiting or _nav_index < 0 or _nav_index >= count:
+		navigator.update_nav(ship.camera, false, Vector3.ZERO, "", "")   # gizmo only
+		return
+	var tname: String
+	var rel: Vector3
+	if _nav_index < bodies.size():
+		tname = bodies[_nav_index]
+		rel = planets.rel_of(tname)
+	else:
+		tname = "Wormhole"
+		rel = wormhole.portal_rel(ship.true_pos)
+	navigator.update_nav(ship.camera, true, rel, tname, _fmt_nav_dist(rel.length()))
+
+func _fmt_nav_dist(u: float) -> String:
+	var au := u * 0.1
+	if au >= 1000.0:
+		return "%.2f ly" % (au / 63241.077)
+	elif au >= 0.05:
+		return "%.2f AU" % au
+	return "%.0f u" % u
+
+
 func teleport_home() -> void:
 	_arrive(SystemDB.SOL)              # instant jump back to Earth (no transit)
 	ship._set_capture(true)
@@ -155,7 +318,8 @@ func _arrive(system_id: String) -> void:
 	ship.face_toward(-ship.true_pos)          # look back toward the system's star
 	wormhole.set_system(system_id)
 	props.visible = (system_id == SystemDB.SOL)   # the station/astronaut are Sol-only
-	combat.reset()                                 # fresh enemies in the new system
+	combat.reset(SystemDB.is_hostile(system_id))   # enemies only in hostile systems
+	_nav_index = -1                                # clear the waypoint in the new system
 	if docked:
 		_set_docked(false)
 	hud.origin_name = SystemDB.display_name(system_id) if system_id != SystemDB.SOL else "Earth"
@@ -169,13 +333,27 @@ func _input(event: InputEvent) -> void:
 		return
 	var key: int = event.keycode
 	if key == KEY_F:
+		# One interact key: undock if docked, else open the wormhole if near it,
+		# else dock if near the station.
 		if docked:
 			_set_docked(false)
+		elif wormhole.in_range(ship.true_pos):
+			wormhole.start_transit()
+			ship.transiting = true
 		elif _dock_in_range:
 			_set_docked(true)
-	elif key == KEY_J and not docked and wormhole.in_range(ship.true_pos):
-		wormhole.start_transit()
-		ship.transiting = true
+	elif key == KEY_TAB:
+		_cycle_nav_target()
+		get_viewport().set_input_as_handled()
+	elif key == KEY_X:
+		# Raptor only: toggle Combat <-> Warp mode.
+		var mode := ship.toggle_warp_mode()
+		if mode != "":
+			hud.toast = "RAPTOR  ·  %s MODE" % mode
+			hud.toast_t = 2.5
+	elif key == KEY_ESCAPE and not ship.transiting and not ship.frozen:
+		# Esc = release the mouse; press again to re-capture (back to flight).
+		ship._set_capture(Input.get_mouse_mode() != Input.MOUSE_MODE_CAPTURED)
 	elif key == KEY_H and not ship.transiting:
 		teleport_home()
 	elif docked and key >= KEY_1 and key <= KEY_9:
@@ -207,7 +385,7 @@ func _update_dock_ui() -> void:
 	elif _dock_in_range:
 		hud.set_prompt("» Press F to dock at %s «" % props.dock_name)
 	elif wormhole.in_range(ship.true_pos):
-		hud.set_prompt("» Press J to open wormhole to %s  (%.0f ly) «"
+		hud.set_prompt("» Press F to enter the wormhole to %s  (%.0f ly) «"
 			% [SystemDB.display_name(wormhole.dest_id), wormhole.dest_ly])
 	else:
 		hud.set_prompt("")
@@ -232,7 +410,7 @@ func _setup_music() -> void:
 		(stream as AudioStreamMP3).loop = true   # seamless loop
 	_music = AudioStreamPlayer.new()
 	_music.stream = stream
-	_music.volume_db = -14.0
+	_music.volume_db = -24.0   # background music is low priority — sits well under engine/SFX
 	_music.bus = "Master"
 	add_child(_music)
 	_music.play()
@@ -255,17 +433,24 @@ func _setup_environment() -> void:
 									  # hull keeps contrast/detail instead of washing pale
 	# (Affects only lit objects — stars/planets are emissive, background stays black.)
 
+	# Glow ONLY the genuinely bright things (stars, the Sun) — not lit surfaces.
+	# glow_bloom>0 was haloing the lit metal hull into a "bulb"; with bloom 0 and
+	# an HDR threshold, only pixels brighter than 1.0 (emissive bodies) bloom, so
+	# the ship reads as shiny lit metal with a gradient, not a glowing bulb.
 	env.glow_enabled = true
-	env.glow_intensity = 0.9
-	env.glow_bloom = 0.25
-	env.glow_strength = 1.1
+	env.glow_intensity = 0.55
+	env.glow_bloom = 0.0
+	env.glow_strength = 0.85
+	env.glow_hdr_threshold = 1.0
 	env.glow_blend_mode = Environment.GLOW_BLEND_MODE_ADDITIVE
-	env.set_glow_level(1, 0.4)
-	env.set_glow_level(3, 0.7)
-	env.set_glow_level(5, 1.0)
+	env.set_glow_level(1, 0.2)
+	env.set_glow_level(3, 0.4)
+	env.set_glow_level(5, 0.7)
 
 	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+	env.tonemap_exposure = 0.7   # global -30% brightness (keeps colour + specular)
 
 	var we := WorldEnvironment.new()
 	we.environment = env
 	add_child(we)
+	_env = env   # kept so the Settings menu can toggle glow quality

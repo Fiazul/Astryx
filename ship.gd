@@ -21,17 +21,56 @@ extends Node3D
 #   pitch  tip nose up/down if the model imports laid flat
 #   glow   hull self-illumination (no scene lights, so the hull lights itself)
 const SHIP_MODELS := [
-	{ "name": "Lyra",   "path": "res://Lyra.glb",          "tint": Color(0.98, 0.98, 1.08), "length": 3.5, "yaw": 180.0, "pitch": 0.0, "glow": 0.08, "chrome": true },
-	{ "name": "Stella", "path": "res://Spaceship.glb",     "tint": Color(0.70, 0.62, 0.95), "length": 3.5, "yaw": 180.0, "pitch": 0.0, "glow": 0.08 },
-	{ "name": "Vortex", "path": "res://Spaceship (1).glb", "tint": Color(0.95, 0.80, 0.65), "length": 3.8, "yaw": 180.0, "pitch": 0.0, "glow": 0.08 },
-	{ "name": "Raptor", "path": "res://Spaceship (2).glb", "tint": Color(0.70, 0.90, 0.95), "length": 3.8, "yaw": 180.0, "pitch": 0.0, "glow": 0.08 },
+	{ "name": "Lyra",   "path": "res://Rocket ship.glb",   "tint": Color(1.0, 1.0, 1.0),    "length": 4.0, "yaw": 180.0, "pitch": 0.0, "glow": 0.0 },
+	{ "name": "Stella", "path": "res://Spaceship.glb",     "tint": Color(0.70, 0.62, 0.95), "length": 3.5, "yaw": 180.0, "pitch": 0.0, "glow": 0.0 },
+	{ "name": "Raptor", "path": "res://Spaceship (2).glb", "tint": Color(0.70, 0.90, 0.95), "length": 3.8, "yaw": 180.0, "pitch": 0.0, "glow": 0.0, "fire_cd": 0.05, "dual": true },
+	# Vela: the FTL ship. warp 1581 -> max cruise ≈ 0.5 ly/s at full charge
+	# (THRUST·warp/DAMPING, 1 ly = 632,411 units). Her drive spools up over time
+	# (see WARP_CHARGE_*), so she eases into warp rather than snapping to it.
+	{ "name": "Vela",   "path": "res://Spaceship (3).glb", "tint": Color(0.55, 0.80, 1.0),  "length": 3.8, "yaw": 180.0, "pitch": 0.0, "glow": 0.0, "warp": 1581.0 },
+	# Vortex retired as a player ship — it's a boss enemy now (see combat.gd boss).
 ]
 const BOOSTER_COLOR := Color(0.35, 0.8, 1.0)
 # Booster nozzle placement (fractions of the fitted model's size). Nudge these
 # to snap the plumes onto Lyra's actual engines.
-const BOOSTER_BACK := 0.34          # how far back (0 = center, 0.5 = tail). Lower = closer to hull.
-const BOOSTER_SPREAD := 0.10        # sideways gap between the two nozzles (tight, near the body)
-const BOOSTER_RISE := 0.0           # vertical nudge (+ up, - down)
+const BOOSTER_BACK := 0.40          # how far back (0 = center, 0.5 = tail). Lower = closer to hull.
+const BOOSTER_RISE := 0.0           # vertical nudge for the whole cluster (+ up, - down)
+# Per-ship nozzle layout: each engine is (x, y) as fractions of the ship's WIDTH
+# (x = left/right, y = up/down). Each ship has a different engine count/pattern;
+# nudge these to snap the plumes onto each hull's actual bells.
+#   Lyra   = 5 in an A (apex on top, legs spread wide at the bottom)
+#   Vortex = 4
+#   Stella = 2
+#   Raptor = 1
+const BOOSTER_LAYOUTS := {
+	"Lyra": [
+		Vector2( 0.00,  0.16),   # apex (top center)
+		Vector2(-0.11,  0.00),   # crossbar left
+		Vector2( 0.11,  0.00),   # crossbar right
+		Vector2(-0.18, -0.15),   # leg, bottom-left (widest)
+		Vector2( 0.18, -0.15),   # leg, bottom-right (widest)
+	],
+	"Stella": [
+		Vector2(-0.09,  0.00),   # left
+		Vector2( 0.09,  0.00),   # right
+	],
+	"Raptor": [
+		Vector2( 0.00, -0.02),   # single, centered
+	],
+	"Vela": [
+		Vector2(-0.05, -0.01),   # twin engines, tight on the central block
+		Vector2( 0.05, -0.01),
+	],
+}
+const BOOSTER_FALLBACK := [Vector2(-0.08, 0.0), Vector2(0.08, 0.0)]  # if a name isn't listed
+# Per-ship plume shaping. Raptor: long/thin/small. Vela: long, thin, golden.
+const BOOSTER_RADIUS_SCALE := { "Raptor": 1.9, "Vela": 0.45, "Stella": 0.40 }   # Raptor: strong
+const BOOSTER_LENGTH_SCALE := { "Raptor": 4.6, "Vela": 4.2,  "Stella": 3.6, "Lyra": 1.5 }  # longer trails
+const BOOSTER_COLOR_OVERRIDE := {
+	"Vela": Color(1.0, 0.82, 0.32),    # transparent gold
+	"Stella": Color(1.0, 0.26, 0.20),  # sharp transparent red
+	"Raptor": Color(0.62, 0.22, 1.0),  # dangerous transparent purple
+}
 const BOOSTER_FADE_FLIP := false    # if the plume fades at the wrong end, flip this
 # Camera zoom (mouse wheel)
 const ZOOM_MIN := 0.45              # closest
@@ -47,23 +86,53 @@ const MAX_SPEED := 1000.0
 # Damping vs thrust sets the real cruise speed (~THRUST/DAMPING ≈ 200 u/s here,
 # ~600 boosted) — MAX_SPEED is just a ceiling. Tune feel with THRUST/DAMPING.
 const DAMPING := 1.1          # higher = eases to a stop faster when idle
-const MOUSE_SENS := 0.0022
+const MOUSE_SENS := 0.0022    # default; runtime value lives in `mouse_sens` (Settings menu)
 const ROLL_RATE := 1.8        # manual Q/E roll (rad/s)
 const BANK_ANGLE := 0.5       # max cosmetic bank into turns (rad)
 const BANK_SMOOTH := 5.0
 const CAM_OFFSET := Vector3(0.0, 2.2, 8.5)  # behind (+Z) and above the ship
 const CAM_LAG := 6.0
 const FOV_BASE := 70.0
-const FOV_KICK := 34.0        # extra FOV at full speed (sense of speed)
+const FOV_KICK := 14.0        # extra FOV at full speed (sense of speed) — gentle
 
 # --- State ---
 var velocity := Vector3.ZERO
 var true_pos := Vector3.ZERO   # absolute position in game units (floating origin)
 var speed_limit := INF         # set by main from PlanetSystem; eases us down near a body
+var nearest_dir := Vector3.ZERO  # toward nearest body; we only ease down when approaching it
 var gravity := Vector3.ZERO    # set by main from PlanetSystem; gentle pull toward bodies
 var frozen := false            # docked at a station — motion held, mouse freed
 var transiting := false        # in a wormhole tunnel — motion held, view locked forward
 var camera: Camera3D           # assigned by main; driven from fly()
+var mouse_sens := MOUSE_SENS   # live mouse sensitivity (Settings menu adjusts this)
+var warp := 1.0                # per-ship MAX speed multiplier; >1 = breaks physics (Vela)
+var _warp_charge := 0.0        # 0..1 spool-up; ramps while thrusting forward
+var fire_cooldown := 0.22      # seconds between shots (combat reads this)
+var _dual := false             # Raptor: can toggle between combat + warp modes
+const RAPTOR_WARP := 1581.0    # Raptor's warp-mode multiplier (≈0.5 ly/s, like Vela)
+const HYPERSONIC_SPEED := 1500.0   # above this a warp ship is "hypersonic" (no combat)
+const WARP_FLOOR := 5.0        # warp multiplier at zero charge (controllable start)
+const WARP_CHARGE_TIME := 9.0  # seconds of thrust to reach full warp
+const WARP_DECAY_TIME := 3.5   # seconds to spool back down when you ease off
+
+# True when a warp ship is blazing fast — combat + crosshair are disabled.
+func is_hypersonic() -> bool:
+	return warp > 1.0 and velocity.length() > HYPERSONIC_SPEED
+
+# Raptor only: toggle between Combat mode (machine-gun, normal flight) and Warp
+# mode (Vela-style FTL). Returns the new mode name for HUD feedback.
+func toggle_warp_mode() -> String:
+	if not _dual:
+		return ""
+	if warp > 1.0:
+		warp = 1.0          # back to Combat mode
+	else:
+		warp = RAPTOR_WARP  # Warp / FTL mode
+		_warp_charge = 0.0
+	return "WARP" if warp > 1.0 else "COMBAT"
+
+func is_warp_mode() -> bool:
+	return _dual and warp > 1.0
 
 var _current_model := 0        # index into SHIP_MODELS
 var _mesh_root: Node3D
@@ -71,6 +140,7 @@ var _engine_mat: StandardMaterial3D   # only used by the primitive fallback
 var _boosters: Array = []
 var _glow_tex: Texture2D
 var _plume_grad: Texture2D
+var _booster_color := BOOSTER_COLOR   # per-ship plume tint, set in _build_boosters
 var _streaks: GPUParticles3D          # motion streaks at high speed
 var _streak_mat: StandardMaterial3D
 var _cam_zoom := 1.0          # target zoom (mouse wheel)
@@ -99,8 +169,7 @@ func _input(event: InputEvent) -> void:
 			_cam_zoom = clampf(_cam_zoom + ZOOM_STEP, ZOOM_MIN, ZOOM_MAX)
 		elif not _mouse_captured and not frozen:
 			_set_capture(true)
-	elif event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
-		_set_capture(not _mouse_captured)
+	# (Esc is owned by the Settings menu — opens/closes it and frees the cursor.)
 
 
 # Called every frame by main.gd, before the world is rebuilt around the ship.
@@ -124,8 +193,8 @@ func fly(delta: float) -> void:
 		return
 
 	# --- Rotation: mouse aims, Q/E roll ---
-	var yaw := _mouse_delta.x * MOUSE_SENS
-	var pitch := _mouse_delta.y * MOUSE_SENS
+	var yaw := _mouse_delta.x * mouse_sens
+	var pitch := _mouse_delta.y * mouse_sens
 	_mouse_delta = Vector2.ZERO
 
 	rotate_object_local(Vector3.UP, -yaw)
@@ -157,7 +226,18 @@ func fly(delta: float) -> void:
 	if Input.is_physical_key_pressed(KEY_CTRL):
 		lift -= 1.0
 
-	var local_accel := Vector3(strafe * STRAFE_THRUST, lift * STRAFE_THRUST, fwd * THRUST)
+	# Warp ships (Vela) spool their drive up over time toward full warp, then
+	# back down when you ease off the throttle — so warp is earned, not instant.
+	var eff_warp := warp
+	if warp > 1.0:
+		if Input.is_physical_key_pressed(KEY_W):
+			_warp_charge = minf(_warp_charge + delta / WARP_CHARGE_TIME, 1.0)
+		else:
+			_warp_charge = maxf(_warp_charge - delta / WARP_DECAY_TIME, 0.0)
+		var c := _warp_charge * _warp_charge * (3.0 - 2.0 * _warp_charge)   # smoothstep
+		eff_warp = lerpf(WARP_FLOOR, warp, c)
+
+	var local_accel := Vector3(strafe * STRAFE_THRUST, lift * STRAFE_THRUST, fwd * THRUST) * eff_warp
 	if local_accel != Vector3.ZERO:
 		velocity += (transform.basis * local_accel) * boost * delta
 
@@ -166,7 +246,14 @@ func fly(delta: float) -> void:
 
 	# Arcade damping: velocity eases toward zero when you're not thrusting.
 	velocity = velocity.lerp(Vector3.ZERO, clampf(DAMPING * delta, 0.0, 1.0))
-	velocity = velocity.limit_length(minf(MAX_SPEED * boost, speed_limit))
+	# Warp ships (Vela) break physics: huge cap, and they ignore the gravity-well
+	# slowdown so they can blast across a system. Normal ships obey speed_limit.
+	var cap := MAX_SPEED * eff_warp * boost
+	# Ease down only when moving TOWARD the nearest body (so you can stabilise and
+	# scan). Pointing away is free, so you never get "stuck" at Earth/a planet.
+	if warp <= 1.0 and velocity.dot(nearest_dir) >= 0.0:
+		cap = minf(cap, speed_limit)
+	velocity = velocity.limit_length(cap)
 
 	# --- Floating origin: never move the node; accumulate the true position ---
 	true_pos += velocity * delta
@@ -219,7 +306,8 @@ func _update_camera(delta: float) -> void:
 	_cam_zoom_smooth = lerpf(_cam_zoom_smooth, _cam_zoom, clampf(10.0 * delta, 0.0, 1.0))
 	var cam_pos := _cam_basis * (CAM_OFFSET * _cam_zoom_smooth)  # ship at origin -> global
 	camera.global_transform = Transform3D(_cam_basis, cam_pos)
-	var speed_frac := velocity.length() / MAX_SPEED
+	# Clamp the fraction so warp speeds don't blow the FOV out into a fisheye.
+	var speed_frac := clampf(velocity.length() / MAX_SPEED, 0.0, 1.0)
 	camera.fov = lerpf(camera.fov, FOV_BASE + speed_frac * FOV_KICK, clampf(4.0 * delta, 0.0, 1.0))
 
 
@@ -296,6 +384,10 @@ func _build_ship_model(idx: int) -> void:
 	_engine_mat = null
 
 	var info = SHIP_MODELS[idx]
+	warp = float(info.get("warp", 1.0))
+	fire_cooldown = float(info.get("fire_cd", 0.22))
+	_dual = info.get("dual", false)
+	_warp_charge = 0.0
 	var packed := load(info.path) as PackedScene
 	if packed == null:
 		push_warning("Ship: could not load %s — using primitive fallback." % info.path)
@@ -307,7 +399,7 @@ func _build_ship_model(idx: int) -> void:
 	model.rotation = Vector3(deg_to_rad(float(info.pitch)), deg_to_rad(float(info.yaw)), 0.0)
 	var box := _fit_model(model, float(info.length))
 	_recolor(model, info.tint, float(info.glow), info.get("chrome", false))
-	_build_boosters(box)
+	_build_boosters(box, info.name)
 
 
 # --- Ship-swap API (called by main when docked) ---
@@ -433,16 +525,22 @@ func _recolor(model: Node3D, tint: Color, glow: float, chrome := false) -> void:
 			mi.set_surface_override_material(si, m)
 
 
-# Two additive booster plumes at the rear of the (fitted, centered) model.
-func _build_boosters(box: AABB) -> void:
+# Additive booster plumes at the rear of the (fitted, centered) model — one per
+# engine in this ship's BOOSTER_LAYOUTS entry (count/pattern differ per hull).
+func _build_boosters(box: AABB, ship_name: String) -> void:
 	var s := box.size
 	var mount_z := s.z * BOOSTER_BACK  # +Z is behind the ship (forward is -Z)
-	var mount_y := s.y * BOOSTER_RISE
-	var x_off := s.x * BOOSTER_SPREAD
-	var r := clampf(s.x * 0.06, 0.04, 0.16)
-	var length := maxf(s.z * 0.22, 0.4)   # shorter base plume so it trails, not splays
-	for sx in [-1.0, 1.0]:
-		_boosters.append(_make_booster(Vector3(sx * x_off, mount_y, mount_z), r, length))
+	var rise := s.y * BOOSTER_RISE
+	var mounts: Array = BOOSTER_LAYOUTS.get(ship_name, BOOSTER_FALLBACK)
+	_booster_color = BOOSTER_COLOR_OVERRIDE.get(ship_name, BOOSTER_COLOR)
+	# Fewer engines read better a touch larger; scale radius down as count grows.
+	var rscale: float = BOOSTER_RADIUS_SCALE.get(ship_name, 1.0)
+	var lscale: float = BOOSTER_LENGTH_SCALE.get(ship_name, 1.0)
+	var r := clampf(s.x * (0.085 - 0.006 * mounts.size()), 0.035, 0.16) * rscale
+	var length := maxf(s.z * 0.20, 0.4) * lscale
+	for m in mounts:
+		var pos := Vector3(m.x * s.x, rise + m.y * s.x, mount_z)
+		_boosters.append(_make_booster(pos, r, length))
 
 
 func _make_booster(mount: Vector3, radius: float, length: float) -> Dictionary:
@@ -460,7 +558,7 @@ func _make_booster(mount: Vector3, radius: float, length: float) -> Dictionary:
 	plume_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	# Gradient texture drives the alpha so the plume fades smoothly nozzle->tail.
 	plume_mat.albedo_texture = _plume_grad
-	plume_mat.albedo_color = Color(BOOSTER_COLOR.r, BOOSTER_COLOR.g, BOOSTER_COLOR.b, 0.18)
+	plume_mat.albedo_color = Color(_booster_color.r, _booster_color.g, _booster_color.b, 0.18)
 
 	var cyl := CylinderMesh.new()
 	cyl.top_radius = 0.0          # tapers to a point at the tail
@@ -482,7 +580,8 @@ func _make_booster(mount: Vector3, radius: float, length: float) -> Dictionary:
 	core_mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
 	core_mat.billboard_keep_scale = true
 	core_mat.albedo_texture = _glow_tex
-	core_mat.albedo_color = Color(0.7, 0.9, 1.0, 0.6)
+	var cc := _booster_color.lerp(Color.WHITE, 0.35)   # hot core in the plume's tint
+	core_mat.albedo_color = Color(cc.r, cc.g, cc.b, 0.6)
 	var quad := QuadMesh.new()
 	quad.size = Vector2(radius * 2.6, radius * 2.6)
 	var core := MeshInstance3D.new()

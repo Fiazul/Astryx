@@ -86,11 +86,18 @@ func scene_pos(name: String) -> Vector3:
 
 
 # Star direction*radius on the backdrop shell (real RA/Dec, fixed radius).
+const UNITS_PER_LY := 632410.77   # 63241.077 AU/ly × AU_TO_UNITS — real interstellar scale
+
 func star_scene_pos(star: Dictionary) -> Vector3:
 	var ra := _hms_deg(star.ra) * PI / 180.0
 	var dec := _dms_deg(star.dec) * PI / 180.0
 	var eq := Vector3(cos(dec) * cos(ra), cos(dec) * sin(ra), sin(dec))
 	return Vector3(eq.x, eq.z, eq.y) * STAR_SHELL_RADIUS
+
+# Real galaxy position at the star's TRUE distance (a floating-origin destination
+# you can actually fly to — the distance counts down as you approach).
+func star_true_pos(star: Dictionary) -> Vector3:
+	return star_scene_pos(star).normalized() * (float(star.ly) * UNITS_PER_LY)
 
 
 func _hms_deg(hms: Array) -> float:

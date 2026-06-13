@@ -49,6 +49,10 @@ func set_system(id: String) -> void:
 func in_range(ship_pos: Vector3) -> bool:
 	return not transiting and (_portal_pos - ship_pos).length() < PORTAL_RANGE
 
+# Render-space position of the portal (for the navigator marker).
+func portal_rel(ship_pos: Vector3) -> Vector3:
+	return _portal_pos - ship_pos
+
 
 func start_transit() -> void:
 	transiting = true
@@ -85,21 +89,61 @@ func update(ship_pos: Vector3, delta: float) -> bool:
 
 # --- visuals ---------------------------------------------------------------
 func _build_portal() -> void:
+	# A dangerous-looking hole: a dark event-horizon core, a fiery accretion ring
+	# that spins, and an outer red danger-glow. All emissive — no lights.
 	var torus := TorusMesh.new()
-	torus.inner_radius = 2.0
-	torus.outer_radius = 2.7
-	torus.rings = 24
-	torus.ring_segments = 12
+	torus.inner_radius = 1.9
+	torus.outer_radius = 3.1
+	torus.rings = 36
+	torus.ring_segments = 16
 	_portal = MeshInstance3D.new()
 	_portal.mesh = torus
 	_portal_mat = StandardMaterial3D.new()
 	_portal_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_portal_mat.emission_enabled = true
-	_portal_mat.emission = Color(0.5, 0.4, 1.0)
-	_portal_mat.albedo_color = Color(0.5, 0.4, 1.0)
-	_portal_mat.emission_energy_multiplier = 2.0
+	_portal_mat.emission = Color(1.0, 0.32, 0.05)        # fiery orange accretion
+	_portal_mat.albedo_color = Color(1.0, 0.28, 0.04)
+	_portal_mat.emission_energy_multiplier = 2.6
 	_portal.material_override = _portal_mat
 	add_child(_portal)
+
+	# Event horizon — a near-black sphere that swallows the center.
+	var core := MeshInstance3D.new()
+	var sm := SphereMesh.new()
+	sm.radius = 1.95; sm.height = 3.9; sm.radial_segments = 20; sm.rings = 10
+	core.mesh = sm
+	var cmat := StandardMaterial3D.new()
+	cmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	cmat.albedo_color = Color(0.01, 0.0, 0.015)          # the hole — eats the light
+	core.material_override = cmat
+	_portal.add_child(core)
+
+	# Outer danger glow — billboarded red haze so it reads as a threat from afar.
+	var glow := MeshInstance3D.new()
+	var q := QuadMesh.new(); q.size = Vector2(11.0, 11.0)
+	glow.mesh = q
+	var gmat := StandardMaterial3D.new()
+	gmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	gmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	gmat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	gmat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	gmat.albedo_texture = _make_hole_glow()
+	gmat.albedo_color = Color(1.0, 0.18, 0.06, 0.85)
+	glow.material_override = gmat
+	_portal.add_child(glow)
+
+
+# Radial haze: bright near the rim, fading out — the hole's danger glow.
+func _make_hole_glow() -> Texture2D:
+	var s := 64
+	var img := Image.create(s, s, false, Image.FORMAT_RGBA8)
+	var c := Vector2(s, s) * 0.5
+	for y in s:
+		for x in s:
+			var d := Vector2(x + 0.5, y + 0.5).distance_to(c) / (s * 0.5)
+			var a := pow(clampf(1.0 - d, 0.0, 1.0), 2.0)
+			img.set_pixel(x, y, Color(1, 1, 1, a))
+	return ImageTexture.create_from_image(img)
 
 
 func _build_tunnel() -> void:
