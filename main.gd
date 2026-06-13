@@ -127,6 +127,7 @@ func _ready() -> void:
 	hud.planets = planets
 	hud.combat = combat
 	hud.teleport_button.pressed.connect(teleport_home)
+	hud.ship_selected.connect(_on_hangar_pick)   # click a hangar row to swap ship
 
 	# Discovery progress (persisted) + real planet facts + the Details panel.
 	codex = Codex.new()
@@ -328,6 +329,9 @@ func _arrive(system_id: String) -> void:
 
 
 # --- Docking at the station + ship swap ---
+# How far out (beyond dock_range) the landing zone begins force-slowing the ship.
+const DOCK_SLOW_MARGIN := 40.0
+
 func _input(event: InputEvent) -> void:
 	if not (event is InputEventKey and event.pressed and not event.echo):
 		return
@@ -370,6 +374,7 @@ func _update_dock_ui() -> void:
 	if ship.transiting:
 		var rem := wormhole.transit_remaining()
 		hud.set_prompt("")
+		hud.set_hangar(false, PackedStringArray(), 0, "")
 		hud.set_menu("— WORMHOLE TRANSIT —\n\n→ %s   ·   %.0f ly\n(light would take %.0f years)\n\nArriving in  %d:%02d"
 			% [SystemDB.display_name(wormhole.dest_id), wormhole.dest_ly, wormhole.dest_ly,
 			int(rem) / 60, int(rem) % 60])
@@ -377,27 +382,38 @@ func _update_dock_ui() -> void:
 
 	hud.set_menu("")
 	# Docking is Sol-only (the station lives there).
-	_dock_in_range = current_system == SystemDB.SOL and props.has_dock \
-		and (props.dock_pos - ship.true_pos).length() < props.dock_range
+	var dock_dist := (props.dock_pos - ship.true_pos).length() \
+		if current_system == SystemDB.SOL and props.has_dock else INF
+	_dock_in_range = dock_dist < props.dock_range
+	# Force-slow the ship as it enters the landing zone (smooth, proximity-based):
+	# 0 at the outer edge (dock_range + DOCK_SLOW_MARGIN), 1 once inside the pad.
+	ship.dock_approach = clampf(1.0 - (dock_dist - props.dock_range) / DOCK_SLOW_MARGIN, 0.0, 1.0) \
+		if dock_dist < INF else 0.0
 	if docked:
 		hud.set_prompt("")
-		hud.set_menu(_menu_text())
-	elif _dock_in_range:
-		hud.set_prompt("» Press F to dock at %s «" % props.dock_name)
-	elif wormhole.in_range(ship.true_pos):
-		hud.set_prompt("» Press F to enter the wormhole to %s  (%.0f ly) «"
-			% [SystemDB.display_name(wormhole.dest_id), wormhole.dest_ly])
+		hud.set_hangar(true, _ship_names(), ship.current_index(), props.dock_name)
 	else:
-		hud.set_prompt("")
+		hud.set_hangar(false, PackedStringArray(), 0, "")
+		if _dock_in_range:
+			hud.set_prompt("» Press F to dock at %s «" % props.dock_name)
+		elif wormhole.in_range(ship.true_pos):
+			hud.set_prompt("» Press F to enter the wormhole to %s  (%.0f ly) «"
+				% [SystemDB.display_name(wormhole.dest_id), wormhole.dest_ly])
+		else:
+			hud.set_prompt("")
 
 
-func _menu_text() -> String:
-	var t := "— DOCKED · %s —\n\nSwap ship  (press a number):\n\n" % props.dock_name
+func _ship_names() -> PackedStringArray:
+	var names := PackedStringArray()
 	for i in ship.ship_count():
-		var cur := "    ◄ current" if i == ship.current_index() else ""
-		t += "[ %d ]   %s%s\n" % [i + 1, ship.ship_name_at(i), cur]
-	t += "\n[ F ]   Undock"
-	return t
+		names.append(ship.ship_name_at(i))
+	return names
+
+
+# Clicking a hangar row swaps to that ship — only meaningful while docked.
+func _on_hangar_pick(index: int) -> void:
+	if docked and index >= 0 and index < ship.ship_count():
+		ship.swap_ship(index)
 
 
 # Looping background music, spawned from code like everything else. Kept low so

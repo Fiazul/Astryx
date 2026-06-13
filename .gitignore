@@ -12,3 +12,7 @@ Thumbs.db
 *~
 *.tmp
 
+# Build artifacts — exported binaries are published as GitHub Release assets,
+# not committed to source history (they'd bloat the repo / hit the 100MB limit).
+builds/
+

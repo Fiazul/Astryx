@@ -9,6 +9,8 @@ extends Node3D
 const AU_PER_UNIT := 0.1
 const LY_PER_AU := 1.0 / 63241.077
 
+signal ship_selected(index: int)   # emitted when a hangar row is clicked
+
 var ship: Ship
 var planets: PlanetSystem
 var combat: Combat           # for HP / kills readout
@@ -26,7 +28,13 @@ var _dist_label: Label
 var _speed_label: Label
 var _near_label: Label
 var _prompt: Label    # "Press F to dock" near the station
-var _menu: Label      # ship-swap panel while docked
+var _menu: Label      # centered overlay text (wormhole-transit countdown)
+# Hangar: the styled, bordered, gradient-backed ship-pickup table (top-right).
+var _hangar: PanelContainer
+var _hangar_bg: TextureRect
+var _hangar_title: Label
+var _hangar_rows: VBoxContainer
+var _hangar_sig := ""   # rebuild the rows only when the contents actually change
 var _combat_label: Label
 var _boss_label: Label
 var _reticle: Label
@@ -66,9 +74,14 @@ func _ready() -> void:
 	_prompt.size = Vector2(1280, 30)
 	_prompt.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 
+	# Centered overlay text — used for the wormhole-transit countdown.
 	_menu = _make_label(canvas, Vector2(0, 200), 22)
 	_menu.size = Vector2(1280, 320)
 	_menu.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_menu.visible = false
+
+	# Styled ship-pickup table (top-right, shown while docked).
+	_build_hangar(canvas)
 
 	# Combat readout (top-right) + a center aiming reticle.
 	_combat_label = _make_label(canvas, Vector2(980, 18), 24)
@@ -111,7 +124,7 @@ func _ready() -> void:
 	canvas.add_child(details_button)
 
 	var hint := _make_label(canvas, Vector2(20, 686), 14)
-	hint.text = "WASD · Shift boost · L-click fire · Tab waypoint · V scan · C codex · F dock/wormhole · M map · X Raptor mode · Esc cursor"
+	hint.text = "WASD · Shift boost · L-click fire · RMB/T free-look · Tab waypoint · V scan · C codex · F dock/wormhole · M map · X Raptor mode · Esc cursor"
 
 
 # Squared, brushed-metal, cyan-glow sci-fi button: "⌖ TELEPORT EARTH".
@@ -170,6 +183,164 @@ func set_prompt(text: String) -> void:
 
 func set_menu(text: String) -> void:
 	_menu.text = text
+	_menu.visible = text != ""   # hide the centered overlay when there's nothing to show
+
+
+# --- Hangar (ship-pickup table) -------------------------------------------------
+const HANGAR_W := 340.0
+const HANGAR_X := 1280.0 - HANGAR_W - 18.0   # top-right, clear of the screen edge
+const HANGAR_Y := 150.0                       # below the MAP/CODEX/⚙ button bar
+
+# A bordered, gradient-backed panel in the top-right. Built once; set_hangar()
+# fills/clears the rows and shows or hides it.
+func _build_hangar(canvas: CanvasLayer) -> void:
+	_hangar = PanelContainer.new()
+	_hangar.position = Vector2(HANGAR_X, HANGAR_Y)
+	_hangar.custom_minimum_size = Vector2(HANGAR_W, 0)
+	_hangar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	# Outer frame: cyan border + soft glow (the table's outer border).
+	var frame := StyleBoxFlat.new()
+	frame.bg_color = Color(0, 0, 0, 0)            # let the gradient backdrop show through
+	frame.set_border_width_all(2)
+	frame.border_color = Color(0.45, 0.85, 1.0, 0.9)
+	frame.set_corner_radius_all(4)
+	frame.shadow_color = Color(0.3, 0.7, 1.0, 0.35)
+	frame.shadow_size = 8
+	_hangar.add_theme_stylebox_override("panel", frame)
+
+	# Linear-gradient backdrop, stretched to fill the panel (drawn behind content).
+	_hangar_bg = TextureRect.new()
+	_hangar_bg.texture = _linear_gradient(
+		Color(0.07, 0.12, 0.20, 0.96), Color(0.01, 0.02, 0.05, 0.96))
+	_hangar_bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_hangar_bg.stretch_mode = TextureRect.STRETCH_SCALE
+	_hangar_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hangar.add_child(_hangar_bg)
+
+	var margin := MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 12)
+	margin.add_theme_constant_override("margin_right", 12)
+	margin.add_theme_constant_override("margin_top", 10)
+	margin.add_theme_constant_override("margin_bottom", 10)
+	_hangar.add_child(margin)
+
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 8)
+	margin.add_child(col)
+
+	_hangar_title = Label.new()
+	_hangar_title.add_theme_font_size_override("font_size", 18)
+	_hangar_title.add_theme_color_override("font_color", Color(0.7, 0.95, 1.0))
+	col.add_child(_hangar_title)
+
+	var sub := Label.new()
+	sub.text = "SELECT A SHIP  ·  PRESS A NUMBER"
+	sub.add_theme_font_size_override("font_size", 12)
+	sub.add_theme_color_override("font_color", Color(0.55, 0.75, 0.9))
+	col.add_child(sub)
+
+	_hangar_rows = VBoxContainer.new()
+	_hangar_rows.add_theme_constant_override("separation", 0)   # rows touch -> a table grid
+	col.add_child(_hangar_rows)
+
+	var footer := Label.new()
+	footer.text = "[ F ]   Undock"
+	footer.add_theme_font_size_override("font_size", 13)
+	footer.add_theme_color_override("font_color", Color(0.6, 0.8, 0.95))
+	col.add_child(footer)
+
+	_hangar.visible = false
+	canvas.add_child(_hangar)
+
+
+# A top->bottom linear gradient as a texture (for the hangar backdrop / row fills).
+func _linear_gradient(top: Color, bottom: Color) -> GradientTexture2D:
+	var g := Gradient.new()
+	g.set_color(0, top)
+	g.set_color(1, bottom)
+	var tex := GradientTexture2D.new()
+	tex.gradient = g
+	tex.fill = GradientTexture2D.FILL_LINEAR
+	tex.fill_from = Vector2(0, 0)
+	tex.fill_to = Vector2(0, 1)
+	tex.width = 8
+	tex.height = 64
+	return tex
+
+
+# Show/refresh the ship-pickup table. Rebuilds rows only when the contents change
+# (ship set, current selection, or station name), so it's cheap to call per frame.
+func set_hangar(open: bool, names: PackedStringArray, current: int, station: String) -> void:
+	var sig := ("%d|%s|%s" % [current, station, ",".join(names)]) if open else ""
+	if sig == _hangar_sig:
+		return
+	_hangar_sig = sig
+	_hangar.visible = open
+	if not open:
+		return
+	_hangar_title.text = "HANGAR · %s" % station
+	for c in _hangar_rows.get_children():
+		c.queue_free()
+	for i in names.size():
+		_hangar_rows.add_child(_make_hangar_row(names[i], i, i == current))
+
+
+# One bordered table row: ◈ icon · ship name · number key. Current ship is lit up.
+func _make_hangar_row(ship_name: String, idx: int, is_current: bool) -> PanelContainer:
+	var row := PanelContainer.new()
+	var box := StyleBoxFlat.new()
+	box.set_border_width_all(1)
+	box.set_content_margin_all(8)
+	if is_current:
+		box.bg_color = Color(0.18, 0.45, 0.70, 0.45)
+		box.border_color = Color(0.6, 0.95, 1.0, 0.95)
+	else:
+		box.bg_color = Color(0.10, 0.16, 0.24, 0.30)
+		box.border_color = Color(0.35, 0.60, 0.80, 0.50)
+	row.add_theme_stylebox_override("panel", box)
+	# Clickable: pick this ship on left-click (number keys still work too).
+	row.mouse_filter = Control.MOUSE_FILTER_STOP
+	row.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	row.gui_input.connect(_on_hangar_row_input.bind(idx))
+
+	var h := HBoxContainer.new()
+	h.add_theme_constant_override("separation", 10)
+	h.mouse_filter = Control.MOUSE_FILTER_IGNORE   # let clicks fall through to the row
+	row.add_child(h)
+
+	var icon := Label.new()
+	icon.text = "◈"
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	icon.add_theme_font_size_override("font_size", 18)
+	icon.add_theme_color_override("font_color",
+		Color(0.7, 1.0, 1.0) if is_current else Color(0.5, 0.75, 0.95))
+	h.add_child(icon)
+
+	var nm := Label.new()
+	nm.text = ship_name
+	nm.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	nm.add_theme_font_size_override("font_size", 18)
+	nm.add_theme_color_override("font_color",
+		Color(1, 1, 1) if is_current else Color(0.85, 0.92, 1.0))
+	nm.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	h.add_child(nm)
+
+	var key := Label.new()
+	key.text = ("◄ %d" % (idx + 1)) if is_current else str(idx + 1)
+	key.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	key.add_theme_font_size_override("font_size", 16)
+	key.add_theme_color_override("font_color",
+		Color(0.7, 1.0, 1.0) if is_current else Color(0.55, 0.75, 0.9))
+	h.add_child(key)
+
+	return row
+
+
+func _on_hangar_row_input(event: InputEvent, idx: int) -> void:
+	if event is InputEventMouseButton and event.pressed \
+			and event.button_index == MOUSE_BUTTON_LEFT:
+		ship_selected.emit(idx)
 
 
 func refresh() -> void:

@@ -64,8 +64,8 @@ const BOOSTER_LAYOUTS := {
 }
 const BOOSTER_FALLBACK := [Vector2(-0.08, 0.0), Vector2(0.08, 0.0)]  # if a name isn't listed
 # Per-ship plume shaping. Raptor: long/thin/small. Vela: long, thin, golden.
-const BOOSTER_RADIUS_SCALE := { "Raptor": 1.9, "Vela": 0.45, "Stella": 0.40 }   # Raptor: strong
-const BOOSTER_LENGTH_SCALE := { "Raptor": 7.0, "Vela": 4.2,  "Stella": 3.6, "Lyra": 1.5 }  # long trails
+const BOOSTER_RADIUS_SCALE := { "Raptor": 0.70, "Vela": 0.45, "Stella": 0.40 }   # Raptor: thin spike
+const BOOSTER_LENGTH_SCALE := { "Raptor": 11.0, "Vela": 4.2,  "Stella": 3.6, "Lyra": 1.5 }  # long trails
 const BOOSTER_COLOR_OVERRIDE := {
 	"Vela": Color(1.0, 0.82, 0.32),    # transparent gold
 	"Stella": Color(1.0, 0.26, 0.20),  # sharp transparent red
@@ -92,6 +92,11 @@ const BANK_ANGLE := 0.5       # max cosmetic bank into turns (rad)
 const BANK_SMOOTH := 5.0
 const CAM_OFFSET := Vector3(0.0, 2.2, 8.5)  # behind (+Z) and above the ship
 const CAM_LAG := 6.0
+# Free-look (hold RMB or T): mouse orbits the camera instead of steering; the ship
+# holds its heading and flies on. Released, the view eases back behind the ship.
+const LOOK_YAW_LIMIT := 2.7     # how far around the ship the view can swing (rad)
+const LOOK_PITCH_LIMIT := 1.2   # how far up/down (rad)
+const LOOK_RETURN := 8.0        # how fast the view snaps to target / eases back home
 const FOV_BASE := 70.0
 const FOV_KICK := 14.0        # extra FOV at full speed (sense of speed) — gentle
 
@@ -101,6 +106,7 @@ var true_pos := Vector3.ZERO   # absolute position in game units (floating origi
 var speed_limit := INF         # set by main from PlanetSystem; eases us down near a body
 var nearest_dir := Vector3.ZERO  # toward nearest body; we only ease down when approaching it
 var gravity := Vector3.ZERO    # set by main from PlanetSystem; gentle pull toward bodies
+var dock_approach := 0.0       # 0 outside the station's landing zone, 1 at the pad; set by main
 var frozen := false            # docked at a station — motion held, mouse freed
 var transiting := false        # in a wormhole tunnel — motion held, view locked forward
 var camera: Camera3D           # assigned by main; driven from fly()
@@ -114,6 +120,12 @@ const HYPERSONIC_SPEED := 1500.0   # above this a warp ship is "hypersonic" (no 
 const WARP_FLOOR := 5.0        # warp multiplier at zero charge (controllable start)
 const WARP_CHARGE_TIME := 9.0  # seconds of thrust to reach full warp
 const WARP_DECAY_TIME := 3.5   # seconds to spool back down when you ease off
+
+# Station landing zone: speed is force-reduced as you near the pad so you can
+# actually land — applies to ALL ships, warp included. Fed by main via dock_approach.
+const DOCK_EDGE_SPEED := 100.0     # speed cap at the outer edge of the zone (gentle entry)
+const DOCK_PLATFORM_SPEED := 6.0   # speed cap right at the pad (smooth final approach)
+const DOCK_SPIN := 0.5             # showroom turntable spin (rad/s) while docked
 
 # True when a warp ship is blazing fast — combat + crosshair are disabled.
 func is_hypersonic() -> bool:
@@ -149,6 +161,11 @@ var _cam_basis := Basis()
 var _bank := 0.0
 var _mouse_delta := Vector2.ZERO
 var _mouse_captured := false
+var _free_look := false       # true while holding RMB / T — mouse orbits the view
+var _look_yaw := 0.0          # target orbit angles (set in fly)
+var _look_pitch := 0.0
+var _look_yaw_s := 0.0        # smoothed orbit angles actually applied to the camera
+var _look_pitch_s := 0.0
 
 
 func _ready() -> void:
@@ -178,35 +195,52 @@ func fly(delta: float) -> void:
 	if transiting:
 		velocity = Vector3.ZERO
 		_mouse_delta = Vector2.ZERO
+		_look_yaw = 0.0
+		_look_pitch = 0.0
 		_update_boosters(1.0, delta)
 		_update_streaks(1.0)
 		_update_camera(delta)
 		return
 
-	# Docked: hold position, idle the boosters, keep the camera steady.
+	# Docked: hold position, idle the boosters, keep the camera steady, and slowly
+	# turntable the hull so the ship is clearly on show while you pick one.
 	if frozen:
 		velocity = Vector3.ZERO
 		_mouse_delta = Vector2.ZERO
+		_look_yaw = 0.0
+		_look_pitch = 0.0
+		_mesh_root.rotate_y(DOCK_SPIN * delta)
 		_update_boosters(0.0, delta)
 		_update_streaks(0.0)
 		_update_camera(delta)
 		return
 
-	# --- Rotation: mouse aims, Q/E roll ---
-	var yaw := _mouse_delta.x * mouse_sens
-	var pitch := _mouse_delta.y * mouse_sens
+	# --- Look vs. steer ---
+	# Hold RMB or T for free-look: the mouse orbits the camera around the ship while
+	# the ship holds its heading and keeps flying. Release to steer normally again.
+	_free_look = Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) \
+		or Input.is_physical_key_pressed(KEY_T)
+	var md := _mouse_delta
 	_mouse_delta = Vector2.ZERO
+	var turn := 0.0   # this frame's mouse yaw (drives cosmetic banking below)
 
-	rotate_object_local(Vector3.UP, -yaw)
-	rotate_object_local(Vector3.RIGHT, -pitch)
-
-	var roll := 0.0
-	if Input.is_physical_key_pressed(KEY_Q):
-		roll += 1.0
-	if Input.is_physical_key_pressed(KEY_E):
-		roll -= 1.0
-	rotate_object_local(Vector3.BACK, roll * ROLL_RATE * delta)
-	orthonormalize()  # scrub float drift out of the basis over time
+	if _free_look:
+		_look_yaw = clampf(_look_yaw - md.x * mouse_sens, -LOOK_YAW_LIMIT, LOOK_YAW_LIMIT)
+		_look_pitch = clampf(_look_pitch - md.y * mouse_sens, -LOOK_PITCH_LIMIT, LOOK_PITCH_LIMIT)
+	else:
+		# Normal steering: mouse aims, Q/E roll. View eases back behind the ship.
+		turn = md.x * mouse_sens
+		rotate_object_local(Vector3.UP, -md.x * mouse_sens)
+		rotate_object_local(Vector3.RIGHT, -md.y * mouse_sens)
+		var roll := 0.0
+		if Input.is_physical_key_pressed(KEY_Q):
+			roll += 1.0
+		if Input.is_physical_key_pressed(KEY_E):
+			roll -= 1.0
+		rotate_object_local(Vector3.BACK, roll * ROLL_RATE * delta)
+		orthonormalize()  # scrub float drift out of the basis over time
+		_look_yaw = 0.0
+		_look_pitch = 0.0
 
 	# --- Thrust (local axes -> world via current basis) ---
 	var boost := BOOST_MULT if Input.is_physical_key_pressed(KEY_SHIFT) else 1.0
@@ -255,11 +289,19 @@ func fly(delta: float) -> void:
 		cap = minf(cap, speed_limit)
 	velocity = velocity.limit_length(cap)
 
+	# Platform approach: inside the station's landing zone the speed is force-reduced
+	# so you can actually land — no matter how fast you arrived (warp included). The
+	# cap shrinks smoothly with proximity, easing you down rather than snapping. You
+	# keep steering, you just can't blast through. (dock_approach is fed by main.)
+	if dock_approach > 0.0:
+		var land_cap := lerpf(DOCK_EDGE_SPEED, DOCK_PLATFORM_SPEED, dock_approach)
+		velocity = velocity.limit_length(land_cap)
+
 	# --- Floating origin: never move the node; accumulate the true position ---
 	true_pos += velocity * delta
 
 	# --- Cosmetic banking (on the mesh only, so the camera stays steady) ---
-	var target_bank := clampf(-yaw * 7.0 - strafe * 0.35, -BANK_ANGLE, BANK_ANGLE)
+	var target_bank := clampf(-turn * 7.0 - strafe * 0.35, -BANK_ANGLE, BANK_ANGLE)
 	_bank = lerpf(_bank, target_bank, clampf(BANK_SMOOTH * delta, 0.0, 1.0))
 	_mesh_root.rotation.z = _bank
 
@@ -310,8 +352,14 @@ func _update_camera(delta: float) -> void:
 	# Camera basis lags the ship's a touch -> gentle sway / sense of speed.
 	_cam_basis = _cam_basis.slerp(transform.basis, clampf(CAM_LAG * delta, 0.0, 1.0))
 	_cam_zoom_smooth = lerpf(_cam_zoom_smooth, _cam_zoom, clampf(10.0 * delta, 0.0, 1.0))
-	var cam_pos := _cam_basis * (CAM_OFFSET * _cam_zoom_smooth)  # ship at origin -> global
-	camera.global_transform = Transform3D(_cam_basis, cam_pos)
+	# Free-look orbit: ease the applied angles toward target (0 = straight behind).
+	# Rotating the whole chase rig keeps the ship framed, so at 0 it's the usual cam.
+	var lk := clampf(LOOK_RETURN * delta, 0.0, 1.0)
+	_look_yaw_s = lerpf(_look_yaw_s, _look_yaw, lk)
+	_look_pitch_s = lerpf(_look_pitch_s, _look_pitch, lk)
+	var basis := _cam_basis * (Basis(Vector3.UP, _look_yaw_s) * Basis(Vector3.RIGHT, _look_pitch_s))
+	var cam_pos := basis * (CAM_OFFSET * _cam_zoom_smooth)  # ship at origin -> global
+	camera.global_transform = Transform3D(basis, cam_pos)
 	# Clamp the fraction so warp speeds don't blow the FOV out into a fisheye.
 	var speed_frac := clampf(velocity.length() / MAX_SPEED, 0.0, 1.0)
 	camera.fov = lerpf(camera.fov, FOV_BASE + speed_frac * FOV_KICK, clampf(4.0 * delta, 0.0, 1.0))
@@ -428,6 +476,9 @@ func ship_name_at(i: int) -> String:
 
 func set_frozen(f: bool) -> void:
 	frozen = f
+	# Clear any showroom-spin / banking carryover so the hull is aligned with the
+	# nose again the instant you undock (otherwise it'd fly pointing sideways).
+	_mesh_root.rotation = Vector3.ZERO
 	_set_capture(not f)
 
 
