@@ -21,6 +21,7 @@ const QUALITY := ["Ultra", "High", "Balanced", "Performance"]
 
 var ship: Ship
 var env: Environment
+var hud: HUD                 # set by main, for the "Edit HUD Layout" button
 
 var _root: Control          # dim + panel; visibility is the open/closed state
 var _open := false
@@ -144,11 +145,24 @@ func _build() -> void:
 	_fs_check.toggled.connect(_apply_fullscreen)
 	col.add_child(_row("Fullscreen  (F11)", _fs_check))
 
+	# --- Edit HUD Layout: close settings, then enter the HUD's drag-to-move editor.
+	var edit_hud := Button.new()
+	edit_hud.text = "Edit HUD Layout…"
+	edit_hud.focus_mode = Control.FOCUS_NONE
+	edit_hud.pressed.connect(_on_edit_hud)
+	col.add_child(edit_hud)
+
 	var resume := Button.new()
 	resume.text = "Resume   (Esc)"
 	resume.focus_mode = Control.FOCUS_NONE
 	resume.pressed.connect(_close)
 	col.add_child(resume)
+
+
+func _on_edit_hud() -> void:
+	_close()
+	if hud != null:
+		hud.enter_edit()
 
 
 # --- control callbacks ---

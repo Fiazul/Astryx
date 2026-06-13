@@ -21,9 +21,14 @@ const APPROACH_MAX_SPEED := 500.0
 # Gravity: a gentle, mass-scaled tug toward each planet (mass ~ radius²), falling
 # off with distance², clamped so thrust always wins. Retuned for the 0.1-AU scale.
 const GRAVITY_ENABLED := true
-const GRAVITY_STRENGTH := 40.0      # gentle — was yanking the ship INTO Earth at spawn
-const GRAVITY_MAX_ACCEL := 4.0      # per-body cap (units/s²); thrust is ~220
-const GRAVITY_RANGE_MULT := 40.0    # bodies pull within radius × this
+const GRAVITY_STRENGTH := 9600.0    # mass-scaled pull (mass ~ radius²); retuned for the ×10 spread
+const GRAVITY_MAX_ACCEL := 120.0    # per-body cap (units/s²); thrust is ~1650 so you can climb out
+const GRAVITY_RANGE_MULT := 160.0   # bodies pull within radius × this (well reaches far in the big system)
+# Stars are tiny on screen but carry a sun's mass — up close they pull hard enough to
+# visibly bend your hull's path and your gunfire. Felt only within STAR_GRAVITY_RANGE.
+const STAR_GRAVITY_K := 18000000000.0  # accel = K / dist² (capped) — retuned for the ×10 spread
+const STAR_GRAVITY_RANGE := 90000.0    # the well reaches out far enough to "call" you in
+const STAR_GRAVITY_MAX := 160.0        # ceiling (units/s²); thrust (~1650) still wins
 
 # Assigned by main before this node enters the tree.
 var eph: Ephemeris
@@ -34,15 +39,16 @@ var nearest_dist := INF
 var nearest_dir := Vector3.ZERO   # unit vector from ship toward the nearest body
 var speed_limit := INF
 var gravity := Vector3.ZERO
+var star_dist := INF              # distance to this system's primary star (gates FTL / warp)
 
 var _bodies := []
 var _stars := []        # named real stars as floating-origin destinations
 var _dot_tex: Texture2D
 var _rel := {}          # body name -> current render-space position (for navigator)
 
-const STAR_RADIUS := 9.0     # visual size when you arrive
-const STAR_SKY := 2800.0     # far dots clamp here so they read as sky points
-const STAR_NEAR := 420.0     # within this -> growing emissive sphere
+const STAR_RADIUS := 22.0     # visual size when you arrive
+const STAR_SKY := 28000.0    # far dots clamp here so they read as sky points
+const STAR_NEAR := 4200.0    # within this -> growing emissive sphere
 
 
 # Names of bodies that can be navigation targets (planets, then named stars).
@@ -136,6 +142,7 @@ func _build_planet(p: Dictionary) -> void:
 		"name": p.name, "radius": float(p.radius),
 		"live": p.get("live", true),          # Sol bodies read live positions; others are static
 		"pos": p.get("pos", Vector3.ZERO),    # local position when not live
+		"star": is_star,                      # the system's primary — gates FTL (star field)
 		"dot": dot, "sphere": sphere, "mat": mat, "model": model, "label": label,
 		"spin": randf_range(0.05, 0.2),
 	})
@@ -210,6 +217,7 @@ func refresh(ship_pos: Vector3, delta: float) -> void:
 	nearest_name = ""
 	speed_limit = INF
 	gravity = Vector3.ZERO
+	star_dist = INF
 	var nearest_radius := 1.0
 
 	for b in _bodies:
@@ -232,6 +240,8 @@ func refresh(ship_pos: Vector3, delta: float) -> void:
 			nearest_dist = dist
 			nearest_name = b.name
 			nearest_radius = rad
+		if b.get("star", false) and dist < star_dist:
+			star_dist = dist   # how far we are from this system's sun (FTL gate)
 
 		# crossfade: dot (far) -> body (near), scaled to body size
 		var far_d := rad * 70.0
@@ -277,6 +287,10 @@ func refresh(ship_pos: Vector3, delta: float) -> void:
 		var srel: Vector3 = st.true_pos - ship_pos
 		var sdist := srel.length()
 		_rel[st.name] = srel
+		# A star's gravity well — strong up close, so a near pass bends your trajectory.
+		if GRAVITY_ENABLED and sdist > 0.001 and sdist < STAR_GRAVITY_RANGE:
+			var sa := minf(STAR_GRAVITY_K / (sdist * sdist), STAR_GRAVITY_MAX)
+			gravity += (srel / sdist) * sa
 		if sdist < nearest_dist:
 			nearest_dist = sdist
 			nearest_name = st.name
@@ -305,6 +319,28 @@ func refresh(ship_pos: Vector3, delta: float) -> void:
 		speed_limit = lerpf(APPROACH_MIN_SPEED, APPROACH_MAX_SPEED, tt)
 	# Direction toward the nearest body (ship lets you escape freely AWAY from it).
 	nearest_dir = _rel.get(nearest_name, Vector3.ZERO).normalized()
+
+
+# Gravitational acceleration at an arbitrary true-space position, summed over every
+# planet and star. Used by combat.gd so bullets curve through gravity wells too.
+func gravity_at(pos: Vector3) -> Vector3:
+	var g := Vector3.ZERO
+	if not GRAVITY_ENABLED:
+		return g
+	for b in _bodies:
+		var bpos: Vector3 = eph.scene_pos(b.name) if b.live else b.pos
+		var rel: Vector3 = bpos - pos
+		var d := rel.length()
+		if d > 0.001 and d < float(b.radius) * GRAVITY_RANGE_MULT:
+			var a := minf(GRAVITY_STRENGTH * (float(b.radius) * float(b.radius)) / (d * d), GRAVITY_MAX_ACCEL)
+			g += (rel / d) * a
+	for st in _stars:
+		var rel: Vector3 = st.true_pos - pos
+		var d := rel.length()
+		if d > 0.001 and d < STAR_GRAVITY_RANGE:
+			var a := minf(STAR_GRAVITY_K / (d * d), STAR_GRAVITY_MAX)
+			g += (rel / d) * a
+	return g
 
 
 # --- GLB helpers (scale, recenter, self-light) ------------------------------

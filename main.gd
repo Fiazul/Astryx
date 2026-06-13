@@ -31,7 +31,7 @@ var _nav_index := -1          # -1 = no waypoint; else index into nav targets
 var _scan := 0.0             # scan progress 0..1 of the nearest body
 var _scan_name := ""
 const SCAN_SECONDS := 2.0
-const SCAN_RANGE := 55.0      # how close you must be to scan a body
+const SCAN_RANGE := 550.0     # how close you must be to scan a body (×10 for the spread)
 var _env: Environment
 
 var docked := false
@@ -121,12 +121,15 @@ func _ready() -> void:
 	combat = Combat.new()
 	add_child(combat)
 	combat.audio = audio
+	combat.planets = planets                            # bolts curve through gravity wells
 	combat.reset(SystemDB.is_hostile(current_system))   # Sol starts peaceful
+	combat.player_hp = ship.max_hp                      # start at the hull's full defence
 
 	# HUD labels (light-year distance, speed, nearest body).
 	hud = HUD.new()
 	add_child(hud)
 	hud.ship = ship
+	hud.ship_ref = ship          # used by the HUD layout editor to free/recapture the cursor
 	hud.planets = planets
 	hud.combat = combat
 	hud.teleport_button.pressed.connect(teleport_home)
@@ -158,6 +161,7 @@ func _ready() -> void:
 	settings = SettingsMenu.new()
 	settings.ship = ship
 	settings.env = _env
+	settings.hud = hud           # for the "Edit HUD Layout" button
 	add_child(settings)
 
 	# Waypoint navigator (Tab) + corner radar.
@@ -168,6 +172,7 @@ func _ready() -> void:
 	minimap = MiniMap.new()
 	minimap.position = Vector2(24, 466)
 	nav_canvas.add_child(minimap)
+	hud.register_movable("radar", minimap)   # make the corner radar drag-positionable too
 
 	# Star map (M): click a system to jump.
 	map = StarMap.new()
@@ -182,17 +187,21 @@ func _process(delta: float) -> void:
 	planets.refresh(ship.true_pos, delta)
 	ship.speed_limit = planets.speed_limit   # eases the ship down near a body
 	ship.nearest_dir = planets.nearest_dir   # only ease down when approaching it
+	ship.nearest_dist = planets.nearest_dist # warp ships ease out of warp on arrival
+	ship.star_field_dist = planets.star_dist # FTL only unlocks beyond the star's gravity field
 	ship.gravity = planets.gravity           # gentle pull toward bodies
 	props.update(ship.true_pos, delta)
 	if wormhole.update(ship.true_pos, delta):
 		_arrive(wormhole.dest_id)
 	# Combat runs in normal flight (not mid-transit, not docked). Docking at a
 	# station is a safe harbor — the fight pauses so you can swap ships in peace.
+	var firing := false
 	if not ship.transiting and not docked:
-		var firing := Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED \
+		firing = Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED \
 			and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) \
 			and not ship.is_hypersonic()        # no shooting at hypersonic speed
 		combat.update(ship, firing, delta)
+	hud.firing = firing                          # blooms the dynamic crosshair
 	_update_dock_ui()
 	_update_navigator()
 	_update_minimap()
@@ -291,18 +300,50 @@ func _update_navigator() -> void:
 		return
 	var bodies: Array = planets.targetables()
 	var count := bodies.size() + 1
-	if ship.transiting or _nav_index < 0 or _nav_index >= count:
-		navigator.update_nav(ship.camera, false, Vector3.ZERO, "", "")   # gizmo only
-		return
 	var tname: String
 	var rel: Vector3
-	if _nav_index < bodies.size():
-		tname = bodies[_nav_index]
-		rel = planets.rel_of(tname)
+	if ship.transiting:
+		navigator.update_nav(ship.camera, false, Vector3.ZERO, "", "")   # gizmo only
+		hud.set_objective("")
+		return
+	elif _nav_index >= 0 and _nav_index < count:
+		# Manual Tab target (a specific body or the wormhole).
+		if _nav_index < bodies.size():
+			tname = bodies[_nav_index]
+			rel = planets.rel_of(tname)
+		else:
+			tname = "Wormhole"
+			rel = wormhole.portal_rel(ship.true_pos)
 	else:
-		tname = "Wormhole"
-		rel = wormhole.portal_rel(ship.true_pos)
-	navigator.update_nav(ship.camera, true, rel, tname, _fmt_nav_dist(rel.length()))
+		# Default: the Survey guide always points at the nearest unclaimed star, so
+		# the player is never lost. Tab overrides it; cycling past the end returns here.
+		var obj := _current_objective()
+		if obj.is_empty():
+			navigator.update_nav(ship.camera, false, Vector3.ZERO, "", "")
+			hud.set_objective("✦  All nearby stars claimed")
+			return
+		tname = obj.name
+		rel = obj.rel
+	var dist_txt := _fmt_nav_dist(rel.length())
+	navigator.update_nav(ship.camera, true, rel, tname, dist_txt)
+	hud.set_objective("→  %s   %s" % [tname, dist_txt])
+
+
+# The current guidance objective: the nearest star not yet claimed (codex proxy until
+# the capture mechanic lands). Returns {} once every nearby star is claimed.
+func _current_objective() -> Dictionary:
+	var best := ""
+	var best_d := INF
+	for s in Ephemeris.STARS:
+		if codex.is_discovered(s.name):
+			continue
+		var d: float = planets.rel_of(s.name).length()
+		if d < best_d:
+			best_d = d
+			best = s.name
+	if best == "":
+		return {}
+	return { "name": best, "rel": planets.rel_of(best) }
 
 func _fmt_nav_dist(u: float) -> String:
 	var au := u * 0.1
@@ -332,6 +373,7 @@ func _arrive(system_id: String) -> void:
 	# still only holds the true hostile Alien zone.
 	var fight := system_id != SystemDB.SOL
 	combat.reset(fight, SystemDB.is_hostile(system_id))
+	combat.player_hp = ship.max_hp
 	_nav_index = -1                                # clear the waypoint in the new system
 	if docked:
 		_set_docked(false)
@@ -374,6 +416,7 @@ func _input(event: InputEvent) -> void:
 		teleport_home()
 	elif docked and key >= KEY_1 and key <= KEY_9:
 		ship.swap_ship(key - KEY_1)
+		combat.player_hp = ship.max_hp   # new hull -> its full defence
 
 
 func _set_docked(d: bool) -> void:
@@ -442,6 +485,7 @@ func _ship_names() -> PackedStringArray:
 func _on_hangar_pick(index: int) -> void:
 	if docked and index >= 0 and index < ship.ship_count():
 		ship.swap_ship(index)
+		combat.player_hp = ship.max_hp   # new hull -> its full defence
 
 
 # Looping background music, spawned from code like everything else.

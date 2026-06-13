@@ -33,14 +33,17 @@ const BOLT_SPEED := 950.0          # fast tracers (swept collision keeps hits re
 const BOLT_LIFE := 2.5
 const BOLT_COOLDOWN := 0.22        # ~4.5 shots/sec — same comfortable delay between shots
 const ALIEN_BOLT_SPEED := 90.0
+const HIT_RADIUS_MULT := 0.95      # enemy hit box as a fraction of body size (was 0.55 — more forgiving)
 const SHIP_HIT_RADIUS := 2.0
 const PLAYER_MAX_HP := 100
 
 var player_hp := PLAYER_MAX_HP
+var player_max := PLAYER_MAX_HP   # current hull's max HP (set from the active ship)
 var kills := 0
 var hitmarker := 0.0              # >0 for a moment after a shot lands (HUD reads it)
 
 var audio: GameAudio              # set by main; SFX for fire / explosion
+var planets: PlanetSystem         # set by main; lets gravity wells bend bolts
 
 var _aliens := []                 # { pos, vel, hp, node, fire_cd, alive, respawn }
 var _bolts := []                  # player bolts: { pos, vel, life, node }
@@ -100,11 +103,16 @@ func update(ship: Node3D, pressed: bool, delta: float) -> void:
 	var sp: Vector3 = ship.true_pos
 	var fwd: Vector3 = -ship.transform.basis.z
 
+	# Per-hull combat identity: defence (max HP), bullet speed and bullet size all come
+	# from the active ship (see SHIP_MODELS). player_max drives the HUD's hull bar.
+	player_max = ship.max_hp if ship.has_method("is_hypersonic") else PLAYER_MAX_HP
+	player_hp = mini(player_hp, player_max)
+
 	# --- player firing: pure straight shots, no aim assist ---
 	_cool = maxf(_cool - delta, 0.0)
 	if pressed and _cool <= 0.0:
 		_cool = ship.fire_cooldown if ship.has_method("is_hypersonic") else BOLT_COOLDOWN
-		_spawn_bolt(_bolts, sp + fwd * 2.5, fwd * BOLT_SPEED, _bolt_mat)
+		_spawn_bolt(_bolts, sp + fwd * ship.muzzle, fwd * ship.bolt_speed, _bolt_mat, ship.bolt_scale, ship.bolt_damage)
 		if audio != null:
 			audio.play_fire()
 
@@ -150,6 +158,8 @@ func _step_bolts(list: Array, sp: Vector3, delta: float, player: bool) -> void:
 	while i >= 0:
 		var b = list[i]
 		var prev: Vector3 = b.pos
+		if planets != null:
+			b.vel += planets.gravity_at(b.pos) * delta   # bolts curve through gravity wells
 		b.pos += b.vel * delta
 		b.life -= delta
 		b.node.position = b.pos - sp
@@ -158,8 +168,8 @@ func _step_bolts(list: Array, sp: Vector3, delta: float, player: bool) -> void:
 			# Swept test: the bolt moves far each frame, so check the whole
 			# segment it travelled, not just its end point (no tunnelling).
 			for a in _aliens:
-				if a.alive and _seg_point_dist(prev, b.pos, a.pos) < a.size * 0.55:
-					_damage_alien(a, sp)
+				if a.alive and _seg_point_dist(prev, b.pos, a.pos) < a.size * HIT_RADIUS_MULT + b.r:
+					_damage_alien(a, sp, int(b.dmg))
 					_hit_flash(b.pos - sp)            # impact pop
 					_enemy_flash(a.pos - sp, a.size)  # the enemy lights up
 					hitmarker = 0.18                  # HUD crosshair confirms the hit
@@ -175,8 +185,8 @@ func _step_bolts(list: Array, sp: Vector3, delta: float, player: bool) -> void:
 		i -= 1
 
 
-func _damage_alien(a: Dictionary, sp: Vector3) -> void:
-	a.hp -= 1
+func _damage_alien(a: Dictionary, sp: Vector3, dmg := 1) -> void:
+	a.hp -= dmg
 	if a.hp <= 0:
 		a.alive = false
 		a.respawn = a.respawn_after
@@ -310,13 +320,15 @@ func _load_alien_model() -> Node3D:
 	return mi
 
 
-func _spawn_bolt(list: Array, pos: Vector3, vel: Vector3, mat: StandardMaterial3D) -> void:
+func _spawn_bolt(list: Array, pos: Vector3, vel: Vector3, mat: StandardMaterial3D, scale := 1.0, dmg := 1) -> void:
 	var mi := MeshInstance3D.new()
 	mi.mesh = _bolt_mesh
 	mi.material_override = mat
 	mi.position = pos
+	mi.scale = Vector3.ONE * scale   # per-hull bullet size (Lyra's big, Stella's small)
 	add_child(mi)
-	list.append({ "pos": pos, "vel": vel, "life": BOLT_LIFE, "node": mi })
+	# A bigger bolt also lands fatter: its radius widens the swept hit test below.
+	list.append({ "pos": pos, "vel": vel, "life": BOLT_LIFE, "node": mi, "dmg": dmg, "r": _bolt_mesh.radius * scale })
 
 
 # Shortest distance from point p to the segment a→b (for swept bolt hits).

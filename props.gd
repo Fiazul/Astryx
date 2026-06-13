@@ -26,13 +26,13 @@ const PROP_LIST := [
 	{
 		"name": "", "path": "res://Wikiplanet Space Station (WSS).glb",
 		"system": "sol",
-		"pos": Vector3(-4.5, 1.5, 1.5), "size": 1.8, "yaw": 25.0, "spin": 0.03, "glow": 0.18,
-		"orbit": 0.04, "dock": true, "dock_range": 4.0,
+		"pos": Vector3(-45.0, 15.0, 15.0), "size": 20.0, "yaw": 25.0, "spin": 0.03, "glow": 0.18,
+		"orbit": 0.04, "dock": true, "dock_range": 90.0,
 	},
 	{
 		"name": "Finn", "path": "res://Astronaut.glb",
 		"system": "sol",
-		"pos": Vector3(-4.0, 1.2, 1.0), "size": 0.5, "yaw": 200.0, "spin": 0.35, "glow": 0.45,
+		"pos": Vector3(-40.0, 12.0, 10.0), "size": 0.3, "yaw": 200.0, "spin": 0.35, "glow": 0.45,
 		"orbit": 0.04,
 	},
 
@@ -47,38 +47,38 @@ const PROP_LIST := [
 	{
 		"name": "K2-18 Station", "path": "res://International Space Station.glb",
 		"system": "k2-18",
-		"pos": Vector3(-11.0, 1.5, 9.0), "size": 9.0, "yaw": 30.0, "spin": 0.03, "glow": 0.5,
-		"dock": true, "dock_range": 8.0,
+		"pos": Vector3(-110.0, 15.0, 90.0), "size": 22.5, "yaw": 30.0, "spin": 0.03, "glow": 0.5,
+		"dock": true, "dock_range": 80.0,
 	},
 	{
 		"name": "Proxima Station", "path": "res://space station.glb",
 		"system": "proxima",
-		"pos": Vector3(-10.5, 1.2, 9.5), "size": 11.0, "yaw": 60.0, "spin": 0.025, "glow": 0.5,
-		"dock": true, "dock_range": 9.0,
+		"pos": Vector3(-105.0, 12.0, 95.0), "size": 27.5, "yaw": 60.0, "spin": 0.025, "glow": 0.5,
+		"dock": true, "dock_range": 90.0,
 	},
 	{
 		"name": "TRAPPIST Outpost", "path": "res://space pod.glb",
 		"system": "trappist",
-		"pos": Vector3(-11.0, 1.5, 8.5), "size": 8.0, "yaw": 15.0, "spin": 0.04, "glow": 0.55,
-		"dock": true, "dock_range": 7.5,
+		"pos": Vector3(-110.0, 15.0, 85.0), "size": 20.0, "yaw": 15.0, "spin": 0.04, "glow": 0.55,
+		"dock": true, "dock_range": 75.0,
 	},
 
 	# --- Drifting probes (scannable): scattered through the hostile systems, away
 	#     from Earth. Each reports local monster data when you fly close. ---
 	{ "name": "Probe", "path": "res://Space probe.glb", "system": "k2-18", "probe": true,
-		"pos": Vector3(-3.2, 1.3, 2.6), "size": 0.9, "yaw": 0.0, "spin": 0.5, "glow": 0.5 },
+		"pos": Vector3(-32.0, 13.0, 26.0), "size": 2.25, "yaw": 0.0, "spin": 0.5, "glow": 0.5 },
 	{ "name": "Probe", "path": "res://Space probe.glb", "system": "k2-18", "probe": true,
-		"pos": Vector3(-2.0, -1.3, 4.2), "size": 0.9, "yaw": 120.0, "spin": 0.6, "glow": 0.5 },
+		"pos": Vector3(-20.0, -13.0, 42.0), "size": 2.25, "yaw": 120.0, "spin": 0.6, "glow": 0.5 },
 	{ "name": "Probe", "path": "res://Space probe.glb", "system": "proxima", "probe": true,
-		"pos": Vector3(-2.8, 0.9, 2.9), "size": 0.9, "yaw": 40.0, "spin": 0.55, "glow": 0.5 },
+		"pos": Vector3(-28.0, 9.0, 29.0), "size": 2.25, "yaw": 40.0, "spin": 0.55, "glow": 0.5 },
 	{ "name": "Probe", "path": "res://Space probe.glb", "system": "proxima", "probe": true,
-		"pos": Vector3(-2.2, 1.4, 4.0), "size": 0.9, "yaw": 200.0, "spin": 0.45, "glow": 0.5 },
+		"pos": Vector3(-22.0, 14.0, 40.0), "size": 2.25, "yaw": 200.0, "spin": 0.45, "glow": 0.5 },
 	{ "name": "Probe", "path": "res://Space probe.glb", "system": "trappist", "probe": true,
-		"pos": Vector3(-3.0, -0.8, 2.7), "size": 0.9, "yaw": 80.0, "spin": 0.6, "glow": 0.5 },
+		"pos": Vector3(-30.0, -8.0, 27.0), "size": 2.25, "yaw": 80.0, "spin": 0.6, "glow": 0.5 },
 	{ "name": "Probe", "path": "res://Space probe.glb", "system": "trappist", "probe": true,
-		"pos": Vector3(-2.4, 1.0, 4.0), "size": 0.9, "yaw": 300.0, "spin": 0.5, "glow": 0.5 },
+		"pos": Vector3(-24.0, 10.0, 40.0), "size": 2.25, "yaw": 300.0, "spin": 0.5, "glow": 0.5 },
 	{ "name": "Probe", "path": "res://Space probe.glb", "system": "alien", "probe": true,
-		"pos": Vector3(-3.4, 1.6, 3.0), "size": 0.9, "yaw": 160.0, "spin": 0.6, "glow": 0.5 },
+		"pos": Vector3(-34.0, 16.0, 30.0), "size": 2.25, "yaw": 160.0, "spin": 0.6, "glow": 0.5 },
 ]
 
 var _items := []

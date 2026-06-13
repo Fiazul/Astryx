@@ -45,9 +45,9 @@ static func light_years(id: String) -> float:
 # that system's return/onward wormhole portal sits.
 static func arrival_pos(id: String) -> Vector3:
 	return {
-		SOL: Vector3(-0.81, -1.97, -4.53), K2_18: Vector3(3.0, 0.6, -2.5),
-		PROXIMA: Vector3(2.5, 0.5, -3.0), TRAPPIST: Vector3(3.2, 0.6, -3.5),
-		ALIEN: Vector3(0.0, 1.5, -7.0),
+		SOL: Vector3(-8.1, -19.7, -45.3), K2_18: Vector3(30.0, 6.0, -25.0),
+		PROXIMA: Vector3(25.0, 5.0, -30.0), TRAPPIST: Vector3(32.0, 6.0, -35.0),
+		ALIEN: Vector3(0.0, 15.0, -70.0),
 	}.get(id, Vector3.ZERO)
 
 # Wormhole portals present in each system. Earth (Sol) has a SEPARATE portal for
@@ -60,15 +60,15 @@ static func portals(id: String) -> Array:
 	match id:
 		SOL:
 			return [
-				{ "pos": Vector3(3.4, 1.7, -10.0),  "dest": K2_18 },
-				{ "pos": Vector3(-11.0, 2.0, -6.0), "dest": PROXIMA },
-				{ "pos": Vector3(8.0, -2.5, 8.0),   "dest": TRAPPIST },
+				{ "pos": Vector3(34.0, 17.0, -100.0),  "dest": K2_18 },
+				{ "pos": Vector3(-110.0, 20.0, -60.0), "dest": PROXIMA },
+				{ "pos": Vector3(80.0, -25.0, 80.0),   "dest": TRAPPIST },
 			]
-		K2_18:    return [{ "pos": Vector3(7.5, 1.0, -1.5),  "dest": SOL }]
-		PROXIMA:  return [{ "pos": Vector3(6.5, 1.2, -2.2),  "dest": SOL }]
-		TRAPPIST: return [{ "pos": Vector3(7.0, 1.2, -2.2),  "dest": SOL }]
-		ALIEN:    return [{ "pos": Vector3(7.5, 1.2, -3.0),  "dest": SOL }]
-		_:        return [{ "pos": Vector3(5.0, 1.0, -2.0),  "dest": SOL }]
+		K2_18:    return [{ "pos": Vector3(75.0, 10.0, -15.0),  "dest": SOL }]
+		PROXIMA:  return [{ "pos": Vector3(65.0, 12.0, -22.0),  "dest": SOL }]
+		TRAPPIST: return [{ "pos": Vector3(70.0, 12.0, -22.0),  "dest": SOL }]
+		ALIEN:    return [{ "pos": Vector3(75.0, 12.0, -30.0),  "dest": SOL }]
+		_:        return [{ "pos": Vector3(50.0, 10.0, -20.0),  "dest": SOL }]
 
 
 static func bodies(id: String) -> Array:
@@ -102,44 +102,44 @@ static func _sol() -> Array:
 # Purely static — no live source, so the swap never calls Horizons.
 static func _k2_18() -> Array:
 	return [
-		{ "name": "K2-18",  "radius": 1.5,  "color": Color(1.0, 0.45, 0.28), "glow": 2.0,
+		{ "name": "K2-18",  "radius": 3.75, "color": Color(1.0, 0.45, 0.28), "glow": 2.0,
 			"star": true, "live": false, "pos": Vector3(0, 0, 0), "model": "res://star.glb" },
-		{ "name": "K2-18b", "radius": 0.95, "color": Color(0.32, 0.62, 0.78), "glow": 0.5,
-			"star": false, "live": false, "pos": Vector3(1.20, 0.10, 0.80) },   # 0.143 AU
-		{ "name": "K2-18c", "radius": 0.5,  "color": Color(0.75, 0.6, 0.5),   "glow": 0.35,
-			"star": false, "live": false, "pos": Vector3(-0.55, 0.05, 0.40) },  # 0.067 AU
+		{ "name": "K2-18b", "radius": 2.4,  "color": Color(0.32, 0.62, 0.78), "glow": 0.5,
+			"star": false, "live": false, "pos": Vector3(12.0, 1.0, 8.0) },   # 0.143 AU
+		{ "name": "K2-18c", "radius": 1.25, "color": Color(0.75, 0.6, 0.5),   "glow": 0.35,
+			"star": false, "live": false, "pos": Vector3(-5.5, 0.5, 4.0) },   # 0.067 AU
 	]
 
 
 # Proxima Centauri (~4.24 ly) and its planet Proxima b.
 static func _proxima() -> Array:
 	return [
-		{ "name": "Proxima Centauri", "radius": 1.3, "color": Color(1.0, 0.4, 0.24), "glow": 2.0,
+		{ "name": "Proxima Centauri", "radius": 3.25, "color": Color(1.0, 0.4, 0.24), "glow": 2.0,
 			"star": true, "live": false, "pos": Vector3(0, 0, 0), "model": "res://star.glb" },
-		{ "name": "Proxima b", "radius": 0.85, "color": Color(0.62, 0.46, 0.40), "glow": 0.4,
-			"star": false, "live": false, "pos": Vector3(0.49, 0.06, 0.30) },   # ~0.0485 AU
+		{ "name": "Proxima b", "radius": 2.1, "color": Color(0.62, 0.46, 0.40), "glow": 0.4,
+			"star": false, "live": false, "pos": Vector3(4.9, 0.6, 3.0) },   # ~0.0485 AU
 	]
 
 
 # TRAPPIST-1 (~39 ly): an ultra-cool red dwarf with several tightly-packed worlds.
 static func _trappist() -> Array:
 	return [
-		{ "name": "TRAPPIST-1", "radius": 1.0, "color": Color(1.0, 0.5, 0.30), "glow": 2.0,
+		{ "name": "TRAPPIST-1", "radius": 2.5, "color": Color(1.0, 0.5, 0.30), "glow": 2.0,
 			"star": true, "live": false, "pos": Vector3(0, 0, 0), "model": "res://star.glb" },
-		{ "name": "TRAPPIST-1b", "radius": 0.42, "color": Color(0.78, 0.5, 0.42), "glow": 0.35,
-			"star": false, "live": false, "pos": Vector3(0.11, 0.02, 0.05) },
-		{ "name": "TRAPPIST-1d", "radius": 0.40, "color": Color(0.55, 0.62, 0.7),  "glow": 0.35,
-			"star": false, "live": false, "pos": Vector3(-0.18, 0.03, 0.12) },
-		{ "name": "TRAPPIST-1e", "radius": 0.46, "color": Color(0.35, 0.62, 0.78), "glow": 0.4,
-			"star": false, "live": false, "pos": Vector3(0.22, 0.04, -0.18) },
-		{ "name": "TRAPPIST-1g", "radius": 0.50, "color": Color(0.6, 0.6, 0.65),   "glow": 0.35,
-			"star": false, "live": false, "pos": Vector3(-0.30, 0.05, -0.22) },
+		{ "name": "TRAPPIST-1b", "radius": 1.05, "color": Color(0.78, 0.5, 0.42), "glow": 0.35,
+			"star": false, "live": false, "pos": Vector3(1.1, 0.2, 0.5) },
+		{ "name": "TRAPPIST-1d", "radius": 1.0, "color": Color(0.55, 0.62, 0.7),  "glow": 0.35,
+			"star": false, "live": false, "pos": Vector3(-1.8, 0.3, 1.2) },
+		{ "name": "TRAPPIST-1e", "radius": 1.15, "color": Color(0.35, 0.62, 0.78), "glow": 0.4,
+			"star": false, "live": false, "pos": Vector3(2.2, 0.4, -1.8) },
+		{ "name": "TRAPPIST-1g", "radius": 1.25, "color": Color(0.6, 0.6, 0.65),   "glow": 0.35,
+			"star": false, "live": false, "pos": Vector3(-3.0, 0.5, -2.2) },
 	]
 
 
 # The hostile zone — a dim, blood-red star to fight under. Aliens + Vortex live here.
 static func _alien() -> Array:
 	return [
-		{ "name": "Hostile Star", "radius": 1.4, "color": Color(0.9, 0.12, 0.12), "glow": 1.6,
+		{ "name": "Hostile Star", "radius": 3.5, "color": Color(0.9, 0.12, 0.12), "glow": 1.6,
 			"star": true, "live": false, "pos": Vector3(0, 0, 0), "model": "res://star.glb" },
 	]

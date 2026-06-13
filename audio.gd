@@ -63,7 +63,11 @@ var _eng_ship := ""             # which ship's loop is currently loaded into _en
 var _eng_sustain := 0.0         # seconds of continuous driving (drives cruise settle)
 
 
+const MASTER_DB := 4.0   # slight overall lift on everything (all audio routes here)
+
 func _ready() -> void:
+	# Nudge the whole mix up a touch — music, engine and SFX all sit on Master.
+	AudioServer.set_bus_volume_db(AudioServer.get_bus_index("Master"), MASTER_DB)
 	var fire_stream := load("res://sfx_fire.wav") as AudioStream
 	for i in FIRE_VOICES:
 		var p := AudioStreamPlayer.new()

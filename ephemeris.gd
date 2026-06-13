@@ -21,8 +21,8 @@ extends Node
 # then sit millions of units away, so they render as a direction-only backdrop
 # shell (see PlanetSystem) — exactly how a real sky behaves.
 
-const AU_TO_UNITS := 10.0
-const STAR_SHELL_RADIUS := 3000.0   # backdrop shell (well inside cam.far)
+const AU_TO_UNITS := 100.0   # 1 unit = 0.01 AU — the system is spread ~10× wide and real
+const STAR_SHELL_RADIUS := 30000.0   # backdrop shell (well inside cam.far) — scaled with the system
 
 # Visual radii are EXAGGERATED (a real planet is sub-pixel) — the one non-real
 # thing, and it's just the "dots and glow" aesthetic. Positions stay real.
@@ -31,15 +31,18 @@ const STAR_SHELL_RADIUS := 3000.0   # backdrop shell (well inside cam.far)
 # energy (no scene lights). Earth is the origin anchor; the Sun wears star.glb,
 # which is also reused for every star (see PlanetSystem).
 const PLANETS := [
-	{ "name": "Earth",   "id": "399", "eq": Vector3(0, 0, 0),               "radius": 1.4,  "color": Color(0.20, 0.45, 1.0), "model": "res://earth.glb", "glow": 0.12, "fixed": true },
-	{ "name": "Sun",     "id": "10",  "eq": Vector3( 0.1640,  0.9194,  0.3985), "radius": 1.8,  "color": Color(1.00, 0.85, 0.30), "star": true, "model": "res://star.glb", "glow": 2.0 },
-	{ "name": "Mercury", "id": "199", "eq": Vector3(-0.2269,  0.7801,  0.3646), "radius": 0.45, "color": Color(0.70, 0.62, 0.52) },
-	{ "name": "Venus",   "id": "299", "eq": Vector3(-0.5535,  0.9404,  0.4534), "radius": 0.75, "color": Color(0.95, 0.85, 0.55) },
-	{ "name": "Mars",    "id": "499", "eq": Vector3( 1.4583,  1.4672,  0.6149), "radius": 0.55, "color": Color(0.90, 0.40, 0.20) },
-	{ "name": "Jupiter", "id": "599", "eq": Vector3(-2.6447,  4.9896,  2.2115), "radius": 1.7,  "color": Color(0.85, 0.72, 0.52) },
-	{ "name": "Saturn",  "id": "699", "eq": Vector3( 9.5512,  2.1483,  0.5020), "radius": 1.5,  "color": Color(0.88, 0.78, 0.55) },
-	{ "name": "Uranus",  "id": "799", "eq": Vector3( 9.4808, 16.6122,  7.1397), "radius": 1.1,  "color": Color(0.55, 0.82, 0.88) },
-	{ "name": "Neptune", "id": "899", "eq": Vector3(30.0174,  2.1421,  0.1558), "radius": 1.1,  "color": Color(0.30, 0.50, 0.95) },
+	{ "name": "Earth",   "id": "399", "eq": Vector3(0, 0, 0),               "radius": 3.5,  "color": Color(0.20, 0.45, 1.0), "model": "res://earth.glb", "glow": 0.12, "fixed": true },
+	# Radii now follow real size ORDER (Sun > giants > Earth/Venus > Mars > Mercury),
+	# gently compressed so the Sun/giants read as dominant without engulfing neighbours.
+	# (True radii at 1u=0.1AU would be sub-pixel; this keeps ratios believable + visible.)
+	{ "name": "Sun",     "id": "10",  "eq": Vector3( 0.1640,  0.9194,  0.3985), "radius": 8.5,  "color": Color(1.00, 0.85, 0.30), "star": true, "model": "res://star.glb", "glow": 2.0 },
+	{ "name": "Mercury", "id": "199", "eq": Vector3(-0.2269,  0.7801,  0.3646), "radius": 1.4,  "color": Color(0.70, 0.62, 0.52) },
+	{ "name": "Venus",   "id": "299", "eq": Vector3(-0.5535,  0.9404,  0.4534), "radius": 3.3,  "color": Color(0.95, 0.85, 0.55) },
+	{ "name": "Mars",    "id": "499", "eq": Vector3( 1.4583,  1.4672,  0.6149), "radius": 1.85, "color": Color(0.90, 0.40, 0.20) },
+	{ "name": "Jupiter", "id": "599", "eq": Vector3(-2.6447,  4.9896,  2.2115), "radius": 12.5, "color": Color(0.85, 0.72, 0.52) },
+	{ "name": "Saturn",  "id": "699", "eq": Vector3( 9.5512,  2.1483,  0.5020), "radius": 10.5, "color": Color(0.88, 0.78, 0.55) },
+	{ "name": "Uranus",  "id": "799", "eq": Vector3( 9.4808, 16.6122,  7.1397), "radius": 5.25, "color": Color(0.55, 0.82, 0.88) },
+	{ "name": "Neptune", "id": "899", "eq": Vector3(30.0174,  2.1421,  0.1558), "radius": 5.0,  "color": Color(0.30, 0.50, 0.95) },
 ]
 
 # Real nearby stars (J2000): RA(h,m,s), Dec(d,m,s), distance(ly). HYG/SIMBAD.
@@ -86,7 +89,7 @@ func scene_pos(name: String) -> Vector3:
 
 
 # Star direction*radius on the backdrop shell (real RA/Dec, fixed radius).
-const UNITS_PER_LY := 632410.77   # 63241.077 AU/ly × AU_TO_UNITS — real interstellar scale
+const UNITS_PER_LY := 6324107.7   # 63241.077 AU/ly × AU_TO_UNITS — real interstellar scale
 
 func star_scene_pos(star: Dictionary) -> Vector3:
 	var ra := _hms_deg(star.ra) * PI / 180.0

@@ -7,7 +7,7 @@ extends Control
 
 const R := 86.0
 const PANEL := Vector2(196, 196)
-const DIST_SCALE := 0.72        # units -> radar px (then clamped to the rim)
+const DIST_SCALE := 0.072       # units -> radar px (then clamped to the rim) — ÷10 for the spread
 
 # roles
 const BODY := 0

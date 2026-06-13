@@ -11,7 +11,7 @@ extends Node3D
 # floating-origin tracked. Fly near any portal, press F, and a tunnel sequence
 # plays for ~ (ly × SEC_PER_LY) seconds, then main swaps to that portal's system.
 
-const PORTAL_RANGE := 6.0
+const PORTAL_RANGE := 60.0    # ×10 for the spread-out system
 const MAX_PORTALS := 4                  # pool size (Sol uses 3; others use 1)
 # Transit length = light-years × this (clamped). Tunable: 0.15 → ~18s for K2-18b
 # (dev-friendly); set ~2.9 for the ~6-minute "epic haul" the design calls for.
@@ -144,8 +144,8 @@ func update(ship_pos: Vector3, delta: float) -> bool:
 		p.node.rotate_z(0.6 * delta)
 		p.mat.emission_energy_multiplier = glow
 		p.label.visible = true
-		p.label.position = rel + Vector3(0.0, 4.2, 0.0)
-		p.label.pixel_size = clampf(rel.length() * 0.0009, 0.01, 0.5)
+		p.label.position = rel + Vector3(0.0, 11.0, 0.0)
+		p.label.pixel_size = clampf(rel.length() * 0.00012, 0.02, 1.2)
 	return false
 
 
@@ -156,8 +156,8 @@ func _build_portal() -> Dictionary:
 	# A dangerous-looking hole: a dark event-horizon core, a fiery accretion ring
 	# that spins, and an outer red danger-glow. All emissive — no lights.
 	var torus := TorusMesh.new()
-	torus.inner_radius = 1.9
-	torus.outer_radius = 3.1
+	torus.inner_radius = 4.75
+	torus.outer_radius = 7.75
 	torus.rings = 36
 	torus.ring_segments = 16
 	var portal := MeshInstance3D.new()
@@ -175,7 +175,7 @@ func _build_portal() -> Dictionary:
 	# Event horizon — a near-black sphere that swallows the center.
 	var core := MeshInstance3D.new()
 	var sm := SphereMesh.new()
-	sm.radius = 1.95; sm.height = 3.9; sm.radial_segments = 20; sm.rings = 10
+	sm.radius = 4.9; sm.height = 9.8; sm.radial_segments = 20; sm.rings = 10
 	core.mesh = sm
 	var cmat := StandardMaterial3D.new()
 	cmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
@@ -185,7 +185,7 @@ func _build_portal() -> Dictionary:
 
 	# Outer danger glow — billboarded red haze so it reads as a threat from afar.
 	var glow := MeshInstance3D.new()
-	var q := QuadMesh.new(); q.size = Vector2(11.0, 11.0)
+	var q := QuadMesh.new(); q.size = Vector2(27.5, 27.5)
 	glow.mesh = q
 	var gmat := StandardMaterial3D.new()
 	gmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
