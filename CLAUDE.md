@@ -8,12 +8,24 @@
 planets appear as glowing dots that grow and resolve as you approach. Runs on a potato
 PC. Scope is intentionally small. No combat, no menus, no inventory.
 
-### Cast / canon (named 2026-06-12 by dev)
+### Cast / canon (named 2026-06-12 by dev; fleet updated 2026-06-13)
 - **Astryx** — the game.
 - **Earth** — the launch point (player starts here; floating-origin world origin = Sol).
 - **Rook** — the pilot (he).
-- **Lyra** — the ship (she). The visible 3rd-person hull is Lyra. (Renamed from
-  "Stella" 2026-06-12.)
+- **The fleet (she)** — swappable 3rd-person hulls, picked at the station. Roster
+  lives in `SHIP_MODELS` (`ship.gd`). Default is Lyra.
+  - **Lyra** — the default hull; the starter you launch in.
+  - **Stella** — the OG good girl: the original, balanced, dependable ride.
+    (The name once belonged to Lyra; it was freed up on 2026-06-12 and is now its
+    own ship.)
+  - **Raptor** — the dangerous one. Press **X** to flip her dual mode: Combat (a
+    massive-fire-rate machine gun) ⇄ Warp (FTL, lightyear-class speed). Purple
+    booster.
+  - **Vela** — the fast, sexy FTL cruiser. Her warp drive spools up and blazes
+    across a system (~0.5 ly/s at full charge). Golden booster.
+- **Vortex** — the alien boss. A hostile hull scaled up huge with a red-hot menace
+  tint; lives in the Alien Zone with the regular aliens and gets a boss HP banner on
+  the HUD. (See `combat.gd` / `systems.gd`.)
 
 ## Hard constraints (already decided — do not revisit)
 - **Engine:** Godot 4.x, **GDScript** for all game logic. (Dev knows C++/Python;
@@ -27,9 +39,11 @@ PC. Scope is intentionally small. No combat, no menus, no inventory.
   - Star field via `MultiMeshInstance3D`, never thousands of separate nodes.
   - Low-poly meshes only (sphere ~16 segments) where meshes are used at all.
 - **Third-person chase camera.** (Revised 2026-06-12 by dev: was first-person/cockpit;
-  now N.O.V.A.-style — simple-but-characterful flight, ship visible in 3rd person.)
-  The ship hull IS visible, so it needs a model — but a *simple low-poly* one with
-  some character, built from primitives in code. Not a detailed asset.
+  now ship visible in 3rd person, with a free-look mode — hold RMB or T to orbit the
+  camera while the ship flies on.) The ship hull IS visible, so it needs a model.
+  (Originally specced as primitives-in-code; in practice the hulls are free low-poly
+  GLBs collected from the internet — see `SHIP_MODELS` in `ship.gd`. Boosters/plumes
+  are still built in code on top of the GLB.)
 - **Minimal UI.** Just `Label`s for: light-year distance, nearby planet name,
   optional speed. Spawn them from code on a `CanvasLayer`. Do NOT build menus,
   anchored layouts, themes, or containers.
@@ -144,7 +158,18 @@ Free key: api.nasa.gov. Real positional data: NASA Exoplanet Archive, HYG star d
 - NOT the UI. UI is trivial here. Don't over-invest.
 
 ## Resolved decisions
-- **Movement model (was open):** arcade 6DOF with velocity damping + cosmetic
-  banking into turns (N.O.V.A.-style — simple, forgiving, with weight/character).
-  Mouse aims; WASD thrust; Space/Ctrl up·down; Q/E roll; Shift boost. Implemented
-  in `ship.gd`. (Decided 2026-06-12.)
+- **Movement model:** arcade 6DOF with velocity damping + cosmetic banking into
+  turns — simple, forgiving, with weight/character. Mouse aims; WASD thrust;
+  Space/Ctrl up·down; Q/E roll; Shift boost. Implemented in `ship.gd`. (Base decided
+  2026-06-12; the "N.O.V.A.-style" framing is dropped — the game has grown its own
+  feel.) On top of the base model:
+  - **Warp / FTL** — Vela (and Raptor in Warp mode) spool a warp drive up over time
+    toward lightyear-class cruise, then back down; combat + crosshair disable while
+    hypersonic.
+  - **Free-look** — hold RMB or T to orbit the camera; release snaps back behind.
+  - **Approach speed limit** — flight eases down as you near a body for stable
+    scanning, but is free to escape away from it.
+- **Esc / cursor & Settings (changed):** Esc no longer just frees the cursor as a
+  one-shot — it toggles mouse capture (press again to recapture and fly). A Settings
+  overlay (gear button) handles volume, sensitivity, glow, render scale, fullscreen.
+  (Updated 2026-06-13.)
