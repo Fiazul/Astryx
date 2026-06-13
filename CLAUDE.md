@@ -15,13 +15,13 @@ PC. Scope is intentionally small. No combat, no menus, no inventory.
 - **The fleet (she)** — swappable 3rd-person hulls, picked at the station. Roster
   lives in `SHIP_MODELS` (`ship.gd`). Default is Lyra.
   - **Lyra** — the default hull; the starter you launch in.
-  - **Stella** — the OG good girl: the original, balanced, dependable ride.
+  - **Stella** — the OG: the original, balanced, dependable ride.
     (The name once belonged to Lyra; it was freed up on 2026-06-12 and is now its
     own ship.)
   - **Raptor** — the dangerous one. Press **X** to flip her dual mode: Combat (a
     massive-fire-rate machine gun) ⇄ Warp (FTL, lightyear-class speed). Purple
     booster.
-  - **Vela** — the fast, sexy FTL cruiser. Her warp drive spools up and blazes
+  - **Vela** — the fast, sleek FTL cruiser. Her warp drive spools up and blazes
     across a system (~0.5 ly/s at full charge). Golden booster.
 - **Vortex** — the alien boss. A hostile hull scaled up huge with a red-hot menace
   tint; lives in the Alien Zone with the regular aliens and gets a boss HP banner on
