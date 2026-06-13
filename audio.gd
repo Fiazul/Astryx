@@ -49,7 +49,9 @@ var _explosion: AudioStreamPlayer
 
 # Per-ship loop streams (distinct timbre per hull, see tools/gen_engine_audio.py);
 # falls back to the shared engine_loop.ogg for any hull without a dedicated file.
-const SHIP_LOOPS := ["Lyra", "Stella", "Raptor", "Vela"]
+# "Raptor_Warp" is Raptor's second form (warp mode) — a thicker drive voice that
+# we swap to while warp is engaged; the fade/duck arc below is shared by all loops.
+const SHIP_LOOPS := ["Lyra", "Stella", "Raptor", "Raptor_Warp", "Vela"]
 
 var _eng_loop: AudioStreamPlayer
 var _eng_start: AudioStreamPlayer
@@ -125,9 +127,14 @@ func _select_ship_loop(ship_name: String) -> void:
 #   intensity : 0..1 throttle (how hard) — shapes cruise volume + pitch
 #   boost     : Shift held — louder, revved up higher/faster, eased in smoothly
 #   pitch_mul : per-ship pitch nudge layered on top of the distinct loop
+#   warp_mode : Raptor's second form is engaged — swap to its thicker drive voice
 # Plays a one-shot "start" whoosh on the rising edge, a "stop" whoosh on release,
 # and crossfades the continuous loop in between.
-func update_engine(ship_name: String, thrusting: bool, intensity: float, boost: bool, pitch_mul: float, delta: float) -> void:
+func update_engine(ship_name: String, thrusting: bool, intensity: float, boost: bool, pitch_mul: float, delta: float, warp_mode := false) -> void:
+	# Raptor's warp form rides on its own thicker loop; everything else (fade,
+	# duck, spool, pitch) is identical to the standard per-ship voice.
+	if warp_mode and ship_name == "Raptor":
+		ship_name = "Raptor_Warp"
 	_select_ship_loop(ship_name)
 	intensity = clampf(intensity, 0.0, 1.0)
 

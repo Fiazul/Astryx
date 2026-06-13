@@ -337,7 +337,7 @@ func fly(delta: float) -> void:
 	if audio:
 		var thrusting := local_accel != Vector3.ZERO
 		var ship_name: String = SHIP_MODELS[_current_model].name
-		audio.update_engine(ship_name, thrusting, clampf(throttle, 0.0, 1.0), boost > 1.0, _engine_pitch, delta)
+		audio.update_engine(ship_name, thrusting, clampf(throttle, 0.0, 1.0), boost > 1.0, _engine_pitch, delta, is_warp_mode())
 	if _engine_mat:  # fallback ship only
 		var e := 2.0 + throttle * 4.0
 		_engine_mat.emission_energy_multiplier = lerpf(

@@ -8,6 +8,13 @@ each ship in the fleet has its own engine voice:
   Raptor - dangerous low growl (deepest, rough harmonics + harder breathing)
   Vela   - sleek FTL whine (highest, bright, smooth)
 
+Raptor also has a SECOND FORM (warp mode), with its own thicker voice:
+
+  Raptor_Warp - the growl opened up: same deep fundamental, but a fuller
+                harmonic stack (more partials, stronger mid-body) and smoother
+                breathing, so the FTL drive reads as heavier/denser than the
+                combat growl. audio.gd swaps to this loop while warp mode is on.
+
 Each per-ship voice = base frequency + a harmonic mix + a tremolo "breathing"
 rate. ship.gd then layers a small per-ship pitch_scale and a boost-deepening on
 top of these, so the result is both timbre- and pitch-distinct.
@@ -44,6 +51,16 @@ SHIP_VOICES = {
         "base": 40.0,
         "harmonics": [0.52, 0.28, 0.18, 0.12],
         "tremolo": (6.5, 0.12),
+    },
+    "raptor_warp": {
+        # Raptor's second form (warp/FTL): the growl opened up into a THICKER
+        # drive. Same deep 40 Hz fundamental, but a fuller harmonic stack (extra
+        # partials, stronger mid-body) gives it real weight/density, and the
+        # breathing is slowed + softened so it reads as a sustained powerful
+        # drive rather than a menacing idle.
+        "base": 40.0,
+        "harmonics": [0.58, 0.44, 0.34, 0.26, 0.18, 0.12],
+        "tremolo": (3.0, 0.05),
     },
     "vela": {
         # Sleek FTL whine: highest base, bright high harmonics, very smooth breathing.
