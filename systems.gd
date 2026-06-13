@@ -50,18 +50,25 @@ static func arrival_pos(id: String) -> Vector3:
 		ALIEN: Vector3(0.0, 1.5, -7.0),
 	}.get(id, Vector3.ZERO)
 
-static func portal_pos(id: String) -> Vector3:
-	# Sol's portal sits out past Earth; the rest sit near each arrival point.
-	return {
-		SOL: Vector3(3.4, 1.7, -10.0), K2_18: Vector3(5.0, 0.8, -1.0),
-		PROXIMA: Vector3(4.0, 1.0, -1.5), TRAPPIST: Vector3(4.5, 1.0, -1.5),
-		ALIEN: Vector3(5.0, 1.0, -2.0),
-	}.get(id, Vector3.ZERO)
-
-# The wormhole (F) does one hop: Sol <-> K2-18. Every other system's portal
-# returns you to Sol. (The star map lets you fast-travel anywhere directly.)
-static func portal_dest(id: String) -> String:
-	return { SOL: K2_18, K2_18: SOL }.get(id, SOL)
+# Wormhole portals present in each system. Earth (Sol) has a SEPARATE portal for
+# each exoplanet destination — spread far apart, parked, clear of every other
+# object (Earth sits at the origin; the Sun is ~10 u out). Every other system
+# keeps a single portal back to Sol, pushed well out from its star (and well clear
+# of that system's station, which lives on the opposite side). The star map still
+# fast-travels anywhere directly. Each entry: { pos: local units, dest: system }.
+static func portals(id: String) -> Array:
+	match id:
+		SOL:
+			return [
+				{ "pos": Vector3(3.4, 1.7, -10.0),  "dest": K2_18 },
+				{ "pos": Vector3(-11.0, 2.0, -6.0), "dest": PROXIMA },
+				{ "pos": Vector3(8.0, -2.5, 8.0),   "dest": TRAPPIST },
+			]
+		K2_18:    return [{ "pos": Vector3(7.5, 1.0, -1.5),  "dest": SOL }]
+		PROXIMA:  return [{ "pos": Vector3(6.5, 1.2, -2.2),  "dest": SOL }]
+		TRAPPIST: return [{ "pos": Vector3(7.0, 1.2, -2.2),  "dest": SOL }]
+		ALIEN:    return [{ "pos": Vector3(7.5, 1.2, -3.0),  "dest": SOL }]
+		_:        return [{ "pos": Vector3(5.0, 1.0, -2.0),  "dest": SOL }]
 
 
 static func bodies(id: String) -> Array:

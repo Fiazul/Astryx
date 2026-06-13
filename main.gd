@@ -186,8 +186,9 @@ func _process(delta: float) -> void:
 	props.update(ship.true_pos, delta)
 	if wormhole.update(ship.true_pos, delta):
 		_arrive(wormhole.dest_id)
-	# Combat runs in normal flight (not mid-transit). Left mouse = fire.
-	if not ship.transiting:
+	# Combat runs in normal flight (not mid-transit, not docked). Docking at a
+	# station is a safe harbor — the fight pauses so you can swap ships in peace.
+	if not ship.transiting and not docked:
 		var firing := Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED \
 			and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) \
 			and not ship.is_hypersonic()        # no shooting at hypersonic speed
@@ -326,8 +327,11 @@ func _arrive(system_id: String) -> void:
 	ship.transiting = false
 	ship.face_toward(-ship.true_pos)          # look back toward the system's star
 	wormhole.set_system(system_id)
-	props.visible = (system_id == SystemDB.SOL)   # the station/astronaut are Sol-only
-	combat.reset(SystemDB.is_hostile(system_id))   # enemies only in hostile systems
+	props.set_system(system_id)                    # show this system's stations/probes
+	# A large alien swarm haunts every star except peaceful Sol; Vortex (the boss)
+	# still only holds the true hostile Alien zone.
+	var fight := system_id != SystemDB.SOL
+	combat.reset(fight, SystemDB.is_hostile(system_id))
 	_nav_index = -1                                # clear the waypoint in the new system
 	if docked:
 		_set_docked(false)
@@ -389,9 +393,9 @@ func _update_dock_ui() -> void:
 		return
 
 	hud.set_menu("")
-	# Docking is Sol-only (the station lives there).
+	# Docking: every system with a station has one (Earth + each exoplanet station).
 	var dock_dist := (props.dock_pos - ship.true_pos).length() \
-		if current_system == SystemDB.SOL and props.has_dock else INF
+		if props.has_dock else INF
 	_dock_in_range = dock_dist < props.dock_range
 	# Force-slow the ship as it enters the landing zone (smooth, proximity-based):
 	# 0 at the outer edge (dock_range + DOCK_SLOW_MARGIN), 1 once inside the pad.
@@ -404,11 +408,27 @@ func _update_dock_ui() -> void:
 		hud.set_hangar(false, PackedStringArray(), 0, "")
 		if _dock_in_range:
 			hud.set_prompt("» Press F to dock at %s «" % props.dock_name)
+		elif props.probe_in_range:
+			hud.set_prompt(_probe_readout())   # drift up to a probe -> monster data
 		elif wormhole.in_range(ship.true_pos):
 			hud.set_prompt("» Press F to enter the wormhole to %s  (%.0f ly) «"
 				% [SystemDB.display_name(wormhole.dest_id), wormhole.dest_ly])
 		else:
 			hud.set_prompt("")
+
+
+# Probe scan readout: the "monster data" a drifting probe reports for its sector
+# (how many hostiles, whether Vortex is here, your kill tally). Nothing else.
+func _probe_readout() -> String:
+	var t := combat.threat_report()
+	var out := "◇ PROBE SCAN · %s ◇\n" % SystemDB.display_name(current_system)
+	if int(t.total) <= 0:
+		return out + "No hostiles detected in this sector."
+	out += "Hostiles: %d / %d active\n" % [t.alive, t.total]
+	var boss: Dictionary = t.boss
+	if boss.alive:
+		out += "⚠ VORTEX present — %d/%d HP\n" % [boss.hp, boss.max]
+	return out + "Confirmed kills: %d" % t.kills
 
 
 func _ship_names() -> PackedStringArray:

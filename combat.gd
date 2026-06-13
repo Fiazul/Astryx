@@ -10,6 +10,7 @@ extends Node3D
 
 const ALIEN_MODELS := ["res://Spaceship (1).glb", "res://Spaceship (2).glb"]
 const ALIEN_COUNT := 3
+const SWARM_COUNT := 14           # "large chunk" of aliens around every non-Sol star
 const ALIEN_SIZE := 6.0           # big — longest axis in units
 const ALIEN_HP := 3
 const ALIEN_SPEED := 14.0
@@ -49,12 +50,16 @@ var _bolt_mesh: SphereMesh
 var _bolt_mat: StandardMaterial3D
 var _abolt_mat: StandardMaterial3D
 var _glow_tex: Texture2D
-var _ring_tex: Texture2D
+var _splatters: Array[Texture2D] = []    # irregular hit-spark shapes, picked at random
 
 
 func _ready() -> void:
 	_glow_tex = _make_glow()
-	_ring_tex = _make_ring()
+	# Bake a few random irregular spark shapes once; _hit_flash picks one per hit.
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 9137
+	for i in 5:
+		_splatters.append(_make_splatter(rng))
 	_bolt_mesh = SphereMesh.new()                # round "ball" bolts, slightly larger
 	_bolt_mesh.radius = 0.48
 	_bolt_mesh.height = 0.96
@@ -65,9 +70,12 @@ func _ready() -> void:
 	# No enemies spawn until main calls reset(true) for a hostile system.
 
 
-# Rebuild the fight when entering a system. `active` = this is a hostile (alien)
-# system; peaceful systems (Sol, exoplanet systems) spawn nothing.
-func reset(active := false) -> void:
+# Rebuild the fight when entering a system.
+#   active    : spawn an alien swarm here (every star except peaceful Sol)
+#   with_boss : also spawn Vortex (only the true hostile Alien zone)
+#   count     : swarm size (defaults to the big SWARM_COUNT)
+# Sol stays peaceful (active = false) — a safe home harbor.
+func reset(active := false, with_boss := false, count := SWARM_COUNT) -> void:
 	for a in _aliens:
 		if a.node != null:
 			a.node.queue_free()
@@ -80,9 +88,10 @@ func reset(active := false) -> void:
 	_abolts.clear()
 	player_hp = PLAYER_MAX_HP
 	if active:
-		for i in ALIEN_COUNT:
+		for i in count:
 			_aliens.append(_make_alien())
-		_aliens.append(_make_boss())   # Vortex
+		if with_boss:
+			_aliens.append(_make_boss())   # Vortex
 
 
 # Called by main each frame. `pressed` = is the fire button held.
@@ -193,6 +202,20 @@ func boss_state() -> Dictionary:
 		if a.is_boss:
 			return { "alive": a.alive, "hp": a.hp, "max": a.max_hp }
 	return { "alive": false, "hp": 0, "max": 1 }
+
+
+# Monster data for a probe scan: how many hostiles are loose, total swarm size,
+# whether Vortex is present/alive, and your running kill count.
+func threat_report() -> Dictionary:
+	var alive := 0
+	var total := 0
+	for a in _aliens:
+		if a.is_boss:
+			continue
+		total += 1
+		if a.alive:
+			alive += 1
+	return { "alive": alive, "total": total, "boss": boss_state(), "kills": kills }
 
 
 # ---------------------------------------------------------------------------
@@ -306,19 +329,21 @@ func _seg_point_dist(a: Vector3, b: Vector3, p: Vector3) -> float:
 	return p.distance_to(a + ab * t)
 
 
-# Clear, punchy hit explosion: a white-hot core, an orange fireball, and a fast
-# expanding shockwave ring — all additive so they pop against black space.
+# A small, soft spark where a bolt hits an enemy. Deliberately understated and
+# semi-transparent (and a random IRREGULAR shape, not a bright clean circle, that
+# fades out to a ragged edge) so it confirms the hit WITHOUT washing out the
+# crosshair hitmarker. No shockwave ring — that circle was the worst offender.
 func _hit_flash(at: Vector3, scale := 1.0) -> void:
-	# core + fireball
+	var tex: Texture2D = _splatters[randi() % _splatters.size()]
 	var layers := [
-		{ "size": 5.0, "grow": 2.2, "col": Color(1.0, 0.97, 0.8, 1.0),  "t": 0.26 },
-		{ "size": 10.0, "grow": 2.9, "col": Color(1.0, 0.5, 0.15, 0.9), "t": 0.32 },
+		{ "size": 2.4, "grow": 1.7, "col": Color(1.0, 0.95, 0.8, 0.45),  "t": 0.18 },
+		{ "size": 4.0, "grow": 2.0, "col": Color(1.0, 0.55, 0.2, 0.28),  "t": 0.22 },
 	]
 	for L in layers:
 		var mi := MeshInstance3D.new()
 		var q := QuadMesh.new(); q.size = Vector2(L.size, L.size) * scale
 		mi.mesh = q
-		mi.material_override = _flash_mat(_glow_tex, L.col)
+		mi.material_override = _flash_mat(tex, L.col)
 		mi.position = at
 		mi.scale = Vector3(0.3, 0.3, 0.3)
 		add_child(mi)
@@ -327,19 +352,6 @@ func _hit_flash(at: Vector3, scale := 1.0) -> void:
 			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 		tw.parallel().tween_property(mi.material_override, "albedo_color:a", 0.0, L.t)
 		tw.tween_callback(mi.queue_free)
-	# shockwave ring
-	var ring := MeshInstance3D.new()
-	var rq := QuadMesh.new(); rq.size = Vector2(8.0, 8.0) * scale
-	ring.mesh = rq
-	ring.material_override = _flash_mat(_ring_tex, Color(1.0, 0.85, 0.6, 0.9))
-	ring.position = at
-	ring.scale = Vector3(0.2, 0.2, 0.2)
-	add_child(ring)
-	var rt := create_tween()
-	rt.tween_property(ring, "scale", Vector3(3.6, 3.6, 3.6), 0.34)\
-		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
-	rt.parallel().tween_property(ring.material_override, "albedo_color:a", 0.0, 0.34)
-	rt.tween_callback(ring.queue_free)
 
 
 # A quick white flash sized to the enemy — it visibly reacts to being hit.
@@ -449,14 +461,26 @@ func _make_glow() -> Texture2D:
 	return ImageTexture.create_from_image(img)
 
 
-# A bright hollow ring (for the shockwave) — peaks at ~75% radius, fades each side.
-func _make_ring() -> Texture2D:
+# A random irregular spark "splatter": a bright core whose alpha fades out to a
+# ragged, NON-circular edge — the edge radius wobbles per-angle with a few random
+# harmonics. We bake a handful of these and pick one per hit so impacts vary.
+func _make_splatter(rng: RandomNumberGenerator) -> Texture2D:
 	var s := 64
 	var img := Image.create(s, s, false, Image.FORMAT_RGBA8)
 	var c := Vector2(s, s) * 0.5
+	# a few random angular harmonics define the ragged outline: [freq, amp, phase]
+	var terms := []
+	for i in rng.randi_range(3, 5):
+		terms.append([float(rng.randi_range(3, 9)), rng.randf_range(0.08, 0.20), rng.randf_range(0.0, TAU)])
 	for y in s:
 		for x in s:
-			var d := Vector2(x + 0.5, y + 0.5).distance_to(c) / (s * 0.5)
-			var a := pow(clampf(1.0 - absf(d - 0.78) / 0.22, 0.0, 1.0), 1.5)
+			var d := Vector2(x + 0.5, y + 0.5) - c
+			var r := d.length() / (s * 0.5)
+			var ang := atan2(d.y, d.x)
+			var edge := 0.52
+			for t in terms:
+				edge += t[1] * sin(ang * t[0] + t[2])
+			edge = clampf(edge, 0.16, 0.96)
+			var a := pow(clampf(1.0 - r / edge, 0.0, 1.0), 1.7)   # bright core, soft ragged fade
 			img.set_pixel(x, y, Color(1, 1, 1, a))
 	return ImageTexture.create_from_image(img)

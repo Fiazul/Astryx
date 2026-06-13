@@ -7,13 +7,17 @@ extends CanvasLayer
 #
 # main wires `main` (reads main.current_system, calls main.travel_to(id)).
 
-const DOT := 26.0           # star button diameter
-const FIELD_SCALE := 2.6    # galaxy-units -> pixels
-const FIELD_CENTER := Vector2(640, 396)
+const DOT := 20.0           # star button diameter
+const FIELD_SCALE := 2.1    # galaxy-units -> pixels
+# The chart now lives in a compact centered panel rather than the whole screen.
+const PANEL := Vector2(720, 460)
+const PANEL_POS := Vector2((1280 - 720) * 0.5, (720 - 460) * 0.5)
+const FIELD_CENTER := PANEL_POS + Vector2(PANEL.x * 0.5, PANEL.y * 0.5 + 24.0)
 
 var main: Node
 
-var _root: Control
+var _root: Control      # dim full-screen scrim
+var _panel: PanelContainer
 var _field: Control
 var _open := false
 
@@ -57,26 +61,60 @@ func _close() -> void:
 
 # ---------------------------------------------------------------------------
 func _build() -> void:
+	# Dim full-screen scrim (you can still see the stars faintly behind it).
 	_root = ColorRect.new()
-	_root.color = Color(0.01, 0.01, 0.04, 0.92)
+	_root.color = Color(0.01, 0.01, 0.04, 0.55)
 	_root.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_root.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(_root)
 
+	# Compact frosted-glass chart panel, centered.
+	_panel = PanelContainer.new()
+	_panel.position = PANEL_POS
+	_panel.size = PANEL
+	var frame := StyleBoxFlat.new()
+	frame.bg_color = Color(0, 0, 0, 0)
+	frame.set_border_width_all(2)
+	frame.border_color = Color(0.45, 0.85, 1.0, 0.9)
+	frame.set_corner_radius_all(8)
+	frame.shadow_color = Color(0.3, 0.7, 1.0, 0.35)
+	frame.shadow_size = 14
+	_panel.add_theme_stylebox_override("panel", frame)
+	_root.add_child(_panel)
+
+	var bg := TextureRect.new()
+	var grad := Gradient.new()
+	grad.set_color(0, Color(0.06, 0.11, 0.19, 0.97))
+	grad.set_color(1, Color(0.01, 0.02, 0.05, 0.97))
+	var gt := GradientTexture2D.new()
+	gt.gradient = grad
+	gt.fill = GradientTexture2D.FILL_LINEAR
+	gt.fill_from = Vector2(0, 0)
+	gt.fill_to = Vector2(0, 1)
+	gt.width = 8; gt.height = 64
+	bg.texture = gt
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	bg.stretch_mode = TextureRect.STRETCH_SCALE
+	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_panel.add_child(bg)
+
 	var title := Label.new()
 	title.text = "STAR  MAP"
-	title.position = Vector2(0, 28)
-	title.size = Vector2(1280, 40)
+	title.position = PANEL_POS + Vector2(0, 16)
+	title.size = Vector2(PANEL.x, 30)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_font_size_override("font_size", 30)
+	title.add_theme_font_size_override("font_size", 22)
 	title.add_theme_color_override("font_color", Color(0.6, 1.0, 0.95))
+	title.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.7))
+	title.add_theme_constant_override("shadow_offset_y", 2)
 	_root.add_child(title)
 
 	var hint := Label.new()
 	hint.text = "click a system to jump  ·  M / Esc to close"
-	hint.position = Vector2(0, 72)
-	hint.size = Vector2(1280, 24)
+	hint.position = PANEL_POS + Vector2(0, 46)
+	hint.size = Vector2(PANEL.x, 20)
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hint.add_theme_font_size_override("font_size", 12)
 	hint.add_theme_color_override("font_color", Color(0.7, 0.75, 0.85))
 	_root.add_child(hint)
 
@@ -96,16 +134,18 @@ func _refresh() -> void:
 	for id in ids:
 		screen[id] = FIELD_CENTER + SystemDB.galaxy_pos(id) * FIELD_SCALE
 
-	# Wormhole routes (drawn first, behind the stars).
+	# Wormhole routes (drawn first, behind the stars). A system can have several
+	# portals (Earth has one per destination), so draw a line for each.
 	for id in ids:
-		var dest: String = SystemDB.portal_dest(id)
-		if screen.has(dest):
-			var ln := Line2D.new()
-			ln.add_point(screen[id])
-			ln.add_point(screen[dest])
-			ln.width = 2.0
-			ln.default_color = Color(0.45, 0.35, 0.85, 0.5)
-			_field.add_child(ln)
+		for portal in SystemDB.portals(id):
+			var dest: String = portal.dest
+			if screen.has(dest):
+				var ln := Line2D.new()
+				ln.add_point(screen[id])
+				ln.add_point(screen[dest])
+				ln.width = 2.0
+				ln.default_color = Color(0.45, 0.35, 0.85, 0.5)
+				_field.add_child(ln)
 
 	# Stars.
 	for id in ids:
@@ -131,10 +171,13 @@ func _refresh() -> void:
 		var ly: float = SystemDB.light_years(id)
 		lbl.text = "%s\n%s" % [SystemDB.display_name(id),
 			"you are here" if here else "%.0f ly" % ly]
-		lbl.position = pos + Vector2(-90, DOT * 0.5 + 4)
-		lbl.size = Vector2(180, 40)
+		lbl.position = pos + Vector2(-80, DOT * 0.5 + 3)
+		lbl.size = Vector2(160, 34)
 		lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		lbl.add_theme_font_size_override("font_size", 12)
 		lbl.add_theme_color_override("font_color", col)
+		lbl.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.7))
+		lbl.add_theme_constant_override("shadow_offset_y", 1)
 		_field.add_child(lbl)
 
 

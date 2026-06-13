@@ -1,40 +1,98 @@
 class_name Props
 extends Node3D
-# Hand-placed GLB landmarks (space station, a detailed planet, a drifting
-# astronaut) tracked with floating origin: each has a true_pos in game units and
-# is rendered at (true_pos - ship_pos) every frame, just like the planets.
+# Hand-placed GLB landmarks (space stations, an astronaut, drifting probes) tracked
+# with floating origin: each has a true_pos in game units and is rendered at
+# (true_pos - ship_pos) every frame, just like the planets.
+#
+# Each prop is tagged with the star system it belongs to; only the props for the
+# currently-loaded system are shown (set_system, called from main on arrival).
 #
 # These are decorative points-of-interest — no collision. They're auto-fitted to
 # a target size and self-lit (no Light3D in the scene), then slowly spun.
-
-# The space station is the ONE invented object (per spec) — a design placement,
-# not real data: a small offset from Earth (the origin), in a slow low orbit.
-# Finn the astronaut is a fictional character, drifting nearby as set-dressing.
-# (No fake planets here — every celestial body is real, in ephemeris.gd.)
+#
+# Two special kinds:
+#   dock  — the Sol station you can land at (ship-swap hangar); Sol-only.
+#   probe — a drifting deep-space probe. Fly close and it reports the local
+#           "monster data" (hostiles in this system); see Main's probe readout.
 #
 # pos = absolute scene units (1u = 0.1 AU). size = longest-axis target.
 # yaw = initial facing. spin = rad/s idle self-rotation. glow = self-illum.
-# orbit = rad/s revolution around Earth/origin (0 = parked).
+# orbit = rad/s revolution around the system's star/origin (0 = parked).
+# system = which star system this prop lives in (defaults to Sol).
+const PROBE_SCAN_RANGE := 9.0    # fly within this of a probe to read its scan
+
 const PROP_LIST := [
+	# --- Sol: the home station (dockable) + Finn, drifting nearby ---
 	{
-		"name": "Wikiplanet Station", "path": "res://Wikiplanet Space Station (WSS).glb",
+		"name": "", "path": "res://Wikiplanet Space Station (WSS).glb",
+		"system": "sol",
 		"pos": Vector3(-4.5, 1.5, 1.5), "size": 1.8, "yaw": 25.0, "spin": 0.03, "glow": 0.18,
 		"orbit": 0.04, "dock": true, "dock_range": 4.0,
 	},
 	{
 		"name": "Finn", "path": "res://Astronaut.glb",
+		"system": "sol",
 		"pos": Vector3(-4.0, 1.2, 1.0), "size": 0.5, "yaw": 200.0, "spin": 0.35, "glow": 0.45,
 		"orbit": 0.04,
 	},
+
+	# --- One BIG dockable station per exoplanet system. You can land at each (F)
+	#     and swap ships in its hangar, just like Earth's. They're large hulls, so
+	#     they're parked far out (~14 u from the star at the origin: their hull
+	#     half-extent is ~5 u, leaving them ~9 u clear of the star and the planets
+	#     that cluster within ~1.5 u). Placed on the OPPOSITE side from this
+	#     system's wormhole portal (portals sit at +x/-z, ~7-8 u out) and from the
+	#     arrival point, so there's no clash with the wormhole and they sit away
+	#     from where the alien swarm spawns/fights. Parked, not orbiting. ---
+	{
+		"name": "K2-18 Station", "path": "res://International Space Station.glb",
+		"system": "k2-18",
+		"pos": Vector3(-11.0, 1.5, 9.0), "size": 9.0, "yaw": 30.0, "spin": 0.03, "glow": 0.5,
+		"dock": true, "dock_range": 8.0,
+	},
+	{
+		"name": "Proxima Station", "path": "res://space station.glb",
+		"system": "proxima",
+		"pos": Vector3(-10.5, 1.2, 9.5), "size": 11.0, "yaw": 60.0, "spin": 0.025, "glow": 0.5,
+		"dock": true, "dock_range": 9.0,
+	},
+	{
+		"name": "TRAPPIST Outpost", "path": "res://space pod.glb",
+		"system": "trappist",
+		"pos": Vector3(-11.0, 1.5, 8.5), "size": 8.0, "yaw": 15.0, "spin": 0.04, "glow": 0.55,
+		"dock": true, "dock_range": 7.5,
+	},
+
+	# --- Drifting probes (scannable): scattered through the hostile systems, away
+	#     from Earth. Each reports local monster data when you fly close. ---
+	{ "name": "Probe", "path": "res://Space probe.glb", "system": "k2-18", "probe": true,
+		"pos": Vector3(-3.2, 1.3, 2.6), "size": 0.9, "yaw": 0.0, "spin": 0.5, "glow": 0.5 },
+	{ "name": "Probe", "path": "res://Space probe.glb", "system": "k2-18", "probe": true,
+		"pos": Vector3(-2.0, -1.3, 4.2), "size": 0.9, "yaw": 120.0, "spin": 0.6, "glow": 0.5 },
+	{ "name": "Probe", "path": "res://Space probe.glb", "system": "proxima", "probe": true,
+		"pos": Vector3(-2.8, 0.9, 2.9), "size": 0.9, "yaw": 40.0, "spin": 0.55, "glow": 0.5 },
+	{ "name": "Probe", "path": "res://Space probe.glb", "system": "proxima", "probe": true,
+		"pos": Vector3(-2.2, 1.4, 4.0), "size": 0.9, "yaw": 200.0, "spin": 0.45, "glow": 0.5 },
+	{ "name": "Probe", "path": "res://Space probe.glb", "system": "trappist", "probe": true,
+		"pos": Vector3(-3.0, -0.8, 2.7), "size": 0.9, "yaw": 80.0, "spin": 0.6, "glow": 0.5 },
+	{ "name": "Probe", "path": "res://Space probe.glb", "system": "trappist", "probe": true,
+		"pos": Vector3(-2.4, 1.0, 4.0), "size": 0.9, "yaw": 300.0, "spin": 0.5, "glow": 0.5 },
+	{ "name": "Probe", "path": "res://Space probe.glb", "system": "alien", "probe": true,
+		"pos": Vector3(-3.4, 1.6, 3.0), "size": 0.9, "yaw": 160.0, "spin": 0.6, "glow": 0.5 },
 ]
 
 var _items := []
+var current_system := "sol"
 
-# Dock target (the prop flagged "dock"), read by main for the dock prompt/menu.
+# Dock target (the prop flagged "dock") for the current system, read by main.
 var has_dock := false
 var dock_pos := Vector3.ZERO
 var dock_name := ""
 var dock_range := 0.0
+
+# Probe scan: set each frame — is the ship within range of a probe right now?
+var probe_in_range := false
+var probe_name := ""
 
 
 func _ready() -> void:
@@ -63,28 +121,49 @@ func _ready() -> void:
 			label.no_depth_test = true
 			add_child(label)
 
-		var is_dock: bool = p.get("dock", false)
 		_items.append({
 			"holder": holder,
 			"label": label,
+			"name": p.get("name", ""),
+			"system": p.get("system", "sol"),
 			"pos": p.pos,
 			"up": float(p.size) * 0.7,      # label height above the prop
 			"spin": float(p.get("spin", 0.0)),
-			"orbit": float(p.get("orbit", 0.0)),   # revolution around Earth/origin
+			"orbit": float(p.get("orbit", 0.0)),   # revolution around the star/origin
 			"cull": float(p.size) * 90.0,   # stop drawing big meshy props when far
-			"is_dock": is_dock,
+			"is_dock": bool(p.get("dock", false)),
+			"is_probe": bool(p.get("probe", false)),
+			"dock_range": float(p.get("dock_range", float(p.size) * 1.8)),
 		})
 
-		if is_dock:
+	set_system(current_system)
+
+
+# Switch to a system: show only its props and recompute the dock target. Called
+# by main on arrival (replaces the old Sol-only visibility toggle).
+func set_system(id: String) -> void:
+	current_system = id
+	has_dock = false
+	dock_name = ""
+	for it in _items:
+		var here: bool = it.system == id
+		it.holder.visible = here
+		if it.label != null:
+			it.label.visible = here
+		if here and it.is_dock:
 			has_dock = true
-			dock_pos = p.pos
-			dock_name = p.name
-			dock_range = float(p.get("dock_range", float(p.size) * 1.8))
+			dock_pos = it.pos
+			dock_name = it.name
+			dock_range = it.dock_range
 
 
 func update(ship_pos: Vector3, delta: float) -> void:
+	probe_in_range = false
+	probe_name = ""
 	for it in _items:
-		# Slow revolution around Earth (the origin), if this prop orbits.
+		if it.system != current_system:
+			continue
+		# Slow revolution around the star (the origin), if this prop orbits.
 		if it.orbit != 0.0:
 			it.pos = it.pos.rotated(Vector3.UP, it.orbit * delta)
 			if it.is_dock:
@@ -96,6 +175,9 @@ func update(ship_pos: Vector3, delta: float) -> void:
 		it.holder.visible = vis
 		if vis and it.spin != 0.0:
 			it.holder.rotate_y(it.spin * delta)
+		if it.is_probe and dist < PROBE_SCAN_RANGE:
+			probe_in_range = true
+			probe_name = it.name
 		if it.label != null:
 			it.label.visible = vis
 			if vis:

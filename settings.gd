@@ -9,7 +9,15 @@ extends CanvasLayer
 
 const SENS_MIN := 0.0008
 const SENS_MAX := 0.0050
-const RENDER_SCALES := [1.0, 0.75, 0.5]   # matches the OptionButton rows below
+# Render scale doubles as a supersampling control: >100% renders the 3D scene at
+# a higher internal resolution and downsamples — "ultra resolution", crisp and
+# alias-free, at a GPU cost. <100% is the performance path on weak hardware.
+const RENDER_SCALES := [2.0, 1.5, 1.0, 0.75, 0.5]   # matches the OptionButton rows below
+const RENDER_LABELS := ["200%  (Ultra)", "150%", "100%", "75%", "50%"]
+
+# One-click graphics presets. Each tunes render scale + anti-aliasing + glow
+# together so the player can jump straight to the highest settings ("Ultra").
+const QUALITY := ["Ultra", "High", "Balanced", "Performance"]
 
 var ship: Ship
 var env: Environment
@@ -18,6 +26,8 @@ var _root: Control          # dim + panel; visibility is the open/closed state
 var _open := false
 var _master_bus := 0
 var _fs_check: CheckButton
+var _rs_option: OptionButton   # render-scale dropdown (kept so presets can drive it)
+var _glow_option: OptionButton # glow dropdown (kept so presets can drive it)
 
 
 func _ready() -> void:
@@ -90,6 +100,14 @@ func _build() -> void:
 
 	col.add_child(_title("SETTINGS"))
 
+	# --- Graphics Quality preset (top: drives the GFX rows below in one click) ---
+	var quality := OptionButton.new()
+	for q in QUALITY:
+		quality.add_item(q)
+	quality.selected = 0   # default the dropdown to Ultra (the rows reflect live state)
+	quality.item_selected.connect(_on_quality)
+	col.add_child(_row("Graphics Quality", quality))
+
 	# --- Master Volume ---
 	var vol := _slider(0.0, 1.0, 0.01, db_to_linear(AudioServer.get_bus_volume_db(_master_bus)))
 	vol.value_changed.connect(_on_volume)
@@ -103,23 +121,22 @@ func _build() -> void:
 	col.add_child(_row("Mouse Sensitivity", sens))
 
 	# --- Glow quality ---
-	var glow := OptionButton.new()
-	glow.add_item("High")   # index 0
-	glow.add_item("Low")    # index 1
-	glow.selected = 0 if (env != null and env.glow_enabled) else 1
-	glow.item_selected.connect(_on_glow)
-	col.add_child(_row("Glow", glow))
+	_glow_option = OptionButton.new()
+	_glow_option.add_item("High")   # index 0
+	_glow_option.add_item("Low")    # index 1
+	_glow_option.selected = 0 if (env != null and env.glow_enabled) else 1
+	_glow_option.item_selected.connect(_on_glow)
+	col.add_child(_row("Glow", _glow_option))
 
-	# --- Render scale ---
-	var rs := OptionButton.new()
-	rs.add_item("100%")
-	rs.add_item("75%")
-	rs.add_item("50%")
-	rs.selected = RENDER_SCALES.find(get_viewport().scaling_3d_scale)
-	if rs.selected < 0:
-		rs.selected = 0
-	rs.item_selected.connect(_on_render_scale)
-	col.add_child(_row("Render Scale", rs))
+	# --- Render scale (incl. >100% ultra-resolution supersampling) ---
+	_rs_option = OptionButton.new()
+	for lbl in RENDER_LABELS:
+		_rs_option.add_item(lbl)
+	_rs_option.selected = RENDER_SCALES.find(get_viewport().scaling_3d_scale)
+	if _rs_option.selected < 0:
+		_rs_option.selected = RENDER_SCALES.find(1.0)
+	_rs_option.item_selected.connect(_on_render_scale)
+	col.add_child(_row("Render Scale", _rs_option))
 
 	# --- Fullscreen ---
 	_fs_check = CheckButton.new()
@@ -148,7 +165,56 @@ func _on_glow(idx: int) -> void:
 		env.glow_enabled = (idx == 0)
 
 func _on_render_scale(idx: int) -> void:
-	get_viewport().scaling_3d_scale = RENDER_SCALES[idx]
+	_apply_render_scale(RENDER_SCALES[idx])
+
+func _apply_render_scale(scale: float) -> void:
+	var vp := get_viewport()
+	vp.scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
+	vp.scaling_3d_scale = scale
+
+
+# One-click preset: set render scale, MSAA, screen-space AA and glow together.
+# "Ultra" = supersampled 2x with 8x MSAA — the highest the player can pick.
+func _on_quality(idx: int) -> void:
+	var vp := get_viewport()
+	var scale := 1.0
+	match idx:
+		0:   # Ultra — supersample + maximum AA + glow
+			scale = 2.0
+			vp.msaa_3d = Viewport.MSAA_8X
+			vp.screen_space_aa = Viewport.SCREEN_SPACE_AA_DISABLED
+			vp.use_taa = true
+			if env != null:
+				env.glow_enabled = true
+		1:   # High — native res, strong MSAA + glow
+			scale = 1.0
+			vp.msaa_3d = Viewport.MSAA_4X
+			vp.screen_space_aa = Viewport.SCREEN_SPACE_AA_DISABLED
+			vp.use_taa = false
+			if env != null:
+				env.glow_enabled = true
+		2:   # Balanced — native res, light AA + glow
+			scale = 1.0
+			vp.msaa_3d = Viewport.MSAA_2X
+			vp.screen_space_aa = Viewport.SCREEN_SPACE_AA_FXAA
+			vp.use_taa = false
+			if env != null:
+				env.glow_enabled = true
+		3:   # Performance — lower res, no MSAA, no glow
+			scale = 0.75
+			vp.msaa_3d = Viewport.MSAA_DISABLED
+			vp.screen_space_aa = Viewport.SCREEN_SPACE_AA_FXAA
+			vp.use_taa = false
+			if env != null:
+				env.glow_enabled = false
+	_apply_render_scale(scale)
+	# Reflect the preset in the individual GFX rows.
+	if _rs_option != null:
+		var ri := RENDER_SCALES.find(scale)
+		if ri >= 0:
+			_rs_option.selected = ri
+	if _glow_option != null:
+		_glow_option.selected = 0 if (env != null and env.glow_enabled) else 1
 
 func _is_fullscreen() -> bool:
 	var m := get_window().mode
