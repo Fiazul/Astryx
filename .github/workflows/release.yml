@@ -1,0 +1,78 @@
+name: Release
+
+# Publish a GitHub Release with Windows + Linux builds whenever a version tag is
+# pushed (e.g. `git tag v0.5.0 && git push origin v0.5.0`). Mirrors build.sh, but
+# uses the official Godot binary instead of the local flatpak.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:        # also runnable by hand from the Actions tab
+    inputs:
+      tag:
+        description: "Tag/name for a manual release"
+        required: true
+
+permissions:
+  contents: write           # needed to create the release + upload assets
+
+env:
+  GODOT_VERSION: "4.6.3"    # bump together with build.sh / export_presets.cfg
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve release tag
+        id: tag
+        run: echo "tag=${GITHUB_REF_NAME:-${{ github.event.inputs.tag }}}" >> "$GITHUB_OUTPUT"
+
+      - name: Download Godot ${{ env.GODOT_VERSION }} (headless) + export templates
+        run: |
+          set -euo pipefail
+          BASE="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable"
+          curl -L -o godot.zip      "${BASE}/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          curl -L -o templates.tpz  "${BASE}/Godot_v${GODOT_VERSION}-stable_export_templates.tpz"
+          unzip -o godot.zip
+          mv "Godot_v${GODOT_VERSION}-stable_linux.x86_64" /usr/local/bin/godot
+          chmod +x /usr/local/bin/godot
+          # Templates live under ~/.local/share/godot/export_templates/<version>.stable/
+          TPL_DIR="${HOME}/.local/share/godot/export_templates/${GODOT_VERSION}.stable"
+          mkdir -p "${TPL_DIR}"
+          unzip -o templates.tpz -d /tmp/tpl > /dev/null
+          mv /tmp/tpl/templates/* "${TPL_DIR}/"
+
+      - name: Import project resources
+        run: godot --headless --path . --import 2>&1 | tail -n 20 || true
+
+      - name: Export builds
+        run: |
+          set -euo pipefail
+          mkdir -p builds/windows builds/linux
+          godot --headless --path . --export-release "Windows Desktop" builds/windows/Astryx.exe
+          godot --headless --path . --export-release "Linux/X11"        builds/linux/Astryx.x86_64
+          chmod +x builds/linux/Astryx.x86_64
+          test -f builds/windows/Astryx.exe   || { echo "Windows export failed"; exit 1; }
+          test -f builds/linux/Astryx.x86_64  || { echo "Linux export failed";   exit 1; }
+
+      - name: Package archives
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.tag.outputs.tag }}"
+          mkdir -p dist
+          (cd builds/windows && zip -9 "../../dist/Astryx-${TAG}-windows.zip" Astryx.exe)
+          (cd builds/linux   && zip -9 "../../dist/Astryx-${TAG}-linux.zip"   Astryx.x86_64)
+          ls -la dist
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: Astryx ${{ steps.tag.outputs.tag }}
+          generate_release_notes: true
+          files: |
+            dist/Astryx-${{ steps.tag.outputs.tag }}-windows.zip
+            dist/Astryx-${{ steps.tag.outputs.tag }}-linux.zip
