@@ -27,10 +27,12 @@ const SHIP_MODELS := [
 	{ "name": "Lyra",   "path": "res://Rocket ship.glb",   "tint": Color(1.0, 1.0, 1.0),    "length": 4.0, "yaw": 180.0, "pitch": 0.0, "glow": 0.0, "engine_pitch": 1.0 },
 	{ "name": "Stella", "path": "res://Spaceship.glb",     "tint": Color(0.70, 0.62, 0.95), "length": 3.5, "yaw": 180.0, "pitch": 0.0, "glow": 0.0, "engine_pitch": 0.92 },
 	{ "name": "Raptor", "path": "res://Spaceship (2).glb", "tint": Color(0.70, 0.90, 0.95), "length": 3.8, "yaw": 180.0, "pitch": 0.0, "glow": 0.0, "fire_cd": 0.05, "dual": true, "engine_pitch": 0.82 },
-	# Vela: the FTL ship. warp 1581 -> max cruise ≈ 0.5 ly/s at full charge
+	# Vela: the FTL ship. warp 7905 -> max cruise ≈ 2.5 ly/s at full charge
 	# (THRUST·warp/DAMPING, 1 ly = 632,411 units). Her drive spools up over time
 	# (see WARP_CHARGE_*), so she eases into warp rather than snapping to it.
-	{ "name": "Vela",   "path": "res://Spaceship (3).glb", "tint": Color(0.55, 0.80, 1.0),  "length": 3.8, "yaw": 180.0, "pitch": 0.0, "glow": 0.0, "warp": 1581.0, "engine_pitch": 1.14 },
+	# "brake": her ultimate — tap S for a near-instant full stop (she's so fast that
+	# stopping at a star is otherwise brutal; the air-brake makes her usable).
+	{ "name": "Vela",   "path": "res://Spaceship (3).glb", "tint": Color(0.55, 0.80, 1.0),  "length": 3.8, "yaw": 180.0, "pitch": 0.0, "glow": 0.0, "warp": 7905.0, "engine_pitch": 1.14, "brake": true },
 	# Vortex retired as a player ship — it's a boss enemy now (see combat.gd boss).
 ]
 const BOOSTER_COLOR := Color(0.35, 0.8, 1.0)
@@ -89,6 +91,7 @@ const MAX_SPEED := 1000.0
 # Damping vs thrust sets the real cruise speed (~THRUST/DAMPING ≈ 200 u/s here,
 # ~600 boosted) — MAX_SPEED is just a ceiling. Tune feel with THRUST/DAMPING.
 const DAMPING := 1.1          # higher = eases to a stop faster when idle
+const FULL_STOP_RATE := 30.0  # Vela's air-brake: how hard S slams velocity to ~0
 const MOUSE_SENS := 0.0022    # default; runtime value lives in `mouse_sens` (Settings menu)
 const ROLL_RATE := 1.8        # manual Q/E roll (rad/s)
 const BANK_ANGLE := 0.5       # max cosmetic bank into turns (rad)
@@ -152,6 +155,7 @@ func is_warp_mode() -> bool:
 
 var _current_model := 0        # index into SHIP_MODELS
 var _engine_pitch := 1.0       # per-ship engine voice character (set on build)
+var _can_brake := false        # Vela: tap S for a near-instant full stop (her ultimate)
 var _mesh_root: Node3D
 var _engine_mat: StandardMaterial3D   # only used by the primitive fallback
 var _boosters: Array = []
@@ -256,9 +260,11 @@ func fly(delta: float) -> void:
 	var fwd := 0.0
 	var strafe := 0.0
 	var lift := 0.0
+	# On a brake ship (Vela) S is the air-brake, not reverse thrust (handled below).
+	var braking := _can_brake and Input.is_physical_key_pressed(KEY_S)
 	if Input.is_physical_key_pressed(KEY_W):
 		fwd -= 1.0
-	if Input.is_physical_key_pressed(KEY_S):
+	if Input.is_physical_key_pressed(KEY_S) and not _can_brake:
 		fwd += 1.0
 	if Input.is_physical_key_pressed(KEY_A):
 		strafe -= 1.0
@@ -289,6 +295,11 @@ func fly(delta: float) -> void:
 
 	# Arcade damping: velocity eases toward zero when you're not thrusting.
 	velocity = velocity.lerp(Vector3.ZERO, clampf(DAMPING * delta, 0.0, 1.0))
+	# Vela's ultimate: tap S to slam to a near-instant stop and drop the warp charge,
+	# so she can actually park at a star despite her absurd top speed.
+	if braking:
+		velocity = velocity.lerp(Vector3.ZERO, clampf(FULL_STOP_RATE * delta, 0.0, 1.0))
+		_warp_charge = 0.0
 	# Warp ships (Vela) break physics: huge cap, and they ignore the gravity-well
 	# slowdown so they can blast across a system. Normal ships obey speed_limit.
 	var cap := MAX_SPEED * eff_warp * boost
@@ -457,6 +468,7 @@ func _build_ship_model(idx: int) -> void:
 	fire_cooldown = float(info.get("fire_cd", 0.22))
 	_dual = info.get("dual", false)
 	_engine_pitch = float(info.get("engine_pitch", 1.0))
+	_can_brake = info.get("brake", false)
 	_warp_charge = 0.0
 	var packed := load(info.path) as PackedScene
 	if packed == null:

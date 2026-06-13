@@ -12,11 +12,11 @@ const EXPLOSION_DB := -3.0
 # Mix intent: the engine is present and has weight, but the music still leads.
 # Cruise sits just above the bgm (≈ -24 dB) so you clearly feel the engine; Shift
 # opens it up into a powerful roar. Gunfire still punches over everything.
-const ENGINE_LOOP_DB := -19.0   # cruise at full throttle — clearly audible
-const ENGINE_QUIET_DB := -30.0  # barely on the gas — quiet idle
-const ENGINE_BOOST_DB := 8.0    # Shift = powerful: a big, deep surge of body
+const ENGINE_LOOP_DB := -23.0   # cruise — present but gentle; the bgm is the star
+const ENGINE_QUIET_DB := -34.0  # barely on the gas — quiet idle
+const ENGINE_BOOST_DB := 7.0    # Shift = a noticeable surge (peak still tasteful)
 const ENGINE_OFF_DB := -60.0    # effectively silent (loop fades here, then pauses)
-const ENGINE_TRANS_DB := -15.0  # the one-shot start/stop "whoosh"
+const ENGINE_TRANS_DB := -19.0  # the one-shot start/stop "whoosh" — soft
 # Pitch shapes the character. Normal flight sits LOW/deep; Shift revs it UP into a
 # faster, higher note (and we smooth harder so it glides in rather than snapping).
 const ENGINE_PITCH_IDLE := 0.82
@@ -26,10 +26,12 @@ const ENGINE_PITCH_BOOST := 1.10
 const ENGINE_SMOOTH := 4.5      # normal ease toward target volume/pitch (per second)
 const ENGINE_SMOOTH_BOOST := 2.5  # gentler ease while boosting -> "even smoother"
 # Continuous-drive arc — the longer you hold a run, the more the mix moves from
-# engine to music. This same clock (drive_time()) also gates the bgm fade-in:
+# engine to music. This same clock (drive_time()) gates the bgm fade-in, and the
+# engine fade-out is coupled to it: the moment the music starts coming up, the
+# engine starts backing off, so they cross over as one motion (every ship):
 #   0 .. MUSIC_IN_TIME (8s)   engine only, no music
-#   MUSIC_IN_TIME ..          music fades in (handled in main._update_music)
-#   DUCK_START..DUCK_FULL     engine recedes so the music leads
+#   MUSIC_IN_TIME ..          music fades IN  *and* engine starts fading OUT
+#   ENGINE_DUCK_FULL          engine fully ducked; music leads
 # The clock climbs while driving and unwinds when you ease off (no hard reset, so a
 # brief coast doesn't restart the whole arc).
 const MUSIC_IN_TIME := 8.0          # music only after this many seconds of steady drive
@@ -37,9 +39,9 @@ const DRIVE_MAX := 20.0             # clock cap (seconds)
 const DRIVE_DECAY := 2.0            # how fast the clock unwinds when you let off
 const ENGINE_SPOOL_TIME := 12.0     # pitch spools up to its cruise note over this long
 const ENGINE_SUSTAIN_PITCH := 0.12  # pitch climbed at full cruise (×pitch_mul per ship)
-const ENGINE_DUCK_START := 12.0     # engine starts receding (music takes over) at...
-const ENGINE_DUCK_FULL := 15.0      # ...and is fully ducked by here
-const ENGINE_SUSTAIN_DUCK := 7.0    # dB the engine drops once fully ducked
+const ENGINE_DUCK_START := MUSIC_IN_TIME        # engine fades out exactly as the music fades in
+const ENGINE_DUCK_FULL := MUSIC_IN_TIME + 5.0   # fully ducked ~5s later, as the music settles
+const ENGINE_SUSTAIN_DUCK := 32.0   # dB the engine drops — once music is in, it's near-silent
 
 var _fire: Array[AudioStreamPlayer] = []
 var _fire_i := 0
@@ -159,9 +161,9 @@ func update_engine(ship_name: String, thrusting: bool, intensity: float, boost: 
 			target_db += ENGINE_BOOST_DB
 			target_pitch = ENGINE_PITCH_BOOST   # revved up — faster, higher
 		else:
-			# Settled cruise: recede under the music, and spool the pitch up a touch.
-			target_db -= ENGINE_SUSTAIN_DUCK * duck
-			target_pitch += ENGINE_SUSTAIN_PITCH * spool
+			target_pitch += ENGINE_SUSTAIN_PITCH * spool   # cruise spools pitch up a touch
+		# Once the music is in, the engine recedes to near-silent — boost included.
+		target_db -= ENGINE_SUSTAIN_DUCK * duck
 	target_pitch *= pitch_mul
 
 	# Ease toward the targets; boost uses a gentler rate for that smooth swell.
