@@ -11,6 +11,7 @@ const DIST_SCALE := 0.072       # units -> radar px (then clamped to the rim) â€
 
 # roles
 const BODY := 0
+const CAPTURED := 4   # a body you've captured (beacon planted) â€” shown gold with a ring
 const HOME := 1
 const NEAREST := 2
 const WORMHOLE := 3
@@ -58,6 +59,9 @@ func _draw() -> void:
 				draw_string(font, p + Vector2(8, 4), blip.name, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.6, 1.0, 1.0))
 			WORMHOLE:
 				draw_circle(p, 4.5, Color(1.0, 0.55, 0.15))
+			CAPTURED:
+				draw_circle(p, 3.5, Color(1.0, 0.84, 0.3))                 # gold beacon
+				draw_arc(p, 5.5, 0, TAU, 12, Color(1.0, 0.84, 0.3, 0.7), 1.5)
 			_:
 				draw_circle(p, 3.0, Color(0.8, 0.85, 0.95, 0.85))
 

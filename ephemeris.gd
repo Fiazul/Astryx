@@ -1,6 +1,6 @@
 class_name Ephemeris
 extends Node
-# REAL positions for Astryx. Earth is the anchor at the scene origin (0,0,0) —
+# REAL positions for Cold Light. Earth is the anchor at the scene origin (0,0,0) —
 # every coordinate here is GEOCENTRIC, the frame NASA RA/Dec are measured in.
 #
 # Two kinds of body, two truths:
@@ -40,7 +40,7 @@ const PLANETS := [
 	{ "name": "Venus",   "id": "299", "eq": Vector3(-0.5535,  0.9404,  0.4534), "radius": 5.3,  "mass": 0.815,    "color": Color(0.95, 0.85, 0.55) },
 	{ "name": "Mars",    "id": "499", "eq": Vector3( 1.4583,  1.4672,  0.6149), "radius": 3.0,  "mass": 0.107,    "color": Color(0.90, 0.40, 0.20) },
 	{ "name": "Jupiter", "id": "599", "eq": Vector3(-2.6447,  4.9896,  2.2115), "radius": 20.0, "mass": 317.8,    "color": Color(0.85, 0.72, 0.52) },
-	{ "name": "Saturn",  "id": "699", "eq": Vector3( 9.5512,  2.1483,  0.5020), "radius": 17.0, "mass": 95.2,     "color": Color(0.88, 0.78, 0.55) },
+	{ "name": "Saturn",  "id": "699", "eq": Vector3( 9.5512,  2.1483,  0.5020), "radius": 17.0, "mass": 95.2,     "color": Color(0.88, 0.78, 0.55), "ring": true },
 	{ "name": "Uranus",  "id": "799", "eq": Vector3( 9.4808, 16.6122,  7.1397), "radius": 8.4,  "mass": 14.5,     "color": Color(0.55, 0.82, 0.88) },
 	{ "name": "Neptune", "id": "899", "eq": Vector3(30.0174,  2.1421,  0.1558), "radius": 8.0,  "mass": 17.1,     "color": Color(0.30, 0.50, 0.95) },
 	# The Voyagers — real interstellar probes, fetched LIVE from Horizons (spacecraft

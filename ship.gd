@@ -38,9 +38,13 @@ const SHIP_MODELS := [
 	# "brake": her ultimate — hold R to ease to a full stop (she's so fast that stopping
 	# at a star is otherwise brutal; the air-brake makes her usable). Squishy hull.
 	{ "name": "Vela",   "path": "res://Spaceship (3).glb", "tint": Color(0.55, 0.80, 1.0),  "length": 0.42, "yaw": 180.0, "pitch": 0.0, "glow": 0.0, "warp": 5749.0, "engine_pitch": 1.14, "brake": true, "hp": 120, "bolt_scale": 0.9, "bolt_speed": 1050.0, "fire_cd": 0.05, "dmg": 2, "raw": true },
-	# Mule — a UTILITY hull: no weapons, very slow (0.001 ly), but a 1000-HP tank.
-	# Used later to tow/reposition stations. Three white-transparent boosters.
-	{ "name": "Mule",   "path": "res://utility_ship.glb",  "tint": Color(0.60, 0.66, 0.76), "length": 0.7,  "yaw": 0.0, "pitch": 0.0, "glow": 0.0, "warp": 3.0, "engine_pitch": 0.7, "hp": 1000, "can_fire": false, "raw": true },
+	# HaniStar — a slow, pretty support hull that CAN fight: fires a touch faster than
+	# Lyra, hits a bit harder than Stella, 125 HP. Three light-blue boosters.
+	# surf_roles indexes the GLB's 9 surfaces: gold = shiny rose-gold (7 = wings), glass =
+	# top-front canopy (3), orb = soft neon-pink accents, hull = pink crystal body.
+	# (4 = the two upright tail fins, kept pink hull.)
+	{ "name": "HaniStar",   "path": "res://utility_ship.glb",  "tint": Color(1.0, 0.412, 0.706), "length": 0.7,  "yaw": 90.0, "pitch": 0.0, "glow": 0.18, "warp": 3.0, "engine_pitch": 0.7, "hp": 125, "fire_cd": 0.24, "dmg": 2, "bolt_scale": 1.0, "bolt_speed": 900.0, "pbr": true,
+		"surf_roles": ["hull", "hull", "gold", "glass", "hull", "hull", "hull", "gold", "hull"] },
 	# Vortex retired as a player ship — it's a boss enemy now (see combat.gd boss).
 ]
 const BOOSTER_COLOR := Color(0.35, 0.8, 1.0)
@@ -70,10 +74,10 @@ const BOOSTER_LAYOUTS := {
 	"Raptor": [
 		Vector2( 0.00, -0.02),   # single, centered
 	],
-	"Mule": [
-		Vector2(-0.20,  0.00),   # left engine pod
-		Vector2( 0.20,  0.00),   # right engine pod
-		Vector2( 0.00,  0.04),   # central thruster
+	"HaniStar": [
+		Vector2( 0.00, -0.10),   # main central thruster, slightly low
+		Vector2(-0.30, -0.06),   # support booster, left side tucked against the hull
+		Vector2( 0.30, -0.06),   # support booster, right side tucked against the hull
 	],
 	"Vela": [
 		Vector2(-0.05, -0.01),   # twin engines, tight on the central block
@@ -82,16 +86,30 @@ const BOOSTER_LAYOUTS := {
 }
 const BOOSTER_FALLBACK := [Vector2(-0.08, 0.0), Vector2(0.08, 0.0)]  # if a name isn't listed
 # Per-ship plume shaping. Raptor: long/thin/small. Vela: long, thin, golden.
-const BOOSTER_RADIUS_SCALE := { "Lyra": 0.6, "Raptor": 0.70, "Vela": 0.45, "Stella": 0.40, "Mule": 0.6 }   # thin spikes
-const BOOSTER_LENGTH_SCALE := { "Raptor": 2.2, "Vela": 1.4,  "Stella": 0.8, "Lyra": 0.5, "Mule": 0.9 }  # plume length × hull
+const BOOSTER_RADIUS_SCALE := { "Lyra": 0.6, "Raptor": 0.62, "Vela": 0.45, "Stella": 0.40, "HaniStar": 0.6 }   # thin spikes
+const BOOSTER_LENGTH_SCALE := { "Raptor": 1.0, "Vela": 1.4,  "Stella": 0.8, "Lyra": 0.5, "HaniStar": 0.9 }  # plume length × hull
 const BOOSTER_COLOR_OVERRIDE := {
-	"Mule": Color(1.0, 1.0, 1.0),      # white (transparent additive plume)
-	"Lyra": Color(1.0, 0.94, 0.72),    # holy golden-white
+	"HaniStar": Color(0.62, 0.82, 1.0),    # very light blue exhaust
+	"Lyra": Color(0.55, 0.80, 1.0),    # light sky blue
 	"Vela": Color(1.0, 0.82, 0.32),    # transparent gold
 	"Stella": Color(1.0, 0.26, 0.20),  # sharp transparent red
-	"Raptor": Color(0.62, 0.22, 1.0),  # dangerous transparent purple
+	"Raptor": Color(0.85, 0.72, 0.45), # champagne gold (small + powerful; deploys in warp)
 }
 const BOOSTER_FADE_FLIP := false    # if the plume fades at the wrong end, flip this
+const BOOSTER_RING_SHIPS := ["HaniStar"]   # ships that get a glowing engine-ring at each nozzle
+# Per-mount size multipliers (same order as BOOSTER_LAYOUTS). HaniStar: big main + smaller supports.
+const BOOSTER_MOUNT_SCALE := { "HaniStar": [1.3, 0.65, 0.65] }
+# Per-mount extra BACK offset (fraction of hull length) to push a nozzle clear of the
+# hull when a rear plate blocks it. HaniStar's main sits behind a rear plate.
+const BOOSTER_MOUNT_BACK := { "HaniStar": [0.08, 0.0, 0.0] }
+# Feminine sticker decals scattered over the hull (so HaniStar isn't one blunt colour).
+const DECAL_SHIPS := []   # emoji/sticker decals removed
+const DECAL_SYMBOLS := ["♥", "✿", "★", "✧", "❀", "♪", "❤", "✦"]
+const DECAL_COLORS := [
+	Color(1.0, 0.45, 0.72), Color(1.0, 0.62, 0.86), Color(0.78, 0.55, 1.0),
+	Color(0.55, 0.92, 1.0), Color(1.0, 0.86, 0.42),
+]
+const DECAL_COUNT := 9
 # Camera zoom (mouse wheel)
 const ZOOM_MIN := 0.45              # closest
 const ZOOM_MAX := 3.0               # farthest
@@ -110,6 +128,10 @@ const MAX_SPEED := 10000.0
 # blitzing past the planets near Sol. Boost (Shift) multiplies it for fast travel.
 # This is SEPARATE from warp — the per-ship ly tops are unaffected.
 const SUBLIGHT_MAX := 550.0
+# Auto-settle: close to a body, gently bleed speed toward a hover so releasing thrust
+# holds you on station to capture (thrust still lets you nudge/orbit). Closer = stronger.
+const SETTLE_RANGE := 900.0
+const SETTLE_RATE := 1.5
 # Damping vs thrust sets the real cruise speed (~THRUST/DAMPING here) — MAX_SPEED is
 # just a ceiling. Lower DAMPING = more glide/momentum (the "heavy" feel).
 const DAMPING := 0.75         # higher = eases to a stop faster when idle
@@ -200,6 +222,11 @@ func toggle_warp_mode() -> String:
 func is_warp_mode() -> bool:
 	return _dual and warp > 1.0
 
+# True only in Raptor's actual WARP form (not his combat mode) — drives the deployed,
+# flared booster. is_warp_mode() can't tell the two apart (both warps are > 1.0).
+func is_warp_form() -> bool:
+	return _dual and warp >= RAPTOR_WARP
+
 var _current_model := 0        # index into SHIP_MODELS
 var _engine_pitch := 1.0       # per-ship engine voice character (set on build)
 var _can_brake := false        # Vela: tap S for a near-instant full stop (her ultimate)
@@ -209,6 +236,7 @@ var _boosters: Array = []
 var _glow_tex: Texture2D
 var _plume_grad: Texture2D
 var _booster_color := BOOSTER_COLOR   # per-ship plume tint, set in _build_boosters
+var _booster_ring := false            # add a glowing engine-ring at the nozzle (the HaniStar)
 var _streaks: GPUParticles3D          # motion streaks at high speed
 var _streak_mat: StandardMaterial3D
 var _cam_zoom := 1.0          # target zoom (mouse wheel)
@@ -353,6 +381,11 @@ func fly(delta: float) -> void:
 
 	# Arcade damping: velocity eases toward zero when you're not thrusting.
 	velocity = velocity.lerp(Vector3.ZERO, clampf(DAMPING * delta, 0.0, 1.0))
+	# Auto-settle near a body: a soft, always-on brake that strengthens as you close in,
+	# so easing off the throttle lets you hover and capture instead of drifting past.
+	if nearest_dist < SETTLE_RANGE and not braking:
+		var settle := SETTLE_RATE * (1.0 - nearest_dist / SETTLE_RANGE)
+		velocity = velocity.lerp(Vector3.ZERO, clampf(settle * delta, 0.0, 1.0))
 	# Vela's air-brake (R): a smooth, hard stop — ~1.5s to a standstill — plus a warp
 	# dump, so she can pull up at a star instead of blowing through it.
 	if braking:
@@ -413,17 +446,21 @@ func fly(delta: float) -> void:
 
 func _update_boosters(throttle: float, delta: float) -> void:
 	var k := clampf(10.0 * delta, 0.0, 1.0)
-	# Warp/travel mode (Raptor): a long, bright, flickering purple FIRE trail.
-	var fire := is_warp_mode()
+	# Always-on engines: keep a strong baseline plume even at idle (boosting still
+	# pushes it to full). Without this the plume only "appeared" under thrust.
+	throttle = maxf(throttle, 0.6)
+	# Warp form (Raptor only): the booster DEPLOYS — a long, bright, flickering fire
+	# trail. Combat mode keeps the regular short plume.
+	var fire := is_warp_form()
 	var t := Time.get_ticks_msec() * 0.001
 	var flick := 1.0 + 0.18 * sin(t * 33.0) + 0.12 * sin(t * 71.0) if fire else 1.0
 	var len_mul := 2.4 * flick if fire else 1.0
 	var max_alpha := 0.95 if fire else 0.6
 	for b in _boosters:
-		# Plume length stretches with throttle; nozzle stays anchored.
-		var sc: Vector3 = b.pivot.scale
+		# Plume length stretches with throttle; bell + ring (on the pivot) stay fixed.
+		var sc: Vector3 = b.plume_holder.scale
 		sc.y = lerpf(sc.y, (0.35 + throttle * 0.7) * len_mul, k)
-		b.pivot.scale = sc
+		b.plume_holder.scale = sc
 		# Plume transparency (additive) tracks throttle (fire = much brighter).
 		var pcol: Color = b.plume_mat.albedo_color
 		pcol.a = lerpf(pcol.a, clampf((0.05 + throttle * 0.45) * (1.7 if fire else 1.0), 0.0, max_alpha), k)
@@ -554,8 +591,12 @@ func _build_ship_model(idx: int) -> void:
 	# past center so its first visible frame is already downrange and clear of the ship
 	# (scales with hull size — the muzzle moment itself isn't shown).
 	muzzle = box.size.z * 1.6
-	_recolor(model, info.tint, float(info.glow), info.get("chrome", false), info.get("raw", false))
+	_recolor(model, info.tint, float(info.glow), info.get("chrome", false), info.get("raw", false), info.get("pbr", false), info.get("surf_roles", []))
 	_build_boosters(box, info.name)
+	if info.name in DECAL_SHIPS:
+		_add_decals(box)
+	if info.get("pbr", false):
+		_add_hull_lights(box)
 
 
 # --- Ship-swap API (called by main when docked) ---
@@ -640,7 +681,7 @@ func _gather_mesh_instances(node: Node) -> Array[MeshInstance3D]:
 # shine comes from the reflective sky (see main._setup_environment) plus a
 # fresnel rim; a gentle emission keeps it from ever going fully dark in deep
 # space. The model's own texture stays as surface detail.
-func _recolor(model: Node3D, tint: Color, glow: float, chrome := false, raw := false) -> void:
+func _recolor(model: Node3D, tint: Color, glow: float, chrome := false, raw := false, pbr := false, roles := []) -> void:
 	for mi in _gather_mesh_instances(model):
 		if mi.mesh == null:
 			continue
@@ -652,7 +693,72 @@ func _recolor(model: Node3D, tint: Color, glow: float, chrome := false, raw := f
 			else:
 				m = StandardMaterial3D.new()
 			m.transparency = BaseMaterial3D.TRANSPARENCY_DISABLED
-			if raw:
+			if pbr:
+				# Feminine pink-crystal hull (HaniStar). Each surface gets a ROLE:
+				#   "hull" -> light pastel-pink porcelain/crystal with a soft rim aura
+				#   "gold" -> shiny rose-gold metallic accent (keel, top, wings)
+				#   "orb"  -> soft neon-pink lit accent
+				# Roles can be set per surface index via the model's "surf_roles" list;
+				# otherwise we auto-classify from the GLB's authored colour.
+				var oc := Color(0.8, 0.8, 0.8)
+				if orig is BaseMaterial3D:
+					oc = (orig as BaseMaterial3D).albedo_color
+				var role := ""
+				if si < roles.size():
+					role = String(roles[si])
+				else:
+					var sat: float = maxf(oc.r, maxf(oc.g, oc.b)) - minf(oc.r, minf(oc.g, oc.b))
+					if oc.r > 0.6 and oc.g > 0.5 and oc.b < 0.45:
+						role = "gold"
+					elif sat > 0.3:
+						role = "orb"
+					else:
+						role = "hull"
+				m.shading_mode = BaseMaterial3D.SHADING_MODE_PER_PIXEL
+				m.albedo_texture = null
+				m.emission_texture = null
+				if role == "gold":
+					# Polished silver alloy. Metallic 1.0 / roughness 0.12 for a smooth
+					# mirroring sheen; a small emission floor keeps it readable (no
+					# reflection probe in scene, so pure metal would render near-black).
+					m.albedo_color = Color(0.82, 0.84, 0.88)       # cool silver
+					m.metallic = 1.0                               # true polished alloy
+					m.roughness = 0.12                             # smooth mirroring sheen
+					m.rim_enabled = false
+					m.emission_enabled = true
+					m.emission = Color(0.82, 0.84, 0.88)           # silver glow
+					m.emission_energy_multiplier = 0.4             # slight glow over the plates
+				elif role == "glass":
+					# Tinted canopy glass for the top front view — clear, glossy, reflective.
+					m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+					m.albedo_color = Color(0.62, 0.80, 1.0, 0.30)  # light blue tinted glass
+					m.metallic = 0.0
+					m.metallic_specular = 0.9
+					m.roughness = 0.04
+					m.rim_enabled = true
+					m.rim = 0.5
+					m.rim_tint = 0.2
+					m.emission_enabled = false
+				elif role == "orb":
+					# Soft neon-pink lit accent.
+					m.albedo_color = Color(1.0, 0.714, 0.757)      # #ffb6c1
+					m.metallic = 0.0
+					m.roughness = 0.4
+					m.rim_enabled = false
+					m.emission_enabled = true
+					m.emission = Color(1.0, 0.714, 0.757)          # bright magenta-pink
+					m.emission_energy_multiplier = 0.7             # subtle lit accent, no flare
+				else:
+					# Light pink crystal body with a feminine rim aura.
+					m.diffuse_mode = BaseMaterial3D.DIFFUSE_TOON   # clean gradients on low-poly faces
+					m.albedo_color = Color(1.0, 0.60, 0.74)        # deeper pink (was washing out white)
+					m.metallic = 0.15                              # porcelain sheen, not dark metal
+					m.roughness = 0.38                             # softer highlights so pink reads, not white
+					m.rim_enabled = true
+					m.rim = 0.35                                   # soft pink outer-shell outline
+					m.rim_tint = 1.0                               # light pink-white edge
+					m.emission_enabled = false
+			elif raw:
 				# Keep the model's AUTHORED colours/textures exactly (its beautiful
 				# design), and render them UNSHADED so they show full-colour in our
 				# light-less scene — no flat tint, no washout.
@@ -691,6 +797,63 @@ func _recolor(model: Node3D, tint: Color, glow: float, chrome := false, raw := f
 			mi.set_surface_override_material(si, m)
 
 
+# A small key + fill light rig parented to the hull (travels with the ship). The
+# scene has no Light3D otherwise — these are what let the lit pink-crystal material
+# (toon diffuse, rim aura, sharp low-poly highlights) actually show. Their range is
+# kept to a few hull-lengths so they light HaniStar, not the wider scene.
+func _add_hull_lights(box: AABB) -> void:
+	var s := box.size
+	var reach: float = maxf(s.length(), 0.3)
+	# Key: warm near-white, up/front/right — carves the faceted highlights.
+	var key := OmniLight3D.new()
+	key.position = Vector3(reach * 0.9, reach * 1.1, reach * 0.9)
+	key.light_color = Color(1.0, 0.90, 0.93)
+	key.light_energy = 1.3
+	key.omni_range = reach * 3.0
+	key.shadow_enabled = false
+	_mesh_root.add_child(key)
+	# Fill: soft pink, down/back/left — lifts the shadow side so it stays bright.
+	var fill := OmniLight3D.new()
+	fill.position = Vector3(-reach * 0.9, -reach * 0.7, -reach * 0.9)
+	fill.light_color = Color(1.0, 0.78, 0.88)
+	fill.light_energy = 0.8
+	fill.omni_range = reach * 3.0
+	fill.shadow_enabled = false
+	_mesh_root.add_child(fill)
+	# Core: a soft pink glow sat right at the hull centre to fill the dark recessed
+	# panels the key/fill miss (the empty pink pockets between plates).
+	var core := OmniLight3D.new()
+	core.position = Vector3(0.0, reach * 0.05, 0.0)
+	core.light_color = Color(1.0, 0.62, 0.80)
+	core.light_energy = 1.1
+	core.omni_range = reach * 1.6
+	core.shadow_enabled = false
+	_mesh_root.add_child(core)
+
+
+# Scatter small billboarded sticker glyphs over the hull surface so a plain hull
+# (HaniStar) reads with some personality instead of one blunt colour.
+func _add_decals(box: AABB) -> void:
+	var s := box.size
+	for i in DECAL_COUNT:
+		var l := Label3D.new()
+		l.text = DECAL_SYMBOLS[randi() % DECAL_SYMBOLS.size()]
+		l.modulate = DECAL_COLORS[randi() % DECAL_COLORS.size()]
+		l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		l.shaded = false
+		l.double_sided = true
+		l.font_size = 64
+		l.outline_size = 0
+		l.pixel_size = maxf(s.length(), 0.3) * 0.0017   # scaled to the (tiny) hull
+		# A random point on the hull's bounding box, nudged just outside the surface.
+		var p := Vector3(
+			randf_range(-0.42, 0.42) * s.x,
+			randf_range(-0.42, 0.42) * s.y,
+			randf_range(-0.42, 0.42) * s.z)
+		l.position = p * 1.08
+		_mesh_root.add_child(l)
+
+
 # Additive booster plumes at the rear of the (fitted, centered) model — one per
 # engine in this ship's BOOSTER_LAYOUTS entry (count/pattern differ per hull).
 func _build_boosters(box: AABB, ship_name: String) -> void:
@@ -699,6 +862,7 @@ func _build_boosters(box: AABB, ship_name: String) -> void:
 	var rise := s.y * BOOSTER_RISE
 	var mounts: Array = BOOSTER_LAYOUTS.get(ship_name, BOOSTER_FALLBACK)
 	_booster_color = BOOSTER_COLOR_OVERRIDE.get(ship_name, BOOSTER_COLOR)
+	_booster_ring = true   # every ship gets the metallic engine bell + nozzle ring
 	# Fewer engines read better a touch larger; scale radius down as count grows.
 	var rscale: float = BOOSTER_RADIUS_SCALE.get(ship_name, 1.0)
 	var lscale: float = BOOSTER_LENGTH_SCALE.get(ship_name, 1.0)
@@ -706,9 +870,16 @@ func _build_boosters(box: AABB, ship_name: String) -> void:
 	# shrank ~9×). radius ~ fraction of width, length ~ fraction of hull length.
 	var r := s.x * (0.085 - 0.006 * mounts.size()) * rscale
 	var length := s.z * 0.55 * lscale
-	for m in mounts:
-		var pos := Vector3(m.x * s.x, rise + m.y * s.x, mount_z)
-		_boosters.append(_make_booster(pos, r, length))
+	# Optional per-mount size multipliers (same order as the mounts) so one ship can
+	# mix a big main booster with smaller support boosters.
+	var per: Array = BOOSTER_MOUNT_SCALE.get(ship_name, [])
+	var back: Array = BOOSTER_MOUNT_BACK.get(ship_name, [])
+	for i in mounts.size():
+		var m: Vector2 = mounts[i]
+		var ms: float = per[i] if i < per.size() else 1.0
+		var bz: float = back[i] if i < back.size() else 0.0
+		var pos := Vector3(m.x * s.x, rise + m.y * s.x, mount_z + bz * s.z)
+		_boosters.append(_make_booster(pos, r * ms, length * ms))
 
 
 func _make_booster(mount: Vector3, radius: float, length: float) -> Dictionary:
@@ -718,6 +889,30 @@ func _make_booster(mount: Vector3, radius: float, length: float) -> Dictionary:
 	pivot.position = mount
 	pivot.rotation = Vector3(deg_to_rad(90.0), 0.0, 0.0)
 	_mesh_root.add_child(pivot)
+
+	# Rough-metallic engine bell the plume emerges from (ring ships only). Extends
+	# BACKWARD past the hull (+Y in pivot space = +Z = tail) so the nozzle reads as a
+	# real engine housing — especially the central main booster, whose nozzle would
+	# otherwise sit buried inside the hull with its ring hidden.
+	if _booster_ring:
+		var bell := MeshInstance3D.new()
+		var bmesh := CylinderMesh.new()
+		bmesh.top_radius = radius * 1.5       # wide opening at the back
+		bmesh.bottom_radius = radius * 1.1    # narrows toward the hull
+		bmesh.height = radius * 1.8
+		bmesh.radial_segments = 16
+		bell.mesh = bmesh
+		var bmat := StandardMaterial3D.new()
+		bmat.albedo_color = Color(0.22, 0.22, 0.25)   # dark gunmetal
+		bmat.metallic = 0.85
+		bmat.roughness = 0.65                          # rough brushed metal
+		# Faint self-lit floor so the bell reads on ships that have no hull lights.
+		bmat.emission_enabled = true
+		bmat.emission = Color(0.22, 0.22, 0.25)
+		bmat.emission_energy_multiplier = 0.6
+		bell.material_override = bmat
+		bell.position = Vector3(0.0, bmesh.height * 0.42, 0.0)
+		pivot.add_child(bell)
 
 	var plume_mat := StandardMaterial3D.new()
 	plume_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
@@ -734,11 +929,34 @@ func _make_booster(mount: Vector3, radius: float, length: float) -> Dictionary:
 	cyl.height = length
 	cyl.radial_segments = 12
 	cyl.rings = 0
+	# Only this holder is scaled to stretch the plume — the bell + ring stay fixed to
+	# the hull (scaling the pivot itself used to drag them backward).
+	var plume_holder := Node3D.new()
+	pivot.add_child(plume_holder)
 	var plume := MeshInstance3D.new()
 	plume.mesh = cyl
 	plume.material_override = plume_mat
 	plume.position = Vector3(0.0, length * 0.5, 0.0)  # wide end sits at the pivot
-	pivot.add_child(plume)
+	plume_holder.add_child(plume)
+
+	# Optional glowing engine-ring framing the nozzle — a bit of design at the tail so
+	# the hull isn't just a bare metal blob. Hole faces back (the pivot's 90° tilt).
+	if _booster_ring:
+		var ring := MeshInstance3D.new()
+		var torus := TorusMesh.new()
+		torus.inner_radius = radius * 1.5    # frames the bell's wide back opening
+		torus.outer_radius = radius * 1.95
+		torus.rings = 24
+		torus.ring_segments = 10
+		ring.mesh = torus
+		var rmat := StandardMaterial3D.new()
+		rmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		rmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		rmat.albedo_color = Color(0.0, 0.0, 0.0, 0.55)   # black, transparent (smoked rim)
+		ring.material_override = rmat
+		# Sit at the bell's mouth (the visible nozzle exit), not the buried pivot origin.
+		ring.position = Vector3(0.0, radius * 1.8 * 0.92, 0.0)
+		pivot.add_child(ring)
 
 	# Soft additive core glow at the nozzle (billboarded).
 	var core_mat := StandardMaterial3D.new()
@@ -760,6 +978,7 @@ func _make_booster(mount: Vector3, radius: float, length: float) -> Dictionary:
 
 	return {
 		"pivot": pivot,
+		"plume_holder": plume_holder,
 		"plume_mat": plume_mat,
 		"core": core,
 		"core_mat": core_mat,

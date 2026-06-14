@@ -34,6 +34,22 @@ const BOSS_FIRE_EVERY := 1.2
 const BOSS_RESPAWN_AFTER := 9.0
 const BOSS_SPAWN_DIST := 160.0
 
+# --- Guardian boss: ONE per guarded body, a distinct monster GLB with its own design
+# (raw colours), that summons small "old vortex" minions (BOSS_MODEL) as its army.
+# Clear the boss to capture the body. ---
+const GUARD_BOSS_SIZE := 16.0
+const GUARD_BOSS_HP := 50
+const GUARD_BOSS_SPEED := 9.0
+const GUARD_BOSS_KEEP := 55.0
+const GUARD_BOSS_FIRE := 1.3
+const MINION_SIZE := 7.0          # small vortexes
+const MINION_HP := 4
+const MINION_SPEED := 16.0
+const MINION_KEEP := 28.0
+const MINION_FIRE := 2.1
+const MINION_CAP := 6             # most minions alive at once
+const MINION_SUMMON_EVERY := 2.6  # seconds between summons
+
 const BOLT_SPEED := 950.0          # fast tracers (swept collision keeps hits reliable)
 const BOLT_LIFE := 2.5
 const BOLT_COOLDOWN := 0.22        # ~4.5 shots/sec — same comfortable delay between shots
@@ -124,6 +140,7 @@ func update(ship: Node3D, pressed: bool, delta: float) -> void:
 	_step_bolts(_bolts, sp, delta, true)
 	_step_bolts(_abolts, sp, delta, false)
 	_step_aliens(ship, sp, delta)
+	_step_guardian_summons(delta)
 
 
 # ---------------------------------------------------------------------------
@@ -202,6 +219,9 @@ func _damage_alien(a: Dictionary, sp: Vector3, dmg := 1) -> void:
 		_boom(a.pos - sp, a.size)
 		if audio != null:
 			audio.play_explosion()
+		# Boss down → its summoned army vanishes and the body becomes capturable.
+		if a.get("guardian_boss", false):
+			_clear_minions()
 
 
 func _revive(a: Dictionary, sp: Vector3) -> void:
@@ -216,7 +236,7 @@ func _revive(a: Dictionary, sp: Vector3) -> void:
 # Boss state for the HUD: returns alive/hp/max for Vortex (or alive=false).
 func boss_state() -> Dictionary:
 	for a in _aliens:
-		if a.is_boss:
+		if a.is_boss or a.get("guardian_boss", false):
 			return { "alive": a.alive, "hp": a.hp, "max": a.max_hp }
 	return { "alive": false, "hp": 0, "max": 1 }
 
@@ -239,16 +259,53 @@ func threat_report() -> Dictionary:
 # them when you approach a guarded body, and the body is capturable once they're clear.
 var guard_body := ""    # name of the body these guardians defend ("" = none)
 
-func set_guardians(center: Vector3, count: int, body: String) -> void:
+func set_guardians(center: Vector3, body: String) -> void:
 	clear_guardians()
 	guard_body = body
-	for i in count:
-		var a := _make_alien()
-		a["guardian"] = true
-		a["respawn_after"] = -1.0                       # never respawn
-		a.pos = center + _rand_dir() * (float(a.size) * 6.0 + 40.0)
-		a.node.position = a.pos                          # rendered at pos - ship each frame
-		_aliens.append(a)
+	_aliens.append(_make_guardian_boss(center))
+
+# One identity boss (a random monster GLB, big, raw colours) that defends a body and
+# summons small vortex minions. Reuses the alien-model loader at boss scale.
+func _make_guardian_boss(center: Vector3) -> Dictionary:
+	var node := _load_alien_model(GUARD_BOSS_SIZE)
+	var a := _make_enemy(node, {
+		"size": GUARD_BOSS_SIZE, "hp": GUARD_BOSS_HP, "speed": GUARD_BOSS_SPEED,
+		"keep": GUARD_BOSS_KEEP, "fire_every": GUARD_BOSS_FIRE, "respawn_after": -1.0,
+		"spawn_dist": 0.0, "is_boss": false,
+	})
+	a["guardian"] = true
+	a["guardian_boss"] = true
+	a["summon_cd"] = MINION_SUMMON_EVERY
+	a.pos = center + _rand_dir() * (GUARD_BOSS_SIZE * 2.0)
+	a.node.position = a.pos
+	return a
+
+func _summon_minion(center: Vector3) -> void:
+	var node := _load_boss_model(MINION_SIZE)   # small "old vortex"
+	var a := _make_enemy(node, {
+		"size": MINION_SIZE, "hp": MINION_HP, "speed": MINION_SPEED, "keep": MINION_KEEP,
+		"fire_every": MINION_FIRE, "respawn_after": -1.0, "spawn_dist": 0.0, "is_boss": false,
+	})
+	a["guardian"] = true
+	a["minion"] = true
+	a.pos = center + _rand_dir() * (MINION_SIZE * 2.0 + 18.0)
+	a.node.position = a.pos
+	_aliens.append(a)
+
+# Each alive guardian boss summons minions over time, up to the live cap.
+func _step_guardian_summons(delta: float) -> void:
+	var minions := 0
+	for a in _aliens:
+		if a.get("minion", false) and a.alive:
+			minions += 1
+	for a in _aliens:
+		if a.get("guardian_boss", false) and a.alive:
+			a.summon_cd -= delta
+			if a.summon_cd <= 0.0:
+				a.summon_cd = MINION_SUMMON_EVERY
+				if minions < MINION_CAP:
+					_summon_minion(a.pos)
+					minions += 1
 
 func clear_guardians() -> void:
 	var keep := []
@@ -260,12 +317,28 @@ func clear_guardians() -> void:
 	_aliens = keep
 	guard_body = ""
 
+# Capture is gated on the BOSS being dead (minions are endless until then).
+func guard_boss_alive() -> bool:
+	for a in _aliens:
+		if a.get("guardian_boss", false) and a.alive:
+			return true
+	return false
+
 func guardians_alive() -> int:
 	var n := 0
 	for a in _aliens:
 		if a.get("guardian", false) and a.alive:
 			n += 1
 	return n
+
+func _clear_minions() -> void:
+	var keep := []
+	for a in _aliens:
+		if a.get("minion", false):
+			a.node.queue_free()
+		else:
+			keep.append(a)
+	_aliens = keep
 
 
 # ---------------------------------------------------------------------------
@@ -288,14 +361,14 @@ func _make_boss() -> Dictionary:
 	})
 
 
-func _load_boss_model() -> Node3D:
+func _load_boss_model(size := BOSS_SIZE) -> Node3D:
 	var packed := load(BOSS_MODEL) as PackedScene
 	if packed != null:
 		var holder := Node3D.new()
 		add_child(holder)                       # in tree BEFORE fitting (needs global xform)
 		var inst := packed.instantiate() as Node3D
 		holder.add_child(inst)
-		_fit_and_light(holder, inst, BOSS_SIZE)
+		_fit_and_light(holder, inst, size)
 		# Overpaint with a menacing red-hot emission so the boss reads as a threat.
 		for mi in _meshes(inst):
 			for si in mi.mesh.get_surface_count():
@@ -336,7 +409,7 @@ func _make_enemy(node: Node3D, cfg: Dictionary) -> Dictionary:
 	return a
 
 
-func _load_alien_model() -> Node3D:
+func _load_alien_model(size := ALIEN_SIZE) -> Node3D:
 	var paths := ALIEN_MODELS.duplicate()
 	paths.shuffle()                  # random monster type per spawn → variety
 	for path in paths:
@@ -346,7 +419,7 @@ func _load_alien_model() -> Node3D:
 			add_child(holder)                        # in tree BEFORE fitting (needs global xform)
 			var inst := packed.instantiate() as Node3D
 			holder.add_child(inst)
-			_fit_and_light(holder, inst, ALIEN_SIZE)
+			_fit_and_light(holder, inst, size)
 			return holder
 	# fallback: a menacing emissive prism if the GLBs aren't there yet
 	var mi := MeshInstance3D.new()
@@ -474,14 +547,15 @@ func _fit_and_light(holder: Node3D, model: Node3D, target: float) -> void:
 		var f := target / longest
 		model.scale = model.scale * f
 		model.position -= (box.position + box.size * 0.5) * f
+	# Keep each monster's AUTHORED design/colours — render unshaded so the GLB's own
+	# albedo/texture/vertex-colours show in our light-less scene (no purple overpaint).
 	for mi in _meshes(model):
 		for si in mi.mesh.get_surface_count():
 			var o = mi.get_active_material(si)
 			var m: BaseMaterial3D = o.duplicate() if o is BaseMaterial3D else StandardMaterial3D.new()
-			m.metallic = 0.2
-			m.emission_enabled = true
-			m.emission = Color(0.7, 0.3, 0.9)   # alien purple-green glow so they pop
-			m.emission_energy_multiplier = 0.5
+			m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+			m.vertex_color_use_as_albedo = true
+			m.emission_enabled = false
 			mi.set_surface_override_material(si, m)
 
 

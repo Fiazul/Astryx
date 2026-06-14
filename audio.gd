@@ -1,6 +1,6 @@
 class_name GameAudio
 extends Node
-# Code-spawned SFX, same spirit as everything else in Astryx: rapid laser fire
+# Code-spawned SFX, same spirit as everything else in Cold Light: rapid laser fire
 # (pooled so shots overlap), a "crush" boom on alien death, and a three-part
 # engine voice (start -> seamless loop -> stop) that the ship drives every frame.
 

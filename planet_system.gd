@@ -49,6 +49,7 @@ var eph: Ephemeris
 var nearest_name := ""
 var nearest_dist := INF
 var nearest_dir := Vector3.ZERO   # unit vector from ship toward the nearest body
+var nearest_radius := 1.0         # visual radius of the nearest body (capture range scales with it)
 var speed_limit := INF
 var gravity := Vector3.ZERO
 var star_dist := INF              # distance to this system's primary star (gates FTL / warp)
@@ -140,6 +141,22 @@ func _build_planet(p: Dictionary) -> void:
 		sphere.visible = false
 		add_child(sphere)
 
+	# Optional flat planetary ring (Saturn). A tilted annulus that tracks the body and
+	# shows whenever the close-up body does.
+	var ring: MeshInstance3D = null
+	if p.get("ring", false):
+		ring = MeshInstance3D.new()
+		ring.mesh = _make_ring_mesh(float(p.radius) * 1.28, float(p.radius) * 2.35, 72)
+		var rmat := StandardMaterial3D.new()
+		rmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		rmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		rmat.cull_mode = BaseMaterial3D.CULL_DISABLED      # visible from both faces
+		rmat.albedo_color = Color(0.86, 0.79, 0.60, 0.6)   # pale tan, semi-transparent
+		ring.material_override = rmat
+		ring.rotation = Vector3(deg_to_rad(26.7), 0.0, deg_to_rad(7.0))   # Saturn's tilt
+		ring.visible = false
+		add_child(ring)
+
 	var label := Label3D.new()
 	label.text = p.name
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
@@ -162,8 +179,26 @@ func _build_planet(p: Dictionary) -> void:
 		"orbit_speed": float(p.get("orbit_speed", 0.0)),
 		"orbit_a": randf() * TAU,             # current orbital phase
 		"dot": dot, "sphere": sphere, "mat": mat, "model": model, "label": label,
+		"ring": ring,
 		"spin": randf_range(0.05, 0.2),
 	})
+
+
+# A flat annulus (planetary ring) in the XZ plane, double-sided via the material.
+func _make_ring_mesh(inner: float, outer: float, seg: int) -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for i in seg:
+		var a0 := TAU * float(i) / float(seg)
+		var a1 := TAU * float(i + 1) / float(seg)
+		var ci0 := Vector3(cos(a0) * inner, 0.0, sin(a0) * inner)
+		var co0 := Vector3(cos(a0) * outer, 0.0, sin(a0) * outer)
+		var ci1 := Vector3(cos(a1) * inner, 0.0, sin(a1) * inner)
+		var co1 := Vector3(cos(a1) * outer, 0.0, sin(a1) * outer)
+		st.set_normal(Vector3.UP)
+		st.add_vertex(ci0); st.add_vertex(co0); st.add_vertex(co1)
+		st.add_vertex(ci0); st.add_vertex(co1); st.add_vertex(ci1)
+	return st.commit()
 
 
 # Instantiate a GLB body, scale it to the visual radius, self-light it (no scene
@@ -237,7 +272,7 @@ func refresh(ship_pos: Vector3, delta: float) -> void:
 	speed_limit = INF
 	gravity = Vector3.ZERO
 	star_dist = INF
-	var nearest_radius := 1.0
+	nearest_radius = 1.0
 
 	for b in _bodies:
 		var rad: float = b.radius
@@ -299,6 +334,15 @@ func refresh(ship_pos: Vector3, delta: float) -> void:
 				var col: Color = b.mat.albedo_color
 				col.a = sphere_a
 				b.mat.albedo_color = col
+
+		# Planetary ring (Saturn): track the body, fade in with the close-up sphere.
+		if b.ring != null:
+			b.ring.position = rel
+			b.ring.visible = sphere_a > 0.02
+			if b.ring.visible:
+				var rc: Color = b.ring.material_override.albedo_color
+				rc.a = 0.6 * sphere_a
+				b.ring.material_override.albedo_color = rc
 
 		b.dot.visible = frac > 0.02
 		if b.dot.visible:

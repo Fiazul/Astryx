@@ -251,6 +251,8 @@ func _update_minimap() -> void:
 	for bname in planets.targetables():
 		var rel: Vector3 = planets.rel_of(bname)
 		var role := MiniMap.BODY
+		if codex.is_discovered(bname):
+			role = MiniMap.CAPTURED                  # captured → gold beacon on the radar
 		if bname == "Earth" and current_system == SystemDB.SOL:
 			role = MiniMap.HOME
 		elif bname == planets.nearest_name:
@@ -266,19 +268,37 @@ func _update_minimap() -> void:
 func _update_scan(delta: float) -> void:
 	hud.toast_t = maxf(hud.toast_t - delta, 0.0)
 	var name := planets.nearest_name
-	var captured := name != "" and codex.is_discovered(name)
-	var guarded := name != "" and current_system != SystemDB.SOL and _is_guarded(name)
+	# Hub gate-suns (✦) and the Interstellar hub are travel markers — never captured or
+	# guarded. Skip the whole flow there (no monsters in the hub, no fake captures).
+	if not _capturable(name):
+		_scan = maxf(_scan - delta * 2.0, 0.0)
+		if _scan <= 0.0:
+			_scan_name = ""
+		hud.scan_progress = _scan
+		hud.scan_name = _scan_name
+		hud.scan_hint = ""
+		return
+	var captured := codex.is_discovered(name)
+	var guarded := current_system != SystemDB.SOL and _is_guarded(name)
 
-	# Approaching a guarded, un-captured body activates its (non-respawning) guardians.
+	# Approaching a guarded, un-captured body spawns its identity boss — but ONLY when
+	# there's no boss currently alive and it's a different body. Without the
+	# "not guard_boss_alive()" guard, a nearest_name that flips between two close bodies
+	# (e.g. TRAPPIST's packed planets) would re-spawn a boss GLB every frame and freeze.
 	if guarded and not captured and planets.nearest_dist < GUARD_RANGE \
-			and combat.guard_body != name and not ship.transiting and not docked:
-		combat.set_guardians(ship.true_pos + planets.rel_of(name), GUARD_COUNT, name)
+			and combat.guard_body != name and not combat.guard_boss_alive() \
+			and not ship.transiting and not docked:
+		combat.set_guardians(ship.true_pos + planets.rel_of(name), name)
 
+	# Capturable once THIS body's boss is dead (its summoned minions are endless till then).
 	var guards := combat.guardians_alive() if (guarded and combat.guard_body == name) else 0
-	var clear := not guarded or guards == 0
+	var clear := not guarded or (combat.guard_body == name and not combat.guard_boss_alive())
 
+	# Capture when within reach of the body's SURFACE (range scales with its size, so a
+	# giant star/nebula is grabbable without diving to its centre).
+	var cap_range := planets.nearest_radius + SCAN_RANGE
 	var in_range := not docked and not ship.transiting and name != "" \
-		and planets.nearest_dist < SCAN_RANGE \
+		and planets.nearest_dist < cap_range \
 		and Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED
 	var fresh := in_range and not captured and clear
 
@@ -305,12 +325,16 @@ func _update_scan(delta: float) -> void:
 	if name == "" or captured:
 		hud.scan_hint = ""
 	elif guarded and not clear:
-		hud.scan_hint = "⚠  %d GUARDIANS defend %s — destroy them" % [guards, name]
+		hud.scan_hint = "⚠  BOSS defends %s  ·  %d hostiles — destroy the boss" % [name, guards]
 	elif in_range and _scan <= 0.0:
 		hud.scan_hint = "» hold V to capture %s «" % name
 	else:
 		hud.scan_hint = ""
 
+
+# A real body you can capture: not the Interstellar hub, not a hub gate-sun (✦).
+func _capturable(body_name: String) -> bool:
+	return body_name != "" and current_system != SystemDB.INTERSTELLAR and not body_name.contains("✦")
 
 # ≈80% of bodies are guarded (deterministic per name, so it's stable across visits).
 func _is_guarded(body_name: String) -> bool:
@@ -392,21 +416,32 @@ func _update_navigator() -> void:
 #  • In any normal system — the nearest UN-surveyed star to fly to. Once they're all
 #    surveyed, fall back to guiding you to the exit gate so you know to move on.
 func _current_objective() -> Dictionary:
+	# CONTINUOUS cursor targeting: suggest whatever the CROSSHAIR is over — the body
+	# whose on-screen position is nearest screen-centre (not the camera axis, which is
+	# offset by the chase cam). Aim the cursor at things to read them; no Tab babysitting.
 	if current_system == SystemDB.INTERSTELLAR:
 		return _nearest_gate_objective()
-	# Fly to the nearest star you haven't logged yet (Tab still cycles every body/gate).
+	var cam := ship.camera
+	if cam == null:
+		return _nearest_gate_objective()
+	var center: Vector2 = cam.get_viewport().get_visible_rect().size * 0.5
 	var best := ""
-	var best_d := INF
-	for s in Ephemeris.STARS:
-		if codex.is_discovered(s.name):
+	var best_px := 240.0              # body must be within this many px of the crosshair
+	var best_rel := Vector3.ZERO
+	for bname in planets.targetables():
+		if not _capturable(bname):
 			continue
-		var d: float = planets.rel_of(s.name).length()
-		if d < best_d:
-			best_d = d
-			best = s.name
+		var rel: Vector3 = planets.rel_of(bname)
+		if rel.length() < 0.001 or cam.is_position_behind(rel):
+			continue
+		var px: float = cam.unproject_position(rel).distance_to(center)
+		if px < best_px:
+			best_px = px
+			best = bname
+			best_rel = rel
 	if best != "":
-		return { "name": best, "rel": planets.rel_of(best) }
-	return _nearest_gate_objective()   # all surveyed here → point at the way out
+		return { "name": best, "rel": best_rel }
+	return _nearest_gate_objective()
 
 func _nearest_gate_objective() -> Dictionary:
 	if wormhole == null:
@@ -600,8 +635,9 @@ func _setup_environment() -> void:
 	# an HDR threshold, only pixels brighter than 1.0 (emissive bodies) bloom, so
 	# the ship reads as shiny lit metal with a gradient, not a glowing bulb.
 	env.glow_enabled = true
-	env.glow_intensity = 0.55
-	env.glow_bloom = 0.0
+	env.glow_normalized = true     # normalize levels so the neon thruster bloom blends evenly
+	env.glow_intensity = 0.9
+	env.glow_bloom = 0.15          # subtle bleed on emissive parts (was haloing the hull)
 	env.glow_strength = 0.85
 	env.glow_hdr_threshold = 1.0
 	env.glow_blend_mode = Environment.GLOW_BLEND_MODE_ADDITIVE
