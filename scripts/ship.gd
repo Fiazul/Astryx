@@ -245,8 +245,8 @@ var _look_pitch_s := 0.0
 
 
 func _ready() -> void:
-	_glow_tex = _make_glow_texture()
-	_plume_grad = _make_plume_gradient(BOOSTER_FADE_FLIP)
+	_glow_tex = ShipMesh.make_glow_texture()
+	_plume_grad = ShipMesh.make_plume_gradient(BOOSTER_FADE_FLIP)
 	_build_visual()
 	_set_capture(true)
 	_cam_basis = transform.basis  # seed so the first frame isn't a lurch
@@ -576,16 +576,16 @@ func _build_ship_model(idx: int) -> void:
 	var model := packed.instantiate() as Node3D
 	_mesh_root.add_child(model)
 	model.rotation = Vector3(deg_to_rad(float(info.pitch)), deg_to_rad(float(info.yaw)), 0.0)
-	var box := _fit_model(model, float(info.length))
+	var box := ShipMesh.fit_model(_mesh_root, model, float(info.length))
 	# Bolts spawn out in FRONT of the nose, not at it: from the chase camera a bolt
 	# right at the tip reads as sitting above/behind the hull. Push it ~1.5 hull-depths
 	# past center so its first visible frame is already downrange and clear of the ship
 	# (scales with hull size — the muzzle moment itself isn't shown).
 	muzzle = box.size.z * 1.6
-	_recolor(model, info.tint, float(info.glow), info.get("chrome", false), info.get("raw", false), info.get("pbr", false), info.get("surf_roles", []))
+	ShipMesh.recolor(model, info.tint, float(info.glow), info.get("chrome", false), info.get("raw", false), info.get("pbr", false), info.get("surf_roles", []))
 	_build_boosters(box, info.name)
 	if info.get("pbr", false):
-		_add_hull_lights(box)
+		ShipMesh.add_hull_lights(_mesh_root, box)
 
 
 # --- Ship-swap API (called by main when docked) ---
@@ -621,203 +621,6 @@ func face_toward(world_point: Vector3) -> void:
 		return
 	look_at(world_point, Vector3.UP)
 	_cam_basis = transform.basis
-
-
-# Scale the model so its longest axis == target, recenter it on the origin, and
-# return the resulting AABB (centered) in _mesh_root space.
-func _fit_model(model: Node3D, target_len: float) -> AABB:
-	# Measured in _mesh_root space (the model's parent) so it accounts for the
-	# model's yaw/pitch rotation — recentering uses model.position, same space.
-	var box := _combined_aabb(_mesh_root)
-	var size := box.size
-	var longest := maxf(size.x, maxf(size.y, size.z))
-	if longest <= 0.0001:
-		return AABB(Vector3(-1, -1, -1), Vector3(2, 2, 2))
-	var factor := target_len / longest
-	model.scale = model.scale * factor
-	var center := box.position + size * 0.5
-	model.position -= center * factor
-	return AABB(-size * factor * 0.5, size * factor)
-
-
-# Union of every child MeshInstance3D's AABB, expressed in `root`'s local space.
-func _combined_aabb(root: Node3D) -> AABB:
-	var out := AABB()
-	var first := true
-	var inv := root.global_transform.affine_inverse()
-	for mi in _gather_mesh_instances(root):
-		if mi.mesh == null:
-			continue
-		var box := (inv * mi.global_transform) * mi.get_aabb()
-		if first:
-			out = box
-			first = false
-		else:
-			out = out.merge(box)
-	return out
-
-
-func _gather_mesh_instances(node: Node) -> Array[MeshInstance3D]:
-	var out: Array[MeshInstance3D] = []
-	if node is MeshInstance3D:
-		out.append(node as MeshInstance3D)
-	for c in node.get_children():
-		out.append_array(_gather_mesh_instances(c))
-	return out
-
-
-# Give the hull a polished, vibrant metallic skin. With no scene lights the
-# shine comes from the reflective sky (see main._setup_environment) plus a
-# fresnel rim; a gentle emission keeps it from ever going fully dark in deep
-# space. The model's own texture stays as surface detail.
-func _recolor(model: Node3D, tint: Color, glow: float, chrome := false, raw := false, pbr := false, roles := []) -> void:
-	for mi in _gather_mesh_instances(model):
-		if mi.mesh == null:
-			continue
-		for si in mi.mesh.get_surface_count():
-			var orig := mi.get_active_material(si)
-			var m: BaseMaterial3D
-			if orig is BaseMaterial3D:
-				m = orig.duplicate() as BaseMaterial3D
-			else:
-				m = StandardMaterial3D.new()
-			m.transparency = BaseMaterial3D.TRANSPARENCY_DISABLED
-			if pbr:
-				# Feminine pink-crystal hull (HaniStar). Each surface gets a ROLE:
-				#   "hull" -> light pastel-pink porcelain/crystal with a soft rim aura
-				#   "gold" -> shiny rose-gold metallic accent (keel, top, wings)
-				#   "orb"  -> soft neon-pink lit accent
-				# Roles can be set per surface index via the model's "surf_roles" list;
-				# otherwise we auto-classify from the GLB's authored colour.
-				var oc := Color(0.8, 0.8, 0.8)
-				if orig is BaseMaterial3D:
-					oc = (orig as BaseMaterial3D).albedo_color
-				var role := ""
-				if si < roles.size():
-					role = String(roles[si])
-				else:
-					var sat: float = maxf(oc.r, maxf(oc.g, oc.b)) - minf(oc.r, minf(oc.g, oc.b))
-					if oc.r > 0.6 and oc.g > 0.5 and oc.b < 0.45:
-						role = "gold"
-					elif sat > 0.3:
-						role = "orb"
-					else:
-						role = "hull"
-				m.shading_mode = BaseMaterial3D.SHADING_MODE_PER_PIXEL
-				m.albedo_texture = null
-				m.emission_texture = null
-				if role == "gold":
-					# Polished silver alloy. Metallic 1.0 / roughness 0.12 for a smooth
-					# mirroring sheen; a small emission floor keeps it readable (no
-					# reflection probe in scene, so pure metal would render near-black).
-					m.albedo_color = Color(0.82, 0.84, 0.88)       # cool silver
-					m.metallic = 1.0                               # true polished alloy
-					m.roughness = 0.12                             # smooth mirroring sheen
-					m.rim_enabled = false
-					m.emission_enabled = true
-					m.emission = Color(0.82, 0.84, 0.88)           # silver glow
-					m.emission_energy_multiplier = 0.4             # slight glow over the plates
-				elif role == "glass":
-					# Tinted canopy glass for the top front view — clear, glossy, reflective.
-					m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-					m.albedo_color = Color(0.62, 0.80, 1.0, 0.30)  # light blue tinted glass
-					m.metallic = 0.0
-					m.metallic_specular = 0.9
-					m.roughness = 0.04
-					m.rim_enabled = true
-					m.rim = 0.5
-					m.rim_tint = 0.2
-					m.emission_enabled = false
-				elif role == "orb":
-					# Soft neon-pink lit accent.
-					m.albedo_color = Color(1.0, 0.714, 0.757)      # #ffb6c1
-					m.metallic = 0.0
-					m.roughness = 0.4
-					m.rim_enabled = false
-					m.emission_enabled = true
-					m.emission = Color(1.0, 0.714, 0.757)          # bright magenta-pink
-					m.emission_energy_multiplier = 0.7             # subtle lit accent, no flare
-				else:
-					# Light pink crystal body with a feminine rim aura.
-					m.diffuse_mode = BaseMaterial3D.DIFFUSE_TOON   # clean gradients on low-poly faces
-					m.albedo_color = Color(1.0, 0.60, 0.74)        # deeper pink (was washing out white)
-					m.metallic = 0.15                              # porcelain sheen, not dark metal
-					m.roughness = 0.38                             # softer highlights so pink reads, not white
-					m.rim_enabled = true
-					m.rim = 0.35                                   # soft pink outer-shell outline
-					m.rim_tint = 1.0                               # light pink-white edge
-					m.emission_enabled = false
-			elif raw:
-				# Keep the model's AUTHORED colours/textures exactly (its beautiful
-				# design), and render them UNSHADED so they show full-colour in our
-				# light-less scene — no flat tint, no washout.
-				m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-				m.vertex_color_use_as_albedo = true   # honour per-vertex colours if any
-				m.emission_enabled = false
-			elif chrome:
-				# Pure sci-fi white brushed metal with a cyan edge glow — drop the
-				# model's own (purple) texture and make a clean polished hull.
-				m.albedo_texture = null
-				m.albedo_color = Color(0.86, 0.90, 0.96)
-				m.metallic = 0.85
-				m.metallic_specular = 0.85
-				m.roughness = 0.3
-				m.rim_enabled = true
-				m.rim = 0.7
-				m.rim_tint = 0.0                    # bright white fresnel edge
-				m.emission_enabled = true
-				m.emission_texture = null
-				m.emission = Color(0.15, 0.7, 1.0)  # cyan self-glow accent
-				m.emission_energy_multiplier = 0.25
-			else:
-				# Painted hull: low metalness so the model's own colour texture
-				# shows under the key+fill lights; dim flat emission floor only.
-				m.albedo_color = tint
-				m.metallic = 0.1
-				m.metallic_specular = 0.5
-				m.roughness = 0.5
-				m.rim_enabled = true
-				m.rim = 0.25
-				m.rim_tint = 0.5
-				m.emission_enabled = true
-				m.emission_texture = null
-				m.emission = tint
-				m.emission_energy_multiplier = glow
-			mi.set_surface_override_material(si, m)
-
-
-# A small key + fill light rig parented to the hull (travels with the ship). The
-# scene has no Light3D otherwise — these are what let the lit pink-crystal material
-# (toon diffuse, rim aura, sharp low-poly highlights) actually show. Their range is
-# kept to a few hull-lengths so they light HaniStar, not the wider scene.
-func _add_hull_lights(box: AABB) -> void:
-	var s := box.size
-	var reach: float = maxf(s.length(), 0.3)
-	# Key: warm near-white, up/front/right — carves the faceted highlights.
-	var key := OmniLight3D.new()
-	key.position = Vector3(reach * 0.9, reach * 1.1, reach * 0.9)
-	key.light_color = Color(1.0, 0.90, 0.93)
-	key.light_energy = 1.3
-	key.omni_range = reach * 3.0
-	key.shadow_enabled = false
-	_mesh_root.add_child(key)
-	# Fill: soft pink, down/back/left — lifts the shadow side so it stays bright.
-	var fill := OmniLight3D.new()
-	fill.position = Vector3(-reach * 0.9, -reach * 0.7, -reach * 0.9)
-	fill.light_color = Color(1.0, 0.78, 0.88)
-	fill.light_energy = 0.8
-	fill.omni_range = reach * 3.0
-	fill.shadow_enabled = false
-	_mesh_root.add_child(fill)
-	# Core: a soft pink glow sat right at the hull centre to fill the dark recessed
-	# panels the key/fill miss (the empty pink pockets between plates).
-	var core := OmniLight3D.new()
-	core.position = Vector3(0.0, reach * 0.05, 0.0)
-	core.light_color = Color(1.0, 0.62, 0.80)
-	core.light_energy = 1.1
-	core.omni_range = reach * 1.6
-	core.shadow_enabled = false
-	_mesh_root.add_child(core)
 
 
 # Additive booster plumes at the rear of the (fitted, centered) model — one per
@@ -949,36 +752,6 @@ func _make_booster(mount: Vector3, radius: float, length: float) -> Dictionary:
 		"core": core,
 		"core_mat": core_mat,
 	}
-
-
-# Vertical alpha ramp for the plume: opaque at the nozzle, fading to clear at the
-# tail. Which mesh end is which depends on UV winding, so BOOSTER_FADE_FLIP flips it.
-func _make_plume_gradient(flip: bool) -> Texture2D:
-	var h := 64
-	var img := Image.create(2, h, false, Image.FORMAT_RGBA8)
-	for y in h:
-		var t := float(y) / float(h - 1)  # 0 at image top .. 1 at bottom
-		if flip:
-			t = 1.0 - t
-		var a := pow(1.0 - t, 1.4)        # bright at t=0, easing to 0
-		for x in 2:
-			img.set_pixel(x, y, Color(1.0, 1.0, 1.0, a))
-	return ImageTexture.create_from_image(img)
-
-
-# Soft radial glow circle, generated once (no binary asset to ship).
-func _make_glow_texture() -> Texture2D:
-	var size := 64
-	var img := Image.create(size, size, false, Image.FORMAT_RGBA8)
-	var center := Vector2(size, size) * 0.5
-	var half := size * 0.5
-	for y in size:
-		for x in size:
-			var d := Vector2(x + 0.5, y + 0.5).distance_to(center) / half
-			var a := clampf(1.0 - d, 0.0, 1.0)
-			a = pow(a, 1.6)
-			img.set_pixel(x, y, Color(1.0, 1.0, 1.0, a))
-	return ImageTexture.create_from_image(img)
 
 
 # ----------------------------------------------------------------------------
