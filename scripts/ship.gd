@@ -29,7 +29,7 @@ const SHIP_MODELS := [
 	#   Stella — the machine-gun: blistering fire rate + very fast small bolts, low HP.
 	#   Raptor — bruiser: high defence, fast fire, FTL warp form (X).
 	#   Vela   — glass cannon: squishy, fast fire like Raptor, the fastest FTL hull.
-	{ "name": "Lyra",   "path": "res://assets/Rocket ship.glb",   "tint": Color(1.0, 1.0, 1.0),    "length": 0.45, "yaw": 180.0, "pitch": 0.0, "glow": 0.0, "engine_pitch": 1.0,  "hp": 250, "bolt_scale": 1.8, "bolt_speed": 820.0,  "fire_cd": 0.34, "dmg": 3, "warp": 230.0, "metal": true },
+	{ "name": "Lyra",   "path": "res://assets/Rocket ship.glb",   "tint": Color(1.0, 1.0, 1.0),    "length": 0.45, "yaw": 180.0, "pitch": 0.0, "glow": 0.0, "engine_pitch": 1.0,  "hp": 250, "bolt_scale": 1.8, "bolt_speed": 820.0,  "fire_cd": 0.34, "dmg": 3, "warp": 230.0, "raw": true },
 	{ "name": "Stella", "path": "res://assets/Spaceship.glb",     "tint": Color(0.70, 0.62, 0.95), "length": 0.40, "yaw": 180.0, "pitch": 0.0, "glow": 0.0, "engine_pitch": 0.92, "hp": 100, "bolt_scale": 0.62, "bolt_speed": 1700.0, "fire_cd": 0.04, "dmg": 1, "warp": 345.0 },
 	{ "name": "Raptor", "path": "res://assets/Spaceship (2).glb", "tint": Color(0.70, 0.90, 0.95), "length": 0.42, "yaw": 180.0, "pitch": 0.0, "glow": 0.0, "engine_pitch": 0.82, "hp": 135, "bolt_scale": 0.95, "bolt_speed": 1050.0, "fire_cd": 0.05, "dual": true, "dmg": 2, "warp": 345.0 },
 	# Vela: the FTL ship. warp 4312 -> max cruise ≈ 1.5 ly/s at full charge
@@ -582,9 +582,9 @@ func _build_ship_model(idx: int) -> void:
 	# past center so its first visible frame is already downrange and clear of the ship
 	# (scales with hull size — the muzzle moment itself isn't shown).
 	muzzle = box.size.z * 1.6
-	ShipMesh.recolor(model, info.tint, float(info.glow), info.get("chrome", false), info.get("raw", false), info.get("pbr", false), info.get("surf_roles", []), info.get("metal", false))
+	ShipMesh.recolor(model, info.tint, float(info.glow), info.get("chrome", false), info.get("raw", false), info.get("pbr", false), info.get("surf_roles", []))
 	_build_boosters(box, info.name)
-	if info.get("pbr", false) or info.get("metal", false):
+	if info.get("pbr", false):
 		ShipMesh.add_hull_lights(_mesh_root, box)
 
 

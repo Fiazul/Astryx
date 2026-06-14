@@ -50,7 +50,7 @@ static func fit_model(mesh_root: Node3D, model: Node3D, target_len: float) -> AA
 
 # --- Materials -------------------------------------------------------------
 
-static func recolor(model: Node3D, tint: Color, glow: float, chrome := false, raw := false, pbr := false, roles := [], metal := false) -> void:
+static func recolor(model: Node3D, tint: Color, glow: float, chrome := false, raw := false, pbr := false, roles := []) -> void:
 	for mi in gather_mesh_instances(model):
 		if mi.mesh == null:
 			continue
@@ -62,20 +62,7 @@ static func recolor(model: Node3D, tint: Color, glow: float, chrome := false, ra
 			else:
 				m = StandardMaterial3D.new()
 			m.transparency = BaseMaterial3D.TRANSPARENCY_DISABLED
-			if metal:
-				# Clean brushed SILVER alloy. Drop the model's texture (no white/orange),
-				# moderate metallic so the silver reads under the hull light rig, and NO
-				# emission so she doesn't bloom like a bulb.
-				m.albedo_texture = null
-				m.albedo_color = Color(0.80, 0.83, 0.88)   # cool silver
-				m.metallic = 0.7
-				m.metallic_specular = 0.5
-				m.roughness = 0.32                          # brushed sheen, not a mirror
-				m.rim_enabled = true
-				m.rim = 0.25
-				m.rim_tint = 0.5
-				m.emission_enabled = false
-			elif pbr:
+			if pbr:
 				# Feminine pink-crystal hull (HaniStar). Each surface gets a ROLE:
 				#   "hull" -> light pastel-pink porcelain/crystal with a soft rim aura
 				#   "gold" -> shiny rose-gold metallic accent (keel, top, wings)
@@ -183,31 +170,32 @@ static func recolor(model: Node3D, tint: Color, glow: float, chrome := false, ra
 # The scene has no Light3D otherwise — these are what let the lit pink-crystal
 # material (toon diffuse, rim aura, sharp low-poly highlights) actually show. Range
 # is kept to a few hull-lengths so they light the ship, not the wider scene.
-static func add_hull_lights(parent: Node3D, box: AABB) -> void:
+# `accent` tints the fill + core lights (HaniStar = pink). `energy` scales the whole
+# rig — metallic hulls (Lyra) need it low or they blow out into a bloom blob.
+static func add_hull_lights(parent: Node3D, box: AABB, accent := Color(1.0, 0.70, 0.84), energy := 1.0) -> void:
 	var s := box.size
 	var reach: float = maxf(s.length(), 0.3)
 	# Key: warm near-white, up/front/right — carves the faceted highlights.
 	var key := OmniLight3D.new()
 	key.position = Vector3(reach * 0.9, reach * 1.1, reach * 0.9)
 	key.light_color = Color(1.0, 0.90, 0.93)
-	key.light_energy = 1.3
+	key.light_energy = 1.3 * energy
 	key.omni_range = reach * 3.0
 	key.shadow_enabled = false
 	parent.add_child(key)
-	# Fill: soft pink, down/back/left — lifts the shadow side so it stays bright.
+	# Fill: accent-tinted, down/back/left — lifts the shadow side.
 	var fill := OmniLight3D.new()
 	fill.position = Vector3(-reach * 0.9, -reach * 0.7, -reach * 0.9)
-	fill.light_color = Color(1.0, 0.78, 0.88)
-	fill.light_energy = 0.8
+	fill.light_color = accent
+	fill.light_energy = 0.8 * energy
 	fill.omni_range = reach * 3.0
 	fill.shadow_enabled = false
 	parent.add_child(fill)
-	# Core: a soft pink glow sat right at the hull centre to fill the dark recessed
-	# panels the key/fill miss (the empty pink pockets between plates).
+	# Core: a soft accent glow at the hull centre to fill recessed panels.
 	var core := OmniLight3D.new()
 	core.position = Vector3(0.0, reach * 0.05, 0.0)
-	core.light_color = Color(1.0, 0.62, 0.80)
-	core.light_energy = 1.1
+	core.light_color = accent
+	core.light_energy = 1.1 * energy
 	core.omni_range = reach * 1.6
 	core.shadow_enabled = false
 	parent.add_child(core)
