@@ -29,28 +29,41 @@ const SHIP_MODELS := [
 	#   Stella — the machine-gun: blistering fire rate + very fast small bolts, low HP.
 	#   Raptor — bruiser: high defence, fast fire, FTL warp form (X).
 	#   Vela   — glass cannon: squishy, fast fire like Raptor, the fastest FTL hull.
-	{ "name": "Lyra",   "path": "res://assets/Rocket ship.glb",   "tint": Color(1.0, 1.0, 1.0),    "length": 0.45, "yaw": 180.0, "pitch": 0.0, "glow": 0.0, "engine_pitch": 1.0,  "hp": 250, "bolt_scale": 1.8, "bolt_speed": 820.0,  "fire_cd": 0.34, "dmg": 3, "warp": 230.0, "raw": true },
-	{ "name": "Stella", "path": "res://assets/Spaceship.glb",     "tint": Color(0.70, 0.62, 0.95), "length": 0.40, "yaw": 180.0, "pitch": 0.0, "glow": 0.0, "engine_pitch": 0.92, "hp": 100, "bolt_scale": 0.62, "bolt_speed": 1700.0, "fire_cd": 0.04, "dmg": 1, "warp": 345.0 },
-	{ "name": "Raptor", "path": "res://assets/Spaceship (2).glb", "tint": Color(0.70, 0.90, 0.95), "length": 0.42, "yaw": 180.0, "pitch": 0.0, "glow": 0.0, "engine_pitch": 0.82, "hp": 135, "bolt_scale": 0.95, "bolt_speed": 1050.0, "fire_cd": 0.05, "dual": true, "dmg": 2, "warp": 345.0 },
+	# Lyra: clean multi-part OBJ (cockpitglass, fighter, engine, guns, enginecanopy).
+	# Per-surface roles give glass canopy + silver body + gold accents; neutral dim
+	# light rig so the metal reads without glowing. One engine -> one booster.
+	{ "name": "Lyra",   "path": "res://assets/lyra.obj",   "tint": Color(1.0, 1.0, 1.0),    "length": 0.7, "yaw": 180.0, "pitch": 0.0, "glow": 0.0, "engine_pitch": 1.0,  "hp": 280, "bolt_scale": 1.8, "bolt_speed": 820.0,  "fire_cd": 0.22, "dmg": 3, "warp": 10.7, "pbr": true,
+		"surf_roles": ["glass", "red", "red", "goldtrim", "goldtrim"],
+		"light_accent": Color(1.0, 0.86, 0.84), "light_energy": 0.85 },
+	{ "name": "Stella", "path": "res://assets/Spaceship.glb",     "tint": Color(0.70, 0.62, 0.95), "length": 0.55, "yaw": 180.0, "pitch": 0.0, "glow": 0.0, "engine_pitch": 0.92, "hp": 80, "bolt_scale": 0.62, "bolt_speed": 1700.0, "fire_cd": 0.04, "dmg": 1, "warp": 10.0 },
+	{ "name": "Raptor", "path": "res://assets/Spaceship (2).glb", "tint": Color(0.70, 0.90, 0.95), "length": 0.55, "yaw": 180.0, "pitch": 0.0, "glow": 0.0, "engine_pitch": 0.82, "hp": 170, "bolt_scale": 0.95, "bolt_speed": 1050.0, "fire_cd": 0.10, "dual": true, "dmg": 2, "warp": 7.3 },
 	# Vela: the FTL ship. warp 4312 -> max cruise ≈ 1.5 ly/s at full charge
 	# (THRUST·warp/DAMPING, 1 ly = 632,411 units). Her drive spools up over time
 	# (see WARP_CHARGE_*), so she eases into warp rather than snapping to it.
 	# "brake": her ultimate — hold R to ease to a full stop (she's so fast that stopping
 	# at a star is otherwise brutal; the air-brake makes her usable). Squishy hull.
-	{ "name": "Vela",   "path": "res://assets/Spaceship (3).glb", "tint": Color(0.55, 0.80, 1.0),  "length": 0.42, "yaw": 180.0, "pitch": 0.0, "glow": 0.0, "warp": 5749.0, "engine_pitch": 1.14, "brake": true, "hp": 120, "bolt_scale": 0.9, "bolt_speed": 1050.0, "fire_cd": 0.05, "dmg": 2, "raw": true },
+	{ "name": "Vela",   "path": "res://assets/Spaceship (3).glb", "tint": Color(0.55, 0.80, 1.0),  "length": 0.55, "yaw": 180.0, "pitch": 0.0, "glow": 0.0, "warp": 14.0, "engine_pitch": 1.14, "brake": true, "hp": 90, "bolt_scale": 0.9, "bolt_speed": 1050.0, "fire_cd": 0.06, "dmg": 2, "raw": true },
 	# HaniStar — a slow, pretty support hull that CAN fight: fires a touch faster than
 	# Lyra, hits a bit harder than Stella, 125 HP. Three light-blue boosters.
 	# surf_roles indexes the GLB's 9 surfaces: gold = shiny rose-gold (7 = wings), glass =
 	# top-front canopy (3), orb = soft neon-pink accents, hull = pink crystal body.
 	# (4 = the two upright tail fins, kept pink hull.)
-	{ "name": "HaniStar",   "path": "res://assets/utility_ship.glb",  "tint": Color(1.0, 0.412, 0.706), "length": 0.7,  "yaw": 90.0, "pitch": 0.0, "glow": 0.18, "warp": 3.0, "engine_pitch": 0.7, "hp": 125, "fire_cd": 0.24, "dmg": 2, "bolt_scale": 1.0, "bolt_speed": 900.0, "pbr": true,
+	{ "name": "HaniStar",   "path": "res://assets/utility_ship.glb",  "tint": Color(1.0, 0.412, 0.706), "length": 0.6,  "yaw": 90.0, "pitch": 0.0, "glow": 0.18, "warp": 8.3, "engine_pitch": 0.7, "hp": 200, "fire_cd": 0.18, "dmg": 2, "bolt_scale": 1.0, "bolt_speed": 900.0, "pbr": true,
 		"surf_roles": ["hull", "hull", "gold", "glass", "hull", "hull", "hull", "gold", "hull"] },
+	# Raptor 2 Neo ("mother ship"): the powerhouse — Stella's fire rate, Vela's top speed,
+	# Lyra's damage, HaniStar's hull. Silver-blue metal body + glass illuminators.
+	{ "name": "Raptor 2 Neo", "path": "res://assets/raptor2.obj", "tint": Color(1, 1, 1), "length": 0.65, "yaw": 0.0, "pitch": 0.0, "glow": 0.0, "engine_pitch": 0.7, "hp": 200, "bolt_scale": 1.0, "bolt_speed": 1700.0, "fire_cd": 0.06, "dmg": 3, "warp": 13.0, "pbr": true, "laser": true, "auto_capture": true,
+		"laser_offset": Vector3(0.0, -0.03, -0.10),   # beam emitter point (slightly down)
+		"surf_roles": ["glass", "silver"],
+		"light_accent": Color(0.82, 0.90, 1.0), "light_energy": 0.8 },
 	# Vortex retired as a player ship — it's a boss enemy now (see combat.gd boss).
 ]
 const BOOSTER_COLOR := Color(0.35, 0.8, 1.0)
 # Booster nozzle placement (fractions of the fitted model's size). Nudge these
 # to snap the plumes onto Lyra's actual engines.
 const BOOSTER_BACK := 0.40          # how far back (0 = center, 0.5 = tail). Lower = closer to hull.
+# Per-ship override of BOOSTER_BACK (fraction back toward the tail).
+const BOOSTER_BACK_OVERRIDE := {}
 const BOOSTER_RISE := 0.0           # vertical nudge for the whole cluster (+ up, - down)
 # Per-ship nozzle layout: each engine is (x, y) as fractions of the ship's WIDTH
 # (x = left/right, y = up/down). Each ship has a different engine count/pattern;
@@ -60,12 +73,10 @@ const BOOSTER_RISE := 0.0           # vertical nudge for the whole cluster (+ up
 #   Stella = 2
 #   Raptor = 1
 const BOOSTER_LAYOUTS := {
-	"Lyra": [
-		Vector2( 0.00,  0.16),   # apex (top center)
-		Vector2(-0.11,  0.00),   # crossbar left
-		Vector2( 0.11,  0.00),   # crossbar right
-		Vector2(-0.18, -0.15),   # leg, bottom-left (widest)
-		Vector2( 0.18, -0.15),   # leg, bottom-right (widest)
+	"Lyra": [ Vector2(0.0, 0.0) ],   # one plume on the engine (clean OBJ, centred)
+	"Raptor 2 Neo": [   # onto the model's 4 engine bells: upper pair (up+left+forward) + lower pair
+		Vector2(-0.32,  0.14), Vector2( 0.30,  0.14),
+		Vector2(-0.17, -0.13), Vector2( 0.17, -0.13),
 	],
 	"Stella": [
 		Vector2(-0.09,  0.00),   # left
@@ -86,11 +97,12 @@ const BOOSTER_LAYOUTS := {
 }
 const BOOSTER_FALLBACK := [Vector2(-0.08, 0.0), Vector2(0.08, 0.0)]  # if a name isn't listed
 # Per-ship plume shaping. Raptor: long/thin/small. Vela: long, thin, golden.
-const BOOSTER_RADIUS_SCALE := { "Lyra": 0.6, "Raptor": 0.62, "Vela": 0.45, "Stella": 0.40, "HaniStar": 0.6 }   # thin spikes
-const BOOSTER_LENGTH_SCALE := { "Raptor": 1.0, "Vela": 1.4,  "Stella": 0.8, "Lyra": 0.5, "HaniStar": 0.9 }  # plume length × hull
+const BOOSTER_RADIUS_SCALE := { "Lyra": 0.9, "Raptor": 0.62, "Vela": 0.45, "Stella": 0.40, "HaniStar": 0.6, "Raptor 2 Neo": 0.6 }   # one engine
+const BOOSTER_LENGTH_SCALE := { "Raptor": 1.0, "Vela": 1.4,  "Stella": 0.8, "Lyra": 0.8, "HaniStar": 0.9, "Raptor 2 Neo": 1.3 }  # plume length × hull
 const BOOSTER_COLOR_OVERRIDE := {
 	"HaniStar": Color(0.62, 0.82, 1.0),    # very light blue exhaust
-	"Lyra": Color(0.55, 0.80, 1.0),    # light sky blue
+	"Lyra": Color(0.55, 0.90, 1.0),    # pretty bright aqua-cyan
+	"Raptor 2 Neo": Color(0.35, 0.65, 1.0),  # strong electric blue
 	"Vela": Color(1.0, 0.82, 0.32),    # transparent gold
 	"Stella": Color(1.0, 0.26, 0.20),  # sharp transparent red
 	"Raptor": Color(0.85, 0.72, 0.45), # champagne gold (small + powerful; deploys in warp)
@@ -100,7 +112,8 @@ const BOOSTER_FADE_FLIP := false    # if the plume fades at the wrong end, flip 
 const BOOSTER_MOUNT_SCALE := { "HaniStar": [1.3, 0.65, 0.65] }
 # Per-mount extra BACK offset (fraction of hull length) to push a nozzle clear of the
 # hull when a rear plate blocks it. HaniStar's main sits behind a rear plate.
-const BOOSTER_MOUNT_BACK := { "HaniStar": [0.08, 0.0, 0.0] }
+const BOOSTER_MOUNT_BACK := { "HaniStar": [0.08, 0.0, 0.0],
+	"Raptor 2 Neo": [-0.08, -0.08, 0.0, 0.0] }   # push the upper pair forward
 # Camera zoom (mouse wheel)
 const ZOOM_MIN := 0.45              # closest
 const ZOOM_MAX := 3.0               # farthest
@@ -114,6 +127,9 @@ const ZOOM_STEP := 0.12             # per wheel notch
 const THRUST := 1650.0        # forward/back accel (units/s^2) — ×10 for the spread-out system
 const STRAFE_THRUST := 1050.0 # lateral / vertical accel
 const BOOST_MULT := 3.0       # Shift multiplier
+const BOOST_ENERGY_MAX := 100.0
+const BOOST_DRAIN := 30.0     # boost energy/sec burned while boosting
+const BOOST_REGEN := 26.0     # boost energy/sec recovered when not boosting
 const MAX_SPEED := 10000.0
 # Calm in-system cruise: sublight (non-warp) flight is capped here so you're not
 # blitzing past the planets near Sol. Boost (Shift) multiplies it for fast travel.
@@ -170,12 +186,25 @@ var bolt_speed := 950.0        # this hull's bullet velocity (combat reads this)
 var bolt_scale := 1.0          # this hull's bullet size multiplier (combat reads this)
 var bolt_damage := 1           # damage per bolt (combat reads this) — Lyra's hit hard
 var can_fire := true           # false for utility hulls (no weapons) — combat reads this
+var has_laser := false         # right-click nose laser beam (Raptor 2 Neo) — combat reads this
+var laser_offset := Vector3.ZERO   # local muzzle offset for the beam (x=right, y=up)
+var auto_capture := false       # captures bodies in range automatically (no V) — Raptor 2 Neo
+var combat_lock := false        # set by main while in combat — no interstellar/FTL speed
+var boost_energy := BOOST_ENERGY_MAX   # separate boost pool (HUD shows its own bar)
+var _boost_starved := false            # true while boosting on an empty tank -> plume sputters
+var autopilot := false          # hands-off cinematic flight to autopilot_target (M-map)
+var autopilot_target := Vector3.ZERO   # world position to fly to
+var autopilot_name := ""        # body the autopilot is bound to (main refreshes the target)
+const AP_ARRIVE := 600.0        # stop autopilot within this distance of the target
+const AP_TURN := 2.5            # autopilot turn rate toward the target
 var muzzle := 2.5              # forward distance bolts spawn at — this hull's nose tip
 var _dual := false             # Raptor: can toggle between combat + warp modes
-const RAPTOR_WARP := 3450.0        # Raptor Warp mode (≈1.2 ly/s)
-const RAPTOR_COMBAT_WARP := 345.0  # Raptor Combat mode top (≈0.12 ly/s, like Stella)
+# Warp is now a TOP-SPEED multiplier (cap = MAX_SPEED × warp). Tuned so the fastest
+# hull crosses ~1 light-year in ~45 seconds (1 ly = 6.32M units; 14×10000 ≈ 140k u/s).
+const RAPTOR_WARP := 12.0           # Raptor Warp mode
+const RAPTOR_COMBAT_WARP := 7.3    # Raptor Combat mode top
 const HYPERSONIC_SPEED := 15000.0   # above this a warp ship is "hypersonic" (no combat)
-const WARP_FLOOR := 5.0        # warp multiplier at zero charge (controllable start)
+const WARP_FLOOR := 1.0        # zero-charge = calm sublight; holding W spools up to warp
 # FTL gate: warp can only spool up once you're beyond the system star's gravity field.
 # Inside this radius you fly normal sublight cruise no matter the hull.
 const SOL_FIELD_RADIUS := 2200.0
@@ -300,13 +329,19 @@ func fly(delta: float) -> void:
 	# --- Look vs. steer ---
 	# Hold RMB or T for free-look: the mouse orbits the camera around the ship while
 	# the ship holds its heading and keeps flying. Release to steer normally again.
-	_free_look = Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) \
+	# (On laser ships RMB fires the nose beam instead, so free-look there is T-only.)
+	_free_look = (Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) and not has_laser) \
 		or Input.is_physical_key_pressed(KEY_T)
 	var md := _mouse_delta
 	_mouse_delta = Vector2.ZERO
 	var turn := 0.0   # this frame's mouse yaw (drives cosmetic banking below)
 
-	if _free_look:
+	if autopilot:
+		_autopilot_steer(delta)
+		_steer = Vector2.ZERO
+		_look_yaw = 0.0
+		_look_pitch = 0.0
+	elif _free_look:
 		_steer = Vector2.ZERO
 		_look_yaw = clampf(_look_yaw - md.x * mouse_sens, -LOOK_YAW_LIMIT, LOOK_YAW_LIMIT)
 		_look_pitch = clampf(_look_pitch - md.y * mouse_sens, -LOOK_PITCH_LIMIT, LOOK_PITCH_LIMIT)
@@ -329,7 +364,15 @@ func fly(delta: float) -> void:
 		_look_pitch = 0.0
 
 	# --- Thrust (local axes -> world via current basis) ---
-	var boost := BOOST_MULT if Input.is_physical_key_pressed(KEY_SHIFT) else 1.0
+	# Shift = boost, burning its OWN boost-energy pool. No boost energy = no boost.
+	var boost := 1.0
+	if Input.is_physical_key_pressed(KEY_SHIFT) and boost_energy > 0.0:
+		boost = BOOST_MULT
+		boost_energy = maxf(boost_energy - BOOST_DRAIN * delta, 0.0)
+	else:
+		boost_energy = minf(boost_energy + BOOST_REGEN * delta, BOOST_ENERGY_MAX)
+	# Holding boost with an empty tank = the engine chokes (plume sputters).
+	_boost_starved = Input.is_physical_key_pressed(KEY_SHIFT) and boost_energy <= 0.0
 	var fwd := 0.0
 	var strafe := 0.0
 	var lift := 0.0
@@ -354,14 +397,23 @@ func fly(delta: float) -> void:
 	# FTL: every hull can spool warp by holding W. There's no gate — instead the
 	# force-slow safe-zones around stars/planets cap your speed when you're near them,
 	# so you naturally drop out of warp near a body and fly free in the deep.
+	# Auto-pilot drives forward at warp toward the target (overrides manual thrust).
+	if autopilot:
+		fwd = -1.0
+		strafe = 0.0
+		lift = 0.0
+		braking = false
 	var eff_warp := 1.0
-	if warp > 1.0:
-		if Input.is_physical_key_pressed(KEY_W):
+	if warp > 1.0 and not combat_lock:
+		if Input.is_physical_key_pressed(KEY_W) or autopilot:   # autopilot spools warp too
 			_warp_charge = minf(_warp_charge + delta / WARP_CHARGE_TIME, 1.0)
 		else:
 			_warp_charge = maxf(_warp_charge - delta / WARP_DECAY_TIME, 0.0)
 		var c := _warp_charge * _warp_charge * (3.0 - 2.0 * _warp_charge)   # smoothstep
 		eff_warp = lerpf(WARP_FLOOR, warp, c)
+	elif combat_lock:
+		# No interstellar speed during combat — bleed any spool back to sublight.
+		_warp_charge = maxf(_warp_charge - delta / WARP_DECAY_TIME, 0.0)
 
 	var local_accel := Vector3(strafe * STRAFE_THRUST, lift * STRAFE_THRUST, fwd * THRUST) * eff_warp
 	if local_accel != Vector3.ZERO:
@@ -447,20 +499,25 @@ func _update_boosters(throttle: float, delta: float) -> void:
 	var flick := 1.0 + 0.18 * sin(t * 33.0) + 0.12 * sin(t * 71.0) if fire else 1.0
 	var len_mul := 2.4 * flick if fire else 1.0
 	var max_alpha := 0.95 if fire else 0.6
+	# Out of boost juice: the engine coughs — a fast on/off stutter that cuts the plume.
+	var sputter := 1.0
+	if _boost_starved:
+		sputter = 0.15 if fmod(t * 11.0, 1.0) < 0.45 else 1.0
+		k = 1.0   # snap, so the stutter is visible instead of smoothed away
 	for b in _boosters:
 		# Plume length stretches with throttle; bell + ring (on the pivot) stay fixed.
 		var sc: Vector3 = b.plume_holder.scale
-		sc.y = lerpf(sc.y, (0.35 + throttle * 0.7) * len_mul, k)
+		sc.y = lerpf(sc.y, (0.35 + throttle * 0.7) * len_mul * sputter, k)
 		b.plume_holder.scale = sc
 		# Plume transparency (additive) tracks throttle (fire = much brighter).
 		var pcol: Color = b.plume_mat.albedo_color
-		pcol.a = lerpf(pcol.a, clampf((0.05 + throttle * 0.45) * (1.7 if fire else 1.0), 0.0, max_alpha), k)
+		pcol.a = lerpf(pcol.a, clampf((0.05 + throttle * 0.45) * (1.7 if fire else 1.0) * sputter, 0.0, max_alpha), k)
 		b.plume_mat.albedo_color = pcol
 		# Soft core glow at the nozzle (bigger + flickering in fire mode).
-		var cs := (0.35 + throttle * 0.7) * (1.6 * flick if fire else 1.0)
+		var cs := (0.35 + throttle * 0.7) * (1.6 * flick if fire else 1.0) * sputter
 		b.core.scale = Vector3(cs, cs, cs)
 		var ccol: Color = b.core_mat.albedo_color
-		ccol.a = lerpf(ccol.a, clampf(0.12 + throttle * 0.5, 0.0, 0.95), k)
+		ccol.a = lerpf(ccol.a, clampf((0.12 + throttle * 0.5) * sputter, 0.0, 0.95), k)
 		b.core_mat.albedo_color = ccol
 
 
@@ -563,17 +620,27 @@ func _build_ship_model(idx: int) -> void:
 	bolt_scale = float(info.get("bolt_scale", 1.0))
 	bolt_damage = int(info.get("dmg", 1))
 	can_fire = bool(info.get("can_fire", true))
+	has_laser = bool(info.get("laser", false))
+	laser_offset = info.get("laser_offset", Vector3.ZERO)
+	auto_capture = bool(info.get("auto_capture", false))
 	_dual = info.get("dual", false)
 	_engine_pitch = float(info.get("engine_pitch", 1.0))
 	_can_brake = info.get("brake", false)
 	_warp_charge = 0.0
-	var packed := load(info.path) as PackedScene
-	if packed == null:
+	# Loads a PackedScene (.glb/.gltf/.fbx/.dae) OR a bare Mesh (.obj) — wrap a Mesh
+	# in a MeshInstance3D so both paths produce a model Node3D.
+	var res := load(info.path)
+	var model: Node3D
+	if res is PackedScene:
+		model = (res as PackedScene).instantiate() as Node3D
+	elif res is Mesh:
+		var mi := MeshInstance3D.new()
+		mi.mesh = res
+		model = mi
+	if model == null:
 		push_warning("Ship: could not load %s — using primitive fallback." % info.path)
 		_build_primitive_ship()
 		return
-
-	var model := packed.instantiate() as Node3D
 	_mesh_root.add_child(model)
 	model.rotation = Vector3(deg_to_rad(float(info.pitch)), deg_to_rad(float(info.yaw)), 0.0)
 	var box := ShipMesh.fit_model(_mesh_root, model, float(info.length))
@@ -582,10 +649,43 @@ func _build_ship_model(idx: int) -> void:
 	# past center so its first visible frame is already downrange and clear of the ship
 	# (scales with hull size — the muzzle moment itself isn't shown).
 	muzzle = box.size.z * 1.6
-	ShipMesh.recolor(model, info.tint, float(info.glow), info.get("chrome", false), info.get("raw", false), info.get("pbr", false), info.get("surf_roles", []))
+	# Optionally lop off the model's rear (behind the ring) so the bell disc caps a
+	# clean cut instead of the GLB's messy tail.
+	if info.get("clip_back", false):
+		var cut: float = box.size.z * float(BOOSTER_BACK_OVERRIDE.get(info.name, BOOSTER_BACK))
+		ShipMesh.clip_behind(model, _mesh_root, cut)
+	if info.get("metal", false) and info.has("gold_above"):
+		# Silver body + champagne-gold top wing (split a single-surface mesh by height).
+		ShipMesh.metal_split(model, _mesh_root, box.size.y * float(info.gold_above))
+	else:
+		ShipMesh.recolor(model, info.tint, float(info.glow), info.get("chrome", false), info.get("raw", false), info.get("pbr", false), info.get("surf_roles", []), info.get("metal", false))
 	_build_boosters(box, info.name)
+	if info.get("gold_backplate", false):
+		_add_gold_backplate(box, info.name)
 	if info.get("pbr", false):
-		ShipMesh.add_hull_lights(_mesh_root, box)
+		# Light rig tint/energy per ship (HaniStar: pink; metal ships: neutral + dim).
+		var accent: Color = info.get("light_accent", Color(1.0, 0.70, 0.84))
+		var lenergy: float = float(info.get("light_energy", 1.0))
+		ShipMesh.add_hull_lights(_mesh_root, box, accent, lenergy)
+
+
+# A champagne-gold heart plate seated at the booster cluster's base, filling the
+# gaps between bells so the clipped rear reads as one solid backing instead of holes.
+func _add_gold_backplate(box: AABB, ship_name: String) -> void:
+	var s := box.size
+	var plate := MeshInstance3D.new()
+	plate.mesh = ShipMesh.make_heart_mesh(s.x * 0.5)   # sized to the bell cluster
+	var gm := StandardMaterial3D.new()
+	gm.albedo_color = Color(0.737, 0.651, 0.478)   # champagne gold
+	gm.metallic = 1.0
+	gm.roughness = 0.12
+	gm.cull_mode = BaseMaterial3D.CULL_DISABLED     # visible from both sides
+	plate.material_override = gm
+	# Sit BEHIND the bells (toward the hull) so the bells mount on its face and every
+	# plume fires out the far side — nothing passes through the plate.
+	var mount_z := s.z * float(BOOSTER_BACK_OVERRIDE.get(ship_name, BOOSTER_BACK))
+	plate.position = Vector3(0.0, s.y * BOOSTER_RISE, mount_z - s.z * 0.12)
+	_mesh_root.add_child(plate)
 
 
 # --- Ship-swap API (called by main when docked) ---
@@ -623,11 +723,36 @@ func face_toward(world_point: Vector3) -> void:
 	_cam_basis = transform.basis
 
 
+# Begin hands-off cinematic flight to a body (main keeps autopilot_target current).
+func start_autopilot(body_name: String) -> void:
+	autopilot = true
+	autopilot_name = body_name
+
+
+# Steer the ship toward autopilot_target; cancel the moment the player takes control.
+func _autopilot_steer(delta: float) -> void:
+	# Cancel only when the player actually flies (thrust keys) — not the mouse, so it
+	# doesn't abort the instant the map closes and the cursor re-captures.
+	if Input.is_physical_key_pressed(KEY_W) or Input.is_physical_key_pressed(KEY_S) \
+			or Input.is_physical_key_pressed(KEY_A) or Input.is_physical_key_pressed(KEY_D) \
+			or Input.is_physical_key_pressed(KEY_SPACE) or Input.is_physical_key_pressed(KEY_CTRL):
+		autopilot = false
+		return
+	var to := autopilot_target - true_pos
+	if to.length() < AP_ARRIVE:
+		autopilot = false
+		return
+	var dir := to.normalized()
+	var up := Vector3.UP if absf(dir.dot(Vector3.UP)) < 0.98 else Vector3.RIGHT
+	var tb := Transform3D(Basis(), Vector3.ZERO).looking_at(dir, up).basis
+	transform.basis = transform.basis.slerp(tb, clampf(AP_TURN * delta, 0.0, 1.0)).orthonormalized()
+
+
 # Additive booster plumes at the rear of the (fitted, centered) model — one per
 # engine in this ship's BOOSTER_LAYOUTS entry (count/pattern differ per hull).
 func _build_boosters(box: AABB, ship_name: String) -> void:
 	var s := box.size
-	var mount_z := s.z * BOOSTER_BACK  # +Z is behind the ship (forward is -Z)
+	var mount_z := s.z * float(BOOSTER_BACK_OVERRIDE.get(ship_name, BOOSTER_BACK))  # +Z is behind the ship (forward is -Z)
 	var rise := s.y * BOOSTER_RISE
 	var mounts: Array = BOOSTER_LAYOUTS.get(ship_name, BOOSTER_FALLBACK)
 	_booster_color = BOOSTER_COLOR_OVERRIDE.get(ship_name, BOOSTER_COLOR)
@@ -637,7 +762,9 @@ func _build_boosters(box: AABB, ship_name: String) -> void:
 	var lscale: float = BOOSTER_LENGTH_SCALE.get(ship_name, 1.0)
 	# Sized PROPORTIONAL to the hull (no absolute floors — those blew up once the ships
 	# shrank ~9×). radius ~ fraction of width, length ~ fraction of hull length.
-	var r := s.x * (0.085 - 0.006 * mounts.size()) * rscale
+	# Bells shrink as the count grows, but clamp so dense clusters (Lyra's 10) stay fat
+	# enough to overlap into a solid disc instead of vanishing.
+	var r := s.x * maxf(0.085 - 0.006 * mounts.size(), 0.05) * rscale
 	var length := s.z * 0.55 * lscale
 	# Optional per-mount size multipliers (same order as the mounts) so one ship can
 	# mix a big main booster with smaller support boosters.

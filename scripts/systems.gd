@@ -120,6 +120,8 @@ static func _sol() -> Array:
 			"glow": p.get("glow", 1.0), "star": p.get("star", false),
 			"mass": p.get("mass", 1.0),    # real mass (Earth=1) drives the force-slow zone
 			"ring": p.get("ring", false),  # Saturn's ring
+			"craft": p.get("craft", false),   # Voyagers drift outward forever
+			"drift": p.get("drift", 0.0),
 			"live": true, "pos": Vector3.ZERO,
 		}
 		if p.has("model"):

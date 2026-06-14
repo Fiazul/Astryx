@@ -7,6 +7,8 @@ extends Node
 const FIRE_VOICES := 8          # round-robin players so rapid shots overlap cleanly
 const FIRE_DB := -19.0          # bullet fire — gentle/soft
 const EXPLOSION_DB := -3.0
+const LASER_DB := -14.0         # continuous beam hum — present but not harsh
+const CLICK_DB := -12.0         # soft UI click
 
 # --- Engine voice ---
 # Mix intent: the engine is present and has weight, but the music still leads.
@@ -46,6 +48,9 @@ const ENGINE_SUSTAIN_DUCK := 32.0   # dB the engine drops — once music is in, 
 var _fire: Array[AudioStreamPlayer] = []
 var _fire_i := 0
 var _explosion: AudioStreamPlayer
+var _laser_loop: AudioStreamPlayer
+var _laser_on := false
+var _click: AudioStreamPlayer
 
 # Per-ship loop streams (distinct timbre per hull, see tools/gen_engine_audio.py);
 # falls back to the shared engine_loop.ogg for any hull without a dedicated file.
@@ -102,6 +107,22 @@ func _ready() -> void:
 	_eng_stop.stream = load("res://assets/engine_stop.ogg") as AudioStream
 	_eng_stop.volume_db = ENGINE_TRANS_DB
 	add_child(_eng_stop)
+
+	# Soft UI click for menus/buttons.
+	_click = AudioStreamPlayer.new()
+	_click.stream = load("res://assets/ui_click.wav") as AudioStream
+	_click.volume_db = CLICK_DB
+	add_child(_click)
+
+	# Laser beam: a seamless looping hum, played only while the beam is firing.
+	_laser_loop = AudioStreamPlayer.new()
+	var ls := load("res://assets/laser_loop.wav")
+	if ls is AudioStreamWAV:
+		(ls as AudioStreamWAV).loop_mode = AudioStreamWAV.LOOP_FORWARD
+		(ls as AudioStreamWAV).loop_end = (ls as AudioStreamWAV).data.size() / 2   # 16-bit mono
+	_laser_loop.stream = ls
+	_laser_loop.volume_db = LASER_DB
+	add_child(_laser_loop)
 
 
 # Load an OGG and flag it as looping (no-op / null if the file is missing).
@@ -216,3 +237,21 @@ func play_fire() -> void:
 func play_explosion() -> void:
 	_explosion.pitch_scale = randf_range(0.9, 1.06)
 	_explosion.play()
+
+
+# Soft UI click for buttons/menus (slight pitch variance so repeats don't feel robotic).
+func play_click() -> void:
+	if _click != null:
+		_click.pitch_scale = randf_range(0.96, 1.06)
+		_click.play()
+
+
+# Laser beam on/off — start/stop the seamless looping hum (called each frame by combat).
+func laser(on: bool) -> void:
+	if _laser_loop == null or on == _laser_on:
+		return
+	_laser_on = on
+	if on:
+		_laser_loop.play()
+	else:
+		_laser_loop.stop()

@@ -31,6 +31,7 @@ signal ship_selected(index: int)   # emitted when a hangar row is clicked
 var ship: Ship
 var planets: PlanetSystem
 var combat: Combat           # for HP / kills readout
+var coins := 0               # player currency, shown beside KILLS (set by main)
 var codex: Codex             # discovery progress (set by main)
 var origin_name := "Earth"   # what the distance readout measures from (per system)
 
@@ -58,6 +59,10 @@ var _boss_label: Label
 var _hull_label: Label       # "HULL  170 / 220" sitting over the hull bar
 var _hull_fill: ColorRect    # the coloured fill of the player hull bar (top-left)
 var _hull_bar_w := 0.0       # inner (fillable) width of the hull bar
+var _energy_fill: ColorRect  # weapon-energy bar fill (shooting)
+var _energy_bar_w := 0.0
+var _boost_fill: ColorRect   # boost-energy bar fill (Shift)
+var _boost_bar_w := 0.0
 var _boss_bar: Control       # red boss HP bar (top-center, shown only while a boss lives)
 var _boss_fill: ColorRect
 var _boss_bar_w := 0.0
@@ -76,6 +81,7 @@ var codex_button: Button      # -> CodexPanel.toggle()
 var settings_button: Button   # -> SettingsMenu.toggle()
 var controls_button: Button   # toggles the controls cheat-sheet
 var nav_button: Button        # -> main.toggle_nav() (stop/resume the Survey guide)
+var cancel_nav_button: Button # -> cancels a locked (paid) map waypoint; shown only then
 var _detail_range := 600.0    # show the Details button within this of a body (×10 spread)
 
 # --- HUD layout editor -------------------------------------------------------
@@ -257,6 +263,19 @@ func _build_hull_bar(canvas: CanvasLayer) -> void:
 	holder.add_child(bar.root)
 	_hull_fill = bar.fill
 	_hull_bar_w = bar.inner_w
+	# Weapon-energy bar (thin, cyan) — drained by shooting.
+	var ebar := _build_bar(184, 6, Color(0.4, 0.85, 1.0))
+	ebar.root.position = Vector2(0, 27)
+	holder.add_child(ebar.root)
+	_energy_fill = ebar.fill
+	_energy_bar_w = ebar.inner_w
+	# Boost-energy bar (thin, orange) — drained by Shift boost.
+	var bbar := _build_bar(184, 6, Color(1.0, 0.65, 0.25))
+	bbar.root.position = Vector2(0, 35)
+	holder.add_child(bbar.root)
+	_boost_fill = bbar.fill
+	_boost_bar_w = bbar.inner_w
+	holder.size = Vector2(184, 42)
 	canvas.add_child(holder)
 	_track("hull", holder)
 
@@ -304,11 +323,30 @@ func _build_button_bar(canvas: CanvasLayer) -> void:
 	controls_button.pressed.connect(toggle_controls)
 	_track("buttons", _btn_bar)
 
+	# Cancel-Nav button: only shown while a LOCKED (paid) map waypoint is active.
+	cancel_nav_button = Button.new()
+	cancel_nav_button.text = "✖ CANCEL NAV"
+	cancel_nav_button.position = Vector2(SCREEN.x * 0.5 - 80.0, 96.0)
+	cancel_nav_button.size = Vector2(160, 26)
+	cancel_nav_button.focus_mode = Control.FOCUS_NONE
+	cancel_nav_button.add_theme_font_size_override("font_size", 12)
+	cancel_nav_button.add_theme_color_override("font_color", Color(1.0, 0.7, 0.4))
+	cancel_nav_button.add_theme_stylebox_override("normal", _metal_box(Color(1.0, 0.6, 0.15), 0.5))
+	cancel_nav_button.add_theme_stylebox_override("hover", _metal_box(Color(1.0, 0.7, 0.3), 0.9))
+	cancel_nav_button.add_theme_stylebox_override("pressed", _metal_box(Color(1.0, 0.8, 0.4), 1.0))
+	cancel_nav_button.visible = false
+	canvas.add_child(cancel_nav_button)
+
 
 # Reflect nav on/off in the button label so it's clear what tapping it does.
 func set_nav_stopped(stopped: bool) -> void:
 	if nav_button != null:
 		nav_button.text = "▶ NAV" if stopped else "⊘ NAV"
+
+# Show/hide the Cancel-Nav button (main calls this while a locked waypoint is active).
+func set_cancel_nav_visible(v: bool) -> void:
+	if cancel_nav_button != null:
+		cancel_nav_button.visible = v
 
 func _icon_button(parent: Node, text: String, pos: Vector2, w: float, edge: Color) -> Button:
 	var b := Button.new()
@@ -822,12 +860,21 @@ func refresh() -> void:
 
 	if combat != null:
 		# Top-right box keeps just the kill count; the hull bar (top-left) is the HP gauge.
-		_combat_label.text = "KILLS  %d" % combat.kills
+		_combat_label.text = "KILLS  %d      ◈ %d" % [combat.kills, coins]
 		var hp_ratio: float = clampf(float(combat.player_hp) / maxf(float(combat.player_max), 1.0), 0.0, 1.0)
 		_hull_label.text = "HULL   %d / %d" % [combat.player_hp, combat.player_max]
 		_hull_fill.size.x = _hull_bar_w * hp_ratio
 		# Green when healthy, amber at half, red when critical.
 		_hull_fill.color = Color(0.4, 1.0, 0.55).lerp(Color(1.0, 0.35, 0.3), 1.0 - hp_ratio)
+		if _energy_fill != null:
+			var e_ratio: float = clampf(combat.energy / 100.0, 0.0, 1.0)
+			_energy_fill.size.x = _energy_bar_w * e_ratio
+			# Cyan when charged, dim red when nearly empty (can't fire).
+			_energy_fill.color = Color(0.4, 0.85, 1.0).lerp(Color(0.9, 0.4, 0.4), 1.0 - e_ratio)
+		if _boost_fill != null and ship_ref != null:
+			var b_ratio: float = clampf(ship_ref.boost_energy / 100.0, 0.0, 1.0)
+			_boost_fill.size.x = _boost_bar_w * b_ratio
+			_boost_fill.color = Color(1.0, 0.65, 0.25).lerp(Color(0.6, 0.4, 0.3), 1.0 - b_ratio)
 		# Hitmarker flash (alpha tracks the combat hit timer).
 		var hm: float = clampf(combat.hitmarker / 0.18, 0.0, 1.0)
 		_hitmarker.modulate = Color(1.0, 0.95, 0.55, hm)

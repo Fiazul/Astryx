@@ -48,9 +48,125 @@ static func fit_model(mesh_root: Node3D, model: Node3D, target_len: float) -> AA
 	return AABB(-size * factor * 0.5, size * factor)
 
 
+# Rebuild each mesh dropping every triangle whose centroid sits AFT of `cut_z`
+# (in `mesh_root` space, +Z = tail). Used to lop off a model's messy rear so the
+# booster ring disc can cap the clean cut. Preserves normals/uv/colour + material.
+static func clip_behind(root: Node3D, mesh_root: Node3D, cut_z: float) -> void:
+	var inv := mesh_root.global_transform.affine_inverse()
+	for mi in gather_mesh_instances(root):
+		if mi.mesh == null:
+			continue
+		var to_root := inv * mi.global_transform   # mesh-local vert -> mesh_root space
+		var src := mi.mesh
+		var new_mesh := ArrayMesh.new()
+		var kept_any := false
+		for si in src.get_surface_count():
+			var orig_mat := mi.get_active_material(si)
+			var a := src.surface_get_arrays(si)
+			var verts: PackedVector3Array = a[Mesh.ARRAY_VERTEX]
+			if verts.is_empty():
+				continue
+			var norms: PackedVector3Array = a[Mesh.ARRAY_NORMAL] if a[Mesh.ARRAY_NORMAL] != null else PackedVector3Array()
+			var uvs: PackedVector2Array = a[Mesh.ARRAY_TEX_UV] if a[Mesh.ARRAY_TEX_UV] != null else PackedVector2Array()
+			var cols: PackedColorArray = a[Mesh.ARRAY_COLOR] if a[Mesh.ARRAY_COLOR] != null else PackedColorArray()
+			var idx: PackedInt32Array = a[Mesh.ARRAY_INDEX] if a[Mesh.ARRAY_INDEX] != null else PackedInt32Array()
+			var has_n := norms.size() == verts.size()
+			var has_uv := uvs.size() == verts.size()
+			var has_c := cols.size() == verts.size()
+			var count := idx.size() if not idx.is_empty() else verts.size()
+			var st := SurfaceTool.new()
+			st.begin(Mesh.PRIMITIVE_TRIANGLES)
+			var wrote := false
+			var t := 0
+			while t < count - 2:
+				var i0 := idx[t] if not idx.is_empty() else t
+				var i1 := idx[t + 1] if not idx.is_empty() else t + 1
+				var i2 := idx[t + 2] if not idx.is_empty() else t + 2
+				var c := (verts[i0] + verts[i1] + verts[i2]) / 3.0
+				if (to_root * c).z <= cut_z:   # forward of the cut -> keep
+					for ii in [i0, i1, i2]:
+						if has_n: st.set_normal(norms[ii])
+						if has_uv: st.set_uv(uvs[ii])
+						if has_c: st.set_color(cols[ii])
+						st.add_vertex(verts[ii])
+					wrote = true
+				t += 3
+			if wrote:
+				st.set_material(orig_mat)
+				st.commit(new_mesh)
+				kept_any = true
+		if kept_any:
+			mi.mesh = new_mesh
+
+
+# Split each mesh by height (in `mesh_root` space): triangles whose centroid is
+# above `gold_y` get a champagne-GOLD metal material, the rest stay SILVER (keeping
+# the model texture). Lets a single-surface GLB have a gold top wing + silver body.
+static func metal_split(root: Node3D, mesh_root: Node3D, gold_y: float) -> void:
+	var inv := mesh_root.global_transform.affine_inverse()
+	for mi in gather_mesh_instances(root):
+		if mi.mesh == null:
+			continue
+		var to_root := inv * mi.global_transform
+		var orig_mat := mi.get_active_material(0)
+		var tex: Texture2D = (orig_mat as BaseMaterial3D).albedo_texture if orig_mat is BaseMaterial3D else null
+		var src := mi.mesh
+		var st_lo := SurfaceTool.new(); st_lo.begin(Mesh.PRIMITIVE_TRIANGLES)
+		var st_hi := SurfaceTool.new(); st_hi.begin(Mesh.PRIMITIVE_TRIANGLES)
+		var wrote_lo := false
+		var wrote_hi := false
+		for si in src.get_surface_count():
+			var a := src.surface_get_arrays(si)
+			var verts: PackedVector3Array = a[Mesh.ARRAY_VERTEX]
+			if verts.is_empty():
+				continue
+			var norms: PackedVector3Array = a[Mesh.ARRAY_NORMAL] if a[Mesh.ARRAY_NORMAL] != null else PackedVector3Array()
+			var uvs: PackedVector2Array = a[Mesh.ARRAY_TEX_UV] if a[Mesh.ARRAY_TEX_UV] != null else PackedVector2Array()
+			var idx: PackedInt32Array = a[Mesh.ARRAY_INDEX] if a[Mesh.ARRAY_INDEX] != null else PackedInt32Array()
+			var has_n := norms.size() == verts.size()
+			var has_uv := uvs.size() == verts.size()
+			var count := idx.size() if not idx.is_empty() else verts.size()
+			var t := 0
+			while t < count - 2:
+				var i0 := idx[t] if not idx.is_empty() else t
+				var i1 := idx[t + 1] if not idx.is_empty() else t + 1
+				var i2 := idx[t + 2] if not idx.is_empty() else t + 2
+				var c := (verts[i0] + verts[i1] + verts[i2]) / 3.0
+				var hi := (to_root * c).y > gold_y
+				var st: SurfaceTool = st_hi if hi else st_lo
+				for ii in [i0, i1, i2]:
+					if has_n: st.set_normal(norms[ii])
+					if has_uv: st.set_uv(uvs[ii])
+					st.add_vertex(verts[ii])
+				if hi: wrote_hi = true
+				else: wrote_lo = true
+				t += 3
+		var silver := StandardMaterial3D.new()
+		silver.albedo_texture = tex
+		silver.metallic = 0.75
+		silver.metallic_specular = 0.6
+		silver.roughness = 0.3
+		silver.rim_enabled = true
+		silver.rim = 0.2
+		silver.rim_tint = 0.5
+		var gold := StandardMaterial3D.new()
+		gold.albedo_color = Color(0.737, 0.651, 0.478)   # champagne gold
+		gold.metallic = 1.0
+		gold.roughness = 0.12
+		var new_mesh := ArrayMesh.new()
+		if wrote_lo:
+			st_lo.set_material(silver)
+			st_lo.commit(new_mesh)
+		if wrote_hi:
+			st_hi.set_material(gold)
+			st_hi.commit(new_mesh)
+		if new_mesh.get_surface_count() > 0:
+			mi.mesh = new_mesh
+
+
 # --- Materials -------------------------------------------------------------
 
-static func recolor(model: Node3D, tint: Color, glow: float, chrome := false, raw := false, pbr := false, roles := []) -> void:
+static func recolor(model: Node3D, tint: Color, glow: float, chrome := false, raw := false, pbr := false, roles := [], metal := false) -> void:
 	for mi in gather_mesh_instances(model):
 		if mi.mesh == null:
 			continue
@@ -62,7 +178,21 @@ static func recolor(model: Node3D, tint: Color, glow: float, chrome := false, ra
 			else:
 				m = StandardMaterial3D.new()
 			m.transparency = BaseMaterial3D.TRANSPARENCY_DISABLED
-			if pbr:
+			if metal:
+				# Polished alloy that KEEPS the model's texture so its colours tint the
+				# metal: white -> SILVER, orange -> GOLD, black trim stays dark. No
+				# emission (so no bulb glow); the neutral hull light rig does the shading.
+				var tex: Texture2D = (orig as BaseMaterial3D).albedo_texture if orig is BaseMaterial3D else null
+				m.albedo_texture = tex
+				m.albedo_color = Color(1, 1, 1)
+				m.metallic = 0.75
+				m.metallic_specular = 0.6
+				m.roughness = 0.3
+				m.rim_enabled = true
+				m.rim = 0.2
+				m.rim_tint = 0.5
+				m.emission_enabled = false
+			elif pbr:
 				# Feminine pink-crystal hull (HaniStar). Each surface gets a ROLE:
 				#   "hull" -> light pastel-pink porcelain/crystal with a soft rim aura
 				#   "gold" -> shiny rose-gold metallic accent (keel, top, wings)
@@ -117,6 +247,47 @@ static func recolor(model: Node3D, tint: Color, glow: float, chrome := false, ra
 					m.emission_enabled = true
 					m.emission = Color(1.0, 0.714, 0.757)          # bright magenta-pink
 					m.emission_energy_multiplier = 0.7             # subtle lit accent, no flare
+				elif role == "silver":
+					# Metallic steel-BLUE with a soft self-lit floor so she reads in the
+					# dark (pure metal goes near-black with no reflection probe).
+					m.albedo_color = Color(0.42, 0.60, 0.95)
+					m.metallic = 0.85
+					m.metallic_specular = 0.7
+					m.roughness = 0.22
+					m.rim_enabled = true
+					m.rim = 0.35
+					m.rim_tint = 0.3                               # bluish edge
+					m.emission_enabled = true
+					m.emission = Color(0.30, 0.45, 0.85)
+					m.emission_energy_multiplier = 0.35
+				elif role == "red":
+					# Pure BLOOD-RED metal with a self-lit floor so it reads in the dark.
+					m.albedo_color = Color(0.62, 0.03, 0.03)
+					m.metallic = 0.7
+					m.metallic_specular = 0.6
+					m.roughness = 0.28
+					m.rim_enabled = true
+					m.rim = 0.35
+					m.rim_tint = 0.2                               # red-tinted edge
+					m.emission_enabled = true
+					m.emission = Color(0.55, 0.03, 0.03)
+					m.emission_energy_multiplier = 0.45
+				elif role == "goldtrim":
+					# Shiny champagne-gold accent with a small floor for visibility.
+					m.albedo_color = Color(0.737, 0.651, 0.478)
+					m.metallic = 1.0
+					m.roughness = 0.14
+					m.rim_enabled = false
+					m.emission_enabled = true
+					m.emission = Color(0.737, 0.651, 0.478)
+					m.emission_energy_multiplier = 0.3
+				elif role == "dark":
+					# Dark gunmetal (engine block / recesses).
+					m.albedo_color = Color(0.08, 0.08, 0.10)
+					m.metallic = 0.6
+					m.roughness = 0.5
+					m.rim_enabled = false
+					m.emission_enabled = false
 				else:
 					# Light pink crystal body with a feminine rim aura.
 					m.diffuse_mode = BaseMaterial3D.DIFFUSE_TOON   # clean gradients on low-poly faces
@@ -199,6 +370,28 @@ static func add_hull_lights(parent: Node3D, box: AABB, accent := Color(1.0, 0.70
 	core.omni_range = reach * 1.6
 	core.shadow_enabled = false
 	parent.add_child(core)
+
+
+# A filled heart silhouette in the XY plane (point down), triangle-fanned from the
+# centre. Used as a gold backing plate behind a booster cluster to cover the gaps
+# between bells. `half` ≈ half the width.
+static func make_heart_mesh(half: float) -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var n := 72
+	var pts: Array[Vector2] = []
+	for i in n:
+		var t := float(i) / float(n) * TAU
+		var hx := 16.0 * pow(sin(t), 3.0)
+		var hy := 13.0 * cos(t) - 5.0 * cos(2.0 * t) - 2.0 * cos(3.0 * t) - cos(4.0 * t)
+		pts.append(Vector2(hx, hy) / 17.0 * half)
+	for i in n:
+		var a := pts[i]
+		var b := pts[(i + 1) % n]
+		st.set_normal(Vector3(0, 0, 1)); st.add_vertex(Vector3.ZERO)
+		st.set_normal(Vector3(0, 0, 1)); st.add_vertex(Vector3(b.x, b.y, 0.0))
+		st.set_normal(Vector3(0, 0, 1)); st.add_vertex(Vector3(a.x, a.y, 0.0))
+	return st.commit()
 
 
 # --- Procedural FX textures ------------------------------------------------

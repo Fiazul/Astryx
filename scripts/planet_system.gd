@@ -168,11 +168,22 @@ func _build_planet(p: Dictionary) -> void:
 	label.no_depth_test = true
 	add_child(label)
 
+	# Craft (Voyagers) drift outward forever from their start point at a constant speed.
+	var is_craft: bool = p.get("craft", false)
+	var craft_pos := Vector3.ZERO
+	var drift_vel := Vector3.ZERO
+	if is_craft:
+		craft_pos = eph.scene_pos(p.name)
+		var dir := craft_pos.normalized()
+		if dir == Vector3.ZERO:
+			dir = Vector3(0, 0, -1)
+		drift_vel = dir * float(p.get("drift", 0.0))
 	_bodies.append({
 		"name": p.name, "radius": float(p.radius),
 		"mass": float(p.get("mass", float(p.radius) * float(p.radius) * 0.05)),   # Earth=1; fallback ~ size
-		"live": p.get("live", true),          # Sol bodies read live positions; others are static
-		"pos": p.get("pos", Vector3.ZERO),    # local position when not live
+		"craft": is_craft, "drift_vel": drift_vel,
+		"live": p.get("live", true) and not is_craft,   # craft use their own drift, not live
+		"pos": craft_pos if is_craft else p.get("pos", Vector3.ZERO),
 		"star": is_star,                      # the system's primary — gates FTL (star field)
 		"parent": p.get("parent", ""),        # non-empty => a moon orbiting that body
 		"orbit_r": float(p.get("orbit_r", 0.0)),
@@ -278,7 +289,10 @@ func refresh(ship_pos: Vector3, delta: float) -> void:
 		var rad: float = b.radius
 		# Moons orbit their (live) parent; Sol bodies read live Horizons positions; others static.
 		var bpos: Vector3
-		if b.parent != "":
+		if b.get("craft", false):
+			b.pos += b.drift_vel * delta       # Voyagers drift outward forever
+			bpos = b.pos
+		elif b.parent != "":
 			b.orbit_a += float(b.orbit_speed) * delta
 			var oa: float = b.orbit_a
 			var off: Vector3 = Vector3(cos(oa), 0.18 * sin(oa * 0.5), sin(oa)) * float(b.orbit_r)

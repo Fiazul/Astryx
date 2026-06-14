@@ -27,12 +27,18 @@ var planet_info: PlanetInfo
 var navigator: Navigator
 var minimap: MiniMap
 var codex: Codex
-var _nav_target := ""         # "" = the auto Survey guide; else a targetable name (Tab)
+var _nav_target := ""         # Tab aim-help target (basic guidance; lowest priority)
+var _nav_locked := ""         # LOCKED map waypoint (orange) — persists until cancelled
+var coins := 0                # player currency; persisted to the profile
+var _claimed := {}            # body name -> true once its capture reward is claimed
+const PROFILE_PATH := "user://profile.cfg"
+const CAPTURE_REWARD := 100
+const NAV_COST := 40          # coins to buy a navigator (map Navigate / Auto-pilot)
 var _nav_off := false         # NAV button: stop the Survey guide + waypoint marker entirely
 var _scan := 0.0             # scan progress 0..1 of the nearest body
 var _scan_name := ""
 const SCAN_SECONDS := 2.0
-const SCAN_RANGE := 550.0     # how close you must be to capture a body (×10 for the spread)
+const SCAN_RANGE := 1500.0    # how close you must be to start a capture (generous)
 const GUARD_RANGE := 2500.0   # approach a guarded body within this → its guardians activate
 const GUARD_COUNT := 5        # guardian aliens per guarded body (placeholder meshes for now)
 var _env: Environment
@@ -53,6 +59,7 @@ const START_POS := Vector3(-0.81, -1.97, -4.53)
 
 
 func _ready() -> void:
+	_load_profile()
 	_setup_environment()
 	_setup_music()
 
@@ -149,6 +156,7 @@ func _ready() -> void:
 	planet_info.planets = planets
 	planet_info.ship = ship
 	planet_info.codex = codex
+	planet_info.main = self
 	add_child(planet_info)
 	hud.details_button.pressed.connect(planet_info.open_for_nearest)
 	# Codex logbook (C): browse discovered bodies, click to read.
@@ -184,6 +192,7 @@ func _ready() -> void:
 	hud.map_button.pressed.connect(map.toggle)
 	hud.settings_button.pressed.connect(settings.toggle)
 	hud.nav_button.pressed.connect(toggle_nav)
+	hud.cancel_nav_button.pressed.connect(cancel_locked_nav)
 
 
 func _process(delta: float) -> void:
@@ -202,12 +211,24 @@ func _process(delta: float) -> void:
 	# station is a safe harbor — the fight pauses so you can swap ships in peace.
 	var firing := false
 	if not ship.transiting and not docked:
-		firing = Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED \
+		var captured := Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED
+		firing = captured \
 			and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) \
 			and not ship.is_hypersonic()        # no shooting at hypersonic speed
-		combat.update(ship, firing, delta)
+		# Right-click fires the nose laser beam (laser-equipped hulls only, e.g. Raptor II).
+		var laser := captured and ship.has_laser \
+			and Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) \
+			and not ship.is_hypersonic()
+		combat.update(ship, firing, delta, laser)
+		ship.combat_lock = combat.in_combat()       # no interstellar speed mid-fight
+	else:
+		ship.combat_lock = false
 	hud.firing = firing                          # blooms the dynamic crosshair
+	hud.coins = coins
+	hud.set_cancel_nav_visible(_nav_locked != "")
 	_update_dock_ui()
+	if ship.autopilot:
+		ship.autopilot_target = ship.true_pos + planets.rel_of(ship.autopilot_name)
 	_update_navigator()
 	_update_minimap()
 	_update_scan(delta)
@@ -290,10 +311,12 @@ func _update_scan(delta: float) -> void:
 	if guarded and not captured and planets.nearest_dist < GUARD_RANGE \
 			and combat.guard_body != name and not combat.guard_boss_alive() \
 			and not ship.transiting and not docked:
-		combat.set_guardians(ship.true_pos + planets.rel_of(name), name)
+		# Bigger bodies (stars) get a tougher boss + bigger waves (power scales with radius).
+		var power: float = clampf(planets.nearest_radius / 7.0, 1.0, 3.0)
+		combat.set_guardians(ship.true_pos + planets.rel_of(name), name, power)
 
-	# Capturable once THIS body's boss is dead (its summoned minions are endless till then).
-	var guards := combat.guardians_alive() if (guarded and combat.guard_body == name) else 0
+	# Capturable once THIS body's boss is dead (its summoned fleet is endless till then).
+	var guards := combat.guardians_alive()    # live hostile count (fixes the "0 hostiles" bug)
 	var clear := not guarded or (combat.guard_body == name and not combat.guard_boss_alive())
 
 	# Capture when within reach of the body's SURFACE (range scales with its size, so a
@@ -304,15 +327,16 @@ func _update_scan(delta: float) -> void:
 		and Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED
 	var fresh := in_range and not captured and clear
 
-	if fresh and Input.is_physical_key_pressed(KEY_V):
+	# Raptor 2 Neo auto-captures any clear body in range — no key needed.
+	if fresh and (ship.auto_capture or Input.is_physical_key_pressed(KEY_V)):
 		if name != _scan_name:
 			_scan_name = name
 			_scan = 0.0
 		_scan = minf(_scan + delta / SCAN_SECONDS, 1.0)
 		if _scan >= 1.0:
 			if codex.discover(name):
-				hud.toast = "✦  CAPTURED  %s   ·   %s" % [name, _rank_title()]
-				hud.toast_t = 3.5
+				hud.toast = "✦  CAPTURED  %s   ·   press G and Claim %d coins" % [name, CAPTURE_REWARD]
+				hud.toast_t = 4.0
 				if combat.guard_body == name:
 					combat.clear_guardians()
 			_scan = 0.0
@@ -327,11 +351,80 @@ func _update_scan(delta: float) -> void:
 	if name == "" or captured:
 		hud.scan_hint = ""
 	elif guarded and not clear:
-		hud.scan_hint = "⚠  BOSS defends %s  ·  %d hostiles — destroy the boss" % [name, guards]
+		hud.scan_hint = "⚠  Defeat the fleet to capture %s  ·  %d defeated · %d hostiles left — kill the BOSS" % [name, combat.zone_kills, guards]
 	elif in_range and _scan <= 0.0:
-		hud.scan_hint = "» hold V to capture %s «" % name
+		hud.scan_hint = ("» auto-capturing %s «" % name) if ship.auto_capture else ("» hold V to capture %s «" % name)
 	else:
 		hud.scan_hint = ""
+
+
+# Open the scanner detail panel for a specific body (called by the M-map list).
+func open_details_for(body_name: String) -> void:
+	if planet_info != null:
+		planet_info.open_for(body_name)
+
+
+# Lock the nav waypoint to a body (orange; persists until cancelled). PAID navigator.
+func set_nav_target(body_name: String) -> void:
+	if not buy_navigator():
+		return
+	_nav_off = false
+	_nav_locked = body_name
+	if hud != null:
+		hud.set_nav_stopped(false)
+
+
+# Auto-pilot: locks the orange waypoint AND flies there hands-off. PAID navigator.
+func start_autopilot(body_name: String) -> void:
+	if not buy_navigator():
+		return
+	_nav_off = false
+	_nav_locked = body_name
+	if hud != null:
+		hud.set_nav_stopped(false)
+	ship.start_autopilot(body_name)
+
+
+# --- Coins / rewards ---
+# A captured body's 100-coin reward isn't auto-given — the player CLAIMS it from the
+# Details (G) panel. Claimable = captured but not yet claimed.
+func can_claim(body_name: String) -> bool:
+	return codex != null and codex.is_discovered(body_name) and not _claimed.has(body_name)
+
+func claim_reward(body_name: String) -> int:
+	if not can_claim(body_name):
+		return 0
+	coins += CAPTURE_REWARD
+	_claimed[body_name] = true
+	_save_profile()
+	return CAPTURE_REWARD
+
+# Map Navigate / Auto-pilot is a PAID navigator service. Returns true if it could pay.
+func buy_navigator() -> bool:
+	if coins < NAV_COST:
+		hud.toast = "Not enough coins for a navigator (%d / %d)" % [coins, NAV_COST]
+		hud.toast_t = 2.5
+		return false
+	coins -= NAV_COST
+	_save_profile()
+	return true
+
+
+# --- Player profile (persisted to disk; will hold more than coins later) ---
+func _load_profile() -> void:
+	var cfg := ConfigFile.new()
+	if cfg.load(PROFILE_PATH) == OK:
+		coins = int(cfg.get_value("player", "coins", 0))
+		_claimed.clear()
+		for n in cfg.get_value("player", "claimed", []):
+			_claimed[n] = true
+
+func _save_profile() -> void:
+	var cfg := ConfigFile.new()
+	cfg.load(PROFILE_PATH)            # keep any other keys we add later
+	cfg.set_value("player", "coins", coins)
+	cfg.set_value("player", "claimed", _claimed.keys())
+	cfg.save(PROFILE_PATH)
 
 
 # A real body you can capture: not the Interstellar hub, not a hub gate-sun (✦).
@@ -388,10 +481,20 @@ func _aim_sorted_targets() -> Array:
 # NAV button: stop / resume the Survey guide and waypoint marker (the orientation
 # gizmo always stays). Also clears any manual Tab target when stopping.
 func toggle_nav() -> void:
+	# N / NAV only toggles the FREE Survey guide. A paid locked waypoint is NOT
+	# affected — it's cancelled only by the on-screen Cancel Nav button.
 	_nav_off = not _nav_off
 	if _nav_off:
 		_nav_target = ""
 	hud.set_nav_stopped(_nav_off)
+	_update_navigator()
+
+
+# Cancel a locked (paid) map waypoint + any autopilot (the on-screen Cancel Nav button).
+func cancel_locked_nav() -> void:
+	_nav_locked = ""
+	ship.autopilot = false
+	hud.set_nav_stopped(false)
 	_update_navigator()
 
 
@@ -400,12 +503,25 @@ func _update_navigator() -> void:
 		return
 	var tname: String
 	var rel: Vector3
-	if _nav_off or ship.transiting:
+	if ship.transiting:
+		navigator.update_nav(ship.camera, false, Vector3.ZERO, "", "")   # gizmo only
+		hud.set_objective("")
+		return
+	elif _nav_locked != "":
+		# LOCKED (paid) map waypoint — orange, top priority, ignores the N toggle,
+		# stays until the Cancel Nav button is clicked.
+		tname = _nav_locked
+		rel = wormhole.portal_rel(ship.true_pos) if tname == "Wormhole" else planets.rel_of(tname)
+		var ld := _fmt_nav_dist(rel.length())
+		navigator.update_nav(ship.camera, true, rel, tname, ld, true)
+		hud.set_objective("◆  LOCKED  %s   %s" % [tname, ld])
+		return
+	elif _nav_off:
 		navigator.update_nav(ship.camera, false, Vector3.ZERO, "", "")   # gizmo only
 		hud.set_objective("")
 		return
 	elif _nav_target != "":
-		# Manual Tab target (a specific body or the wormhole), picked by aim.
+		# Tab aim-help target (basic guidance), picked by aim.
 		tname = _nav_target
 		rel = wormhole.portal_rel(ship.true_pos) if tname == "Wormhole" else planets.rel_of(tname)
 	else:
@@ -488,10 +604,14 @@ func _arrive(system_id: String) -> void:
 	props.set_system(system_id)                    # show this system's stations/probes
 	# A large alien swarm haunts every star except peaceful Sol; Vortex (the boss)
 	# still only holds the true hostile Alien zone.
-	var fight := system_id != SystemDB.SOL and system_id != SystemDB.INTERSTELLAR
+	# Only the hostile Alien zone gets an always-on respawning swarm. Every other star
+	# system is quiet until you approach a guarded body, which spawns ONE big boss you
+	# kill once (the per-body guardians, no respawn).
+	var fight := SystemDB.is_hostile(system_id)
 	combat.reset(fight, SystemDB.is_hostile(system_id))
 	combat.player_hp = ship.max_hp
 	_nav_target = ""                               # clear the waypoint in the new system
+	ship.autopilot = false                         # don't keep flying to an old-system target
 	if docked:
 		_set_docked(false)
 	hud.origin_name = SystemDB.display_name(system_id) if system_id != SystemDB.SOL else "Earth"
@@ -520,6 +640,8 @@ func _input(event: InputEvent) -> void:
 	elif key == KEY_TAB:
 		_cycle_nav_target()
 		get_viewport().set_input_as_handled()
+	elif key == KEY_N:
+		toggle_nav()          # keyboard shortcut for the ⊘ NAV stop/resume button
 	elif key == KEY_X:
 		# Raptor only: toggle Combat <-> Warp mode.
 		var mode := ship.toggle_warp_mode()

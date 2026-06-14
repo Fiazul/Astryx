@@ -47,8 +47,10 @@ const PLANETS := [
 	# IDs -31 / -32, same geocentric frame as the planets). The eq fallbacks are their
 	# approximate 2026 positions (~160 / ~136 AU out) so they appear even offline. We
 	# respect them: they sit at their true coordinates and get a safe-zone speed limit.
-	{ "name": "Voyager 1", "id": "-31", "eq": Vector3(-33.2, -155.9, 33.9),  "radius": 8.0, "mass": 8000.0, "color": Color(0.82, 0.86, 0.92), "model": "res://assets/Space probe.glb", "glow": 0.1, "craft": true },
-	{ "name": "Voyager 2", "id": "-32", "eq": Vector3(39.0, -67.6, -111.4),  "radius": 8.0, "mass": 8000.0, "color": Color(0.82, 0.86, 0.92), "model": "res://assets/Space probe.glb", "glow": 0.1, "craft": true },
+	# drift = constant outward speed (units/s). Real V1≈17.0 km/s, V2≈15.4 km/s are
+	# microscopic at this scale, so these are visible speeds keeping the real ratio.
+	{ "name": "Voyager 1", "id": "-31", "eq": Vector3(-33.2, -155.9, 33.9),  "radius": 8.0, "mass": 8000.0, "color": Color(0.82, 0.86, 0.92), "model": "res://assets/Space probe.glb", "glow": 0.1, "craft": true, "drift": 5.0 },
+	{ "name": "Voyager 2", "id": "-32", "eq": Vector3(39.0, -67.6, -111.4),  "radius": 8.0, "mass": 8000.0, "color": Color(0.82, 0.86, 0.92), "model": "res://assets/Space probe.glb", "glow": 0.1, "craft": true, "drift": 4.5 },
 ]
 
 # Major moons — they orbit their PARENT planet each frame (parent tracked live from

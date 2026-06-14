@@ -17,11 +17,31 @@ const ALIEN_MODELS := [
 const ALIEN_COUNT := 3
 const SWARM_COUNT := 14           # "large chunk" of aliens around every non-Sol star
 const ALIEN_SIZE := 6.0           # big — longest axis in units
+# Nose laser beam (Raptor II, right-click): a long continuous beam that melts whatever
+# it sweeps over. Damage is applied on a steady tick so it uses integer HP cleanly.
+const LASER_LEN := 5000.0
+const LASER_RADIUS := 22.0        # hit radius around the beam line
+const LASER_TICK := 0.08          # seconds between damage ticks
+const LASER_TICK_DMG := 2         # HP per tick (~25 dps)
 const ALIEN_HP := 3
 const ALIEN_SPEED := 14.0
 const ALIEN_KEEP_DIST := 30.0     # they hover around this range and strafe
-const ALIEN_FIRE_EVERY := 2.2
+const ALIEN_FIRE_EVERY := 1.4         # more aggressive (was 2.2)
 const RESPAWN_AFTER := 4.0
+const COMBAT_HOLD := 10.0          # stay "in combat" this long after the last attack (either way)
+# Weapon energy: firing drains it, it regenerates; empty = can't fire (rapid-fire limit).
+const ENERGY_MAX := 100.0
+const ENERGY_REGEN := 24.0         # per second
+const BOLT_ENERGY := 7.0           # per bolt
+const LASER_ENERGY := 32.0         # per second while the beam is on
+# Shiny pickups appear often as you fly — grab them to restore energy + a little hull.
+const PICKUP_EVERY := 2.2          # seconds between spawns
+const PICKUP_AHEAD := 450.0        # spawn this far ahead of the ship
+const PICKUP_SCATTER := 280.0      # random scatter around that point
+const PICKUP_COLLECT := 70.0       # grab radius
+const PICKUP_LIFE := 14.0          # seconds before it fades out
+const PICKUP_ENERGY := 45.0        # weapon + boost energy restored
+const PICKUP_HEAL := 18            # hull restored
 const SPAWN_RADIUS := 60.0        # where new aliens appear around the player
 
 # --- VORTEX: the boss. Vortex's own ship hull, scaled up huge and menacing. ---
@@ -37,18 +57,27 @@ const BOSS_SPAWN_DIST := 160.0
 # --- Guardian boss: ONE per guarded body, a distinct monster GLB with its own design
 # (raw colours), that summons small "old vortex" minions (BOSS_MODEL) as its army.
 # Clear the boss to capture the body. ---
-const GUARD_BOSS_SIZE := 16.0
-const GUARD_BOSS_HP := 50
+const GUARD_BOSS_SIZE := 40.0   # EXTREMELY big, imposing monster guarding the star/body
+const GUARD_BOSS_HP := 180      # base — scaled up further by star size in set_guardians
 const GUARD_BOSS_SPEED := 9.0
+const BOSS_FAST_EVERY := 2.2    # seconds between ultra-fast aimed shots (between specials)
+const BOSS_FAST_SPEED := 320.0  # ultra-fast bullet/laser the player must dodge
 const GUARD_BOSS_KEEP := 55.0
-const GUARD_BOSS_FIRE := 1.3
+const GUARD_BOSS_FIRE := 0.9
 const MINION_SIZE := 7.0          # small vortexes
 const MINION_HP := 4
 const MINION_SPEED := 16.0
 const MINION_KEEP := 28.0
-const MINION_FIRE := 2.1
-const MINION_CAP := 6             # most minions alive at once
+const MINION_FIRE := 1.3          # more aggressive minions (was 2.1)
+const MINION_CAP := 6             # base live minions; scaled up by star size (bigger = waves)
 const MINION_SUMMON_EVERY := 2.6  # seconds between summons
+# Boss phases + telegraphed special. Phase 2 (enraged) triggers below this HP fraction:
+# faster summons + faster specials. The special is a radial bolt burst preceded by a
+# clear wind-up (the boss swells), so the player can dodge.
+const BOSS_ENRAGE_AT := 0.5
+const BOSS_SPECIAL_EVERY := 6.5   # seconds between special attacks (phase 1)
+const BOSS_TELEGRAPH := 1.2       # wind-up time before the burst fires
+const BOSS_BURST_COUNT := 12      # bolts in the radial burst
 
 const BOLT_SPEED := 950.0          # fast tracers (swept collision keeps hits reliable)
 const BOLT_LIFE := 2.5
@@ -70,6 +99,10 @@ var _aliens := []                 # { pos, vel, hp, node, fire_cd, alive, respaw
 var _bolts := []                  # player bolts: { pos, vel, life, node }
 var _abolts := []                 # alien bolts:  { pos, vel, life, node }
 var _cool := 0.0
+var _laser: MeshInstance3D        # the beam mesh (child of the ship, points out the nose)
+var _laser_ring: MeshInstance3D   # glowing emitter "belt" the beam fires through
+var _laser_tick := 0.0
+var _combat_t := 0.0              # >0 while in combat (counts down from COMBAT_HOLD)
 var _bolt_mesh: SphereMesh
 var _bolt_mat: StandardMaterial3D
 var _abolt_mat: StandardMaterial3D
@@ -110,6 +143,9 @@ func reset(active := false, with_boss := false, count := SWARM_COUNT) -> void:
 	for b in _abolts:
 		b.node.queue_free()
 	_abolts.clear()
+	for p in _pickups:
+		p.node.queue_free()
+	_pickups.clear()
 	player_hp = PLAYER_MAX_HP
 	if active:
 		for i in count:
@@ -118,11 +154,17 @@ func reset(active := false, with_boss := false, count := SWARM_COUNT) -> void:
 			_aliens.append(_make_boss())   # Vortex
 
 
-# Called by main each frame. `pressed` = is the fire button held.
-func update(ship: Node3D, pressed: bool, delta: float) -> void:
+# Called by main each frame. `pressed` = left fire held; `laser` = right-click beam.
+func update(ship: Node3D, pressed: bool, delta: float, laser := false) -> void:
 	hitmarker = maxf(hitmarker - delta, 0.0)
+	_combat_t = maxf(_combat_t - delta, 0.0)
+	energy = minf(energy + ENERGY_REGEN * delta, ENERGY_MAX)
 	var sp: Vector3 = ship.true_pos
 	var fwd: Vector3 = -ship.transform.basis.z
+	var laser_on: bool = laser and ship.can_fire and energy > 0.0
+	if laser_on:
+		energy = maxf(energy - LASER_ENERGY * delta, 0.0)
+	_update_laser(ship, laser_on, sp, fwd, delta)
 
 	# Per-hull combat identity: defence (max HP), bullet speed and bullet size all come
 	# from the active ship (see SHIP_MODELS). player_max drives the HUD's hull bar.
@@ -131,16 +173,116 @@ func update(ship: Node3D, pressed: bool, delta: float) -> void:
 
 	# --- player firing: pure straight shots, no aim assist (utility hulls can't fire) ---
 	_cool = maxf(_cool - delta, 0.0)
-	if pressed and _cool <= 0.0 and ship.can_fire:
+	if pressed and _cool <= 0.0 and ship.can_fire and energy >= BOLT_ENERGY:
 		_cool = ship.fire_cooldown if ship.has_method("is_hypersonic") else BOLT_COOLDOWN
+		energy -= BOLT_ENERGY
 		_spawn_bolt(_bolts, sp + fwd * ship.muzzle, fwd * ship.bolt_speed, _bolt_mat, ship.bolt_scale, ship.bolt_damage)
+		if _any_alien_alive():
+			_combat_t = COMBAT_HOLD            # attacking while enemies are present = in combat
 		if audio != null:
 			audio.play_fire()
 
 	_step_bolts(_bolts, sp, delta, true)
 	_step_bolts(_abolts, sp, delta, false)
 	_step_aliens(ship, sp, delta)
-	_step_guardian_summons(delta)
+	_step_boss(0.0, delta, sp)
+	_step_pickups(ship, sp, fwd, delta)
+
+
+# True for COMBAT_HOLD seconds after the last attack (you fire at enemies, an alien
+# fires, you get hit, or the laser connects). main reads this to lock out FTL.
+func in_combat() -> bool:
+	return _combat_t > 0.0
+
+func _any_alien_alive() -> bool:
+	for a in _aliens:
+		if a.alive:
+			return true
+	return false
+
+
+# Continuous nose laser. The beam mesh is a child of the ship (which sits at the
+# origin and only rotates), so it always emerges from the nose and tracks heading.
+func _update_laser(ship: Node3D, on: bool, sp: Vector3, fwd: Vector3, delta: float) -> void:
+	if _laser == null:
+		_build_laser(ship)
+	var off: Vector3 = ship.laser_offset
+	if _laser.get_parent() != ship:
+		if _laser.get_parent() != null:
+			_laser.get_parent().remove_child(_laser)
+		ship.add_child(_laser)
+	if _laser_ring.get_parent() != ship:
+		if _laser_ring.get_parent() != null:
+			_laser_ring.get_parent().remove_child(_laser_ring)
+		ship.add_child(_laser_ring)
+	# Start the beam exactly at the offset point (the under-hull pod), not the muzzle,
+	# so it connects to the hull. Near end at local z = off.z, extends forward.
+	_laser.position = Vector3(off.x, off.y, off.z - LASER_LEN * 0.5)
+	_laser_ring.position = off + Vector3(0.0, 0.015, 0.0)   # ring sits a touch above the beam
+	_laser.visible = on
+	_laser_ring.visible = on
+	if audio != null:
+		audio.laser(on)
+	if not on:
+		return
+	# Subtle flicker so the beam feels alive.
+	var f := 1.0 + 0.15 * sin(Time.get_ticks_msec() * 0.04)
+	_laser.scale = Vector3(f, 1.0, f)
+	# Damage everything the beam line passes through, on a steady tick.
+	_laser_tick -= delta
+	if _laser_tick > 0.0:
+		return
+	_laser_tick = LASER_TICK
+	# Damage ray starts at the same pod point in world space (local off -> world).
+	var b := ship.transform.basis
+	var origin: Vector3 = sp + b.x * off.x + b.y * off.y - fwd * off.z
+	var hit := false
+	for a in _aliens:
+		if not a.alive:
+			continue
+		var to: Vector3 = a.pos - origin
+		var t := to.dot(fwd)
+		if t < 0.0 or t > LASER_LEN:
+			continue
+		if (to - fwd * t).length() < a.size * 0.5 + LASER_RADIUS:
+			_damage_alien(a, sp, LASER_TICK_DMG)
+			hit = true
+	if hit:
+		hitmarker = 0.18
+		_combat_t = COMBAT_HOLD
+
+
+func _build_laser(ship: Node3D) -> void:
+	var cyl := CylinderMesh.new()
+	cyl.top_radius = 0.015   # very thin, round beam
+	cyl.bottom_radius = 0.015
+	cyl.height = LASER_LEN
+	cyl.radial_segments = 16
+	cyl.rings = 0
+	_laser = MeshInstance3D.new()
+	_laser.mesh = cyl
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	mat.albedo_color = Color(1.0, 0.18, 0.12, 0.7)   # red beam
+	_laser.material_override = mat
+	_laser.rotation = Vector3(deg_to_rad(-90.0), 0.0, 0.0)   # cylinder +Y -> -Z (forward)
+	_laser.visible = false
+	# Emitter "belt": a glowing ring the beam fires through, sat at the muzzle point.
+	var torus := TorusMesh.new()
+	torus.inner_radius = 0.022   # small hole — just bigger than the beam
+	torus.outer_radius = 0.038
+	torus.rings = 18
+	torus.ring_segments = 10
+	_laser_ring = MeshInstance3D.new()
+	_laser_ring.mesh = torus
+	var rmat := StandardMaterial3D.new()
+	rmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	rmat.albedo_color = Color(0.02, 0.02, 0.03)   # small black emitter belt
+	_laser_ring.material_override = rmat
+	_laser_ring.rotation = Vector3(deg_to_rad(90.0), 0.0, 0.0)   # hole faces forward (-Z)
+	_laser_ring.visible = false
 
 
 # ---------------------------------------------------------------------------
@@ -175,6 +317,7 @@ func _step_aliens(ship: Node3D, sp: Vector3, delta: float) -> void:
 			a.fire_cd = a.fire_every
 			var aim: Vector3 = (sp - a.pos).normalized()
 			_spawn_bolt(_abolts, a.pos + aim * (a.size * 0.5), aim * ALIEN_BOLT_SPEED, _abolt_mat)
+			_combat_t = COMBAT_HOLD            # an enemy is shooting at you = in combat
 
 
 func _step_bolts(list: Array, sp: Vector3, delta: float, player: bool) -> void:
@@ -202,6 +345,7 @@ func _step_bolts(list: Array, sp: Vector3, delta: float, player: bool) -> void:
 		else:
 			if b.pos.distance_to(sp) < SHIP_HIT_RADIUS:
 				player_hp = maxi(player_hp - 8, 0)
+				_combat_t = COMBAT_HOLD            # taking damage = in combat
 				hit = true
 		if hit or b.life <= 0.0:
 			b.node.queue_free()
@@ -216,6 +360,8 @@ func _damage_alien(a: Dictionary, sp: Vector3, dmg := 1) -> void:
 		a.respawn = a.respawn_after
 		a.node.visible = false
 		kills += 1
+		if a.get("guardian", false):
+			zone_kills += 1     # track hostiles defeated in this star zone
 		_boom(a.pos - sp, a.size)
 		if audio != null:
 			audio.play_explosion()
@@ -259,24 +405,39 @@ func threat_report() -> Dictionary:
 # them when you approach a guarded body, and the body is capturable once they're clear.
 var guard_body := ""    # name of the body these guardians defend ("" = none)
 
-func set_guardians(center: Vector3, body: String) -> void:
+var _zone_power := 1.0   # current guard zone's strength (scales with the body's size)
+var zone_kills := 0      # hostiles defeated in the current guard zone (HUD reads this)
+var energy := ENERGY_MAX # weapon energy (HUD reads this); regenerates over time
+var _pickups := []       # { pos, node, life } — shiny energy/health orbs while flying
+var _pickup_cd := PICKUP_EVERY
+
+# `power` ~ the body's size; bigger stars get a tougher, bigger boss + bigger waves.
+func set_guardians(center: Vector3, body: String, power := 1.0) -> void:
 	clear_guardians()
 	guard_body = body
-	_aliens.append(_make_guardian_boss(center))
+	_zone_power = clampf(power, 1.0, 3.0)
+	zone_kills = 0
+	_aliens.append(_make_guardian_boss(center, _zone_power))
 
 # One identity boss (a random monster GLB, big, raw colours) that defends a body and
 # summons small vortex minions. Reuses the alien-model loader at boss scale.
-func _make_guardian_boss(center: Vector3) -> Dictionary:
-	var node := _load_alien_model(GUARD_BOSS_SIZE)
+func _make_guardian_boss(center: Vector3, power := 1.0) -> Dictionary:
+	var size := GUARD_BOSS_SIZE * clampf(power, 1.0, 1.8)   # bigger stars = bigger boss
+	var node := _load_alien_model(size)
 	var a := _make_enemy(node, {
-		"size": GUARD_BOSS_SIZE, "hp": GUARD_BOSS_HP, "speed": GUARD_BOSS_SPEED,
+		"size": size, "hp": int(GUARD_BOSS_HP * power), "speed": GUARD_BOSS_SPEED,
 		"keep": GUARD_BOSS_KEEP, "fire_every": GUARD_BOSS_FIRE, "respawn_after": -1.0,
 		"spawn_dist": 0.0, "is_boss": false,
 	})
 	a["guardian"] = true
 	a["guardian_boss"] = true
 	a["summon_cd"] = MINION_SUMMON_EVERY
-	a.pos = center + _rand_dir() * (GUARD_BOSS_SIZE * 2.0)
+	a["special_cd"] = BOSS_SPECIAL_EVERY
+	a["fast_cd"] = BOSS_FAST_EVERY
+	a["telegraph_t"] = 0.0
+	a["enraged"] = false
+	a["base_scale"] = a.node.scale
+	a.pos = center + _rand_dir() * (size * 2.0)
 	a.node.position = a.pos
 	return a
 
@@ -292,20 +453,101 @@ func _summon_minion(center: Vector3) -> void:
 	a.node.position = a.pos
 	_aliens.append(a)
 
-# Each alive guardian boss summons minions over time, up to the live cap.
-func _step_guardian_summons(delta: float) -> void:
+# Boss tick: summons (capped), phase change at low HP (enrage = faster), and a
+# telegraphed radial burst the player can see coming and dodge.
+func _step_boss(_unused: float, delta: float, sp := Vector3.ZERO) -> void:
 	var minions := 0
 	for a in _aliens:
 		if a.get("minion", false) and a.alive:
 			minions += 1
 	for a in _aliens:
-		if a.get("guardian_boss", false) and a.alive:
-			a.summon_cd -= delta
-			if a.summon_cd <= 0.0:
-				a.summon_cd = MINION_SUMMON_EVERY
-				if minions < MINION_CAP:
-					_summon_minion(a.pos)
-					minions += 1
+		if not (a.get("guardian_boss", false) and a.alive):
+			continue
+		var enraged: bool = a.hp <= a.max_hp * BOSS_ENRAGE_AT
+		var rate := 0.6 if enraged else 1.0          # phase 2 = faster everything
+		# Bigger stars sustain bigger waves; enrage pushes the cap higher still.
+		var cap := MINION_CAP + int((_zone_power - 1.0) * 5.0) + (3 if enraged else 0)
+		# Summon minions, faster when enraged.
+		a.summon_cd -= delta
+		if a.summon_cd <= 0.0:
+			a.summon_cd = MINION_SUMMON_EVERY * rate
+			if minions < cap:
+				_summon_minion(a.pos)
+				minions += 1
+		# Ultra-fast aimed shot the player must dodge (between the big specials).
+		a.fast_cd -= delta
+		if a.fast_cd <= 0.0 and a.telegraph_t <= 0.0:
+			a.fast_cd = BOSS_FAST_EVERY * rate
+			var faim: Vector3 = (sp - a.pos).normalized()
+			_spawn_bolt(_abolts, a.pos + faim * (a.size * 0.5), faim * BOSS_FAST_SPEED, _abolt_mat, 1.4, 2)
+			_combat_t = COMBAT_HOLD
+		# Telegraphed special: wind up (swell), then fire a radial burst.
+		if a.telegraph_t > 0.0:
+			a.telegraph_t -= delta
+			var swell := 1.0 + 0.4 * sin((1.0 - a.telegraph_t / BOSS_TELEGRAPH) * PI)
+			a.node.scale = a.base_scale * swell
+			if a.telegraph_t <= 0.0:
+				a.node.scale = a.base_scale
+				_boss_burst(a, sp)
+		else:
+			a.special_cd -= delta
+			if a.special_cd <= 0.0:
+				a.special_cd = BOSS_SPECIAL_EVERY * rate
+				a.telegraph_t = BOSS_TELEGRAPH        # start the wind-up
+
+# A ring of bolts fired outward (plus one straight at the player) on the special.
+func _boss_burst(a: Dictionary, sp: Vector3) -> void:
+	for i in BOSS_BURST_COUNT:
+		var ang := float(i) / float(BOSS_BURST_COUNT) * TAU
+		var dir := Vector3(cos(ang), 0.0, sin(ang))
+		_spawn_bolt(_abolts, a.pos + dir * (a.size * 0.5), dir * ALIEN_BOLT_SPEED, _abolt_mat)
+	var aim: Vector3 = (sp - a.pos).normalized()
+	_spawn_bolt(_abolts, a.pos + aim * (a.size * 0.5), aim * (ALIEN_BOLT_SPEED * 1.4), _abolt_mat)
+	_combat_t = COMBAT_HOLD
+
+# Shiny pickups: spawn often ahead of the ship; flying through one restores energy +
+# a little hull. Floating-origin: stored in world space, drawn relative to the ship.
+func _step_pickups(ship: Node3D, sp: Vector3, fwd: Vector3, delta: float) -> void:
+	_pickup_cd -= delta
+	if _pickup_cd <= 0.0 and not ship.transiting:
+		_pickup_cd = PICKUP_EVERY
+		_spawn_pickup(sp + fwd * PICKUP_AHEAD + _rand_dir() * PICKUP_SCATTER)
+	var i := _pickups.size() - 1
+	while i >= 0:
+		var p = _pickups[i]
+		p.life -= delta
+		p.node.position = p.pos - sp
+		p.node.rotate_y(delta * 2.0)                  # gentle spin -> "shiny"
+		if sp.distance_to(p.pos) < PICKUP_COLLECT:
+			energy = minf(energy + PICKUP_ENERGY, ENERGY_MAX)
+			ship.boost_energy = minf(ship.boost_energy + PICKUP_ENERGY, 100.0)
+			player_hp = mini(player_hp + PICKUP_HEAL, player_max)
+			_boom(p.pos - sp, 10.0)
+			if audio != null:
+				audio.play_click()
+			p.node.queue_free()
+			_pickups.remove_at(i)
+		elif p.life <= 0.0:
+			p.node.queue_free()
+			_pickups.remove_at(i)
+		i -= 1
+
+
+func _spawn_pickup(world_pos: Vector3) -> void:
+	var mi := MeshInstance3D.new()
+	var q := QuadMesh.new(); q.size = Vector2(16, 16)
+	mi.mesh = q
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	mat.albedo_texture = _glow_tex
+	mat.albedo_color = Color(0.5, 1.0, 0.8, 0.95)   # shiny mint-green orb
+	mi.material_override = mat
+	add_child(mi)
+	_pickups.append({ "pos": world_pos, "node": mi, "life": PICKUP_LIFE })
+
 
 func clear_guardians() -> void:
 	var keep := []

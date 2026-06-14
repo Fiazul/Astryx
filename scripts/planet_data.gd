@@ -109,6 +109,15 @@ const BUNDLED := {
 		"blurb": "A young Sun-like star ringed by a dusty debris disk."},
 	"Tau Ceti": {"type": "Star", "distance": "11.91 ly", "spectral": "G8V",
 		"blurb": "A stable, Sun-like star and a long-time target in the search for life."},
+	"K2-18": {"type": "Star", "distance": "124 ly", "spectral": "M2.5V",
+		"blurb": "A cool red dwarf whose sub-Neptune K2-18b shows water vapour — a hycean-world candidate."},
+	"K2-18c": {"type": "Exoplanet", "blurb": "A warm inner companion to K2-18b, orbiting closer to the red-dwarf star."},
+	"TRAPPIST-1": {"type": "Star", "distance": "39 ly", "spectral": "M8V",
+		"blurb": "An ultra-cool dwarf hosting seven Earth-sized worlds — the richest known compact planetary system."},
+	"TRAPPIST-1d": {"type": "Exoplanet", "blurb": "A light, possibly water-rich inner TRAPPIST world."},
+	"TRAPPIST-1g": {"type": "Exoplanet", "blurb": "One of the larger TRAPPIST worlds, near the outer habitable edge."},
+	"Hostile Star": {"type": "Star", "blurb": "A dim blood-red star at the heart of the hostile zone — guarded by swarms."},
+	"Veil Nebula": {"type": "Nebula", "blurb": "A vast supernova remnant — colourful filaments of glowing gas in deep space."},
 }
 
 var _cache := {}      # name -> dict (live-fetched overrides)

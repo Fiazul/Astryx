@@ -6,9 +6,11 @@ extends Control
 #  2) A waypoint marker for the current Tab target: a diamond + label when it's
 #     on screen, or an arrow pinned to the screen edge pointing toward it.
 
-const COL := Color(0.62, 1.0, 0.82)   # light silvery-teal
+const COL := Color(0.62, 1.0, 0.82)   # light silvery-teal (normal/Tab waypoint)
+const LOCK_COL := Color(1.0, 0.6, 0.15)   # orange — a LOCKED map waypoint
 const MARKER_FONT := 12               # smaller, designed marker label
 const EDGE_MARGIN := 46.0
+var _mcol := COL                      # marker colour (orange when locked)
 const GIZMO_POS := Vector2(1208, 486)
 const GIZMO_LEN := 42.0
 
@@ -25,12 +27,13 @@ func _ready() -> void:
 
 
 # active=false -> gizmo only; active=true -> also draw the waypoint marker.
-func update_nav(cam: Camera3D, active: bool, rel: Vector3, name: String, dist: String) -> void:
+func update_nav(cam: Camera3D, active: bool, rel: Vector3, name: String, dist: String, locked := false) -> void:
 	_cam = cam
 	_active = active
 	_rel = rel
 	_name = name
 	_dist = dist
+	_mcol = LOCK_COL if locked else COL
 	queue_redraw()
 
 
@@ -102,20 +105,20 @@ func _draw_marker() -> void:
 # Designed marker text: a soft dark drop-shadow behind a bright top layer reads as
 # crisp, slightly metallic lettering (draw_string can't gradient, so this fakes depth).
 func _draw_label(font: Font, pos: Vector2, txt: String) -> void:
-	draw_string(font, pos + Vector2(1, 1), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, MARKER_FONT, Color(0.02, 0.06, 0.04, 0.85))
-	draw_string(font, pos, txt, HORIZONTAL_ALIGNMENT_LEFT, -1, MARKER_FONT, COL)
+	draw_string(font, pos + Vector2(1, 1), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, MARKER_FONT, Color(0.02, 0.04, 0.02, 0.85))
+	draw_string(font, pos, txt, HORIZONTAL_ALIGNMENT_LEFT, -1, MARKER_FONT, _mcol)
 
 
 func _draw_diamond(c: Vector2, r: float) -> void:
 	var pts := PackedVector2Array([
 		c + Vector2(0, -r), c + Vector2(r, 0), c + Vector2(0, r), c + Vector2(-r, 0), c + Vector2(0, -r)])
-	draw_polyline(pts, COL, 2.0, true)
+	draw_polyline(pts, _mcol, 2.0, true)
 
 func _draw_arrow(tip: Vector2, ang: float) -> void:
 	var d := Vector2(cos(ang), sin(ang))
 	var n := Vector2(-d.y, d.x)
 	var p := PackedVector2Array([tip, tip - d * 22 + n * 11, tip - d * 22 - n * 11])
-	draw_colored_polygon(p, COL)
+	draw_colored_polygon(p, _mcol)
 
 func _edge_point(center: Vector2, dir: Vector2, vp: Vector2) -> Vector2:
 	var half := vp * 0.5 - Vector2(EDGE_MARGIN, EDGE_MARGIN)
