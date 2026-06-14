@@ -31,31 +31,51 @@ const STAR_SHELL_RADIUS := 30000.0   # backdrop shell (well inside cam.far) — 
 # energy (no scene lights). Earth is the origin anchor; the Sun wears star.glb,
 # which is also reused for every star (see PlanetSystem).
 const PLANETS := [
-	{ "name": "Earth",   "id": "399", "eq": Vector3(0, 0, 0),               "radius": 3.5,  "color": Color(0.20, 0.45, 1.0), "model": "res://earth.glb", "glow": 0.12, "fixed": true },
-	# Radii now follow real size ORDER (Sun > giants > Earth/Venus > Mars > Mercury),
-	# gently compressed so the Sun/giants read as dominant without engulfing neighbours.
-	# (True radii at 1u=0.1AU would be sub-pixel; this keeps ratios believable + visible.)
-	{ "name": "Sun",     "id": "10",  "eq": Vector3( 0.1640,  0.9194,  0.3985), "radius": 8.5,  "color": Color(1.00, 0.85, 0.30), "star": true, "model": "res://star.glb", "glow": 2.0 },
-	{ "name": "Mercury", "id": "199", "eq": Vector3(-0.2269,  0.7801,  0.3646), "radius": 1.4,  "color": Color(0.70, 0.62, 0.52) },
-	{ "name": "Venus",   "id": "299", "eq": Vector3(-0.5535,  0.9404,  0.4534), "radius": 3.3,  "color": Color(0.95, 0.85, 0.55) },
-	{ "name": "Mars",    "id": "499", "eq": Vector3( 1.4583,  1.4672,  0.6149), "radius": 1.85, "color": Color(0.90, 0.40, 0.20) },
-	{ "name": "Jupiter", "id": "599", "eq": Vector3(-2.6447,  4.9896,  2.2115), "radius": 12.5, "color": Color(0.85, 0.72, 0.52) },
-	{ "name": "Saturn",  "id": "699", "eq": Vector3( 9.5512,  2.1483,  0.5020), "radius": 10.5, "color": Color(0.88, 0.78, 0.55) },
-	{ "name": "Uranus",  "id": "799", "eq": Vector3( 9.4808, 16.6122,  7.1397), "radius": 5.25, "color": Color(0.55, 0.82, 0.88) },
-	{ "name": "Neptune", "id": "899", "eq": Vector3(30.0174,  2.1421,  0.1558), "radius": 5.0,  "color": Color(0.30, 0.50, 0.95) },
+	# Bigger now, with REAL masses (Earth = 1) so gravity is mass-based: the giants and
+	# the Sun grab hard, Mercury/Mars barely tug. Radii follow real size order, gently
+	# compressed so they read as dominant without engulfing neighbours.
+	{ "name": "Earth",   "id": "399", "eq": Vector3(0, 0, 0),               "radius": 5.6,  "mass": 1.0,      "color": Color(0.20, 0.45, 1.0), "model": "res://earth.glb", "glow": 0.12, "fixed": true },
+	{ "name": "Sun",     "id": "10",  "eq": Vector3( 0.1640,  0.9194,  0.3985), "radius": 14.0, "mass": 333000.0, "color": Color(1.00, 0.85, 0.30), "star": true, "model": "res://star.glb", "glow": 2.0 },
+	{ "name": "Mercury", "id": "199", "eq": Vector3(-0.2269,  0.7801,  0.3646), "radius": 2.2,  "mass": 0.055,    "color": Color(0.70, 0.62, 0.52) },
+	{ "name": "Venus",   "id": "299", "eq": Vector3(-0.5535,  0.9404,  0.4534), "radius": 5.3,  "mass": 0.815,    "color": Color(0.95, 0.85, 0.55) },
+	{ "name": "Mars",    "id": "499", "eq": Vector3( 1.4583,  1.4672,  0.6149), "radius": 3.0,  "mass": 0.107,    "color": Color(0.90, 0.40, 0.20) },
+	{ "name": "Jupiter", "id": "599", "eq": Vector3(-2.6447,  4.9896,  2.2115), "radius": 20.0, "mass": 317.8,    "color": Color(0.85, 0.72, 0.52) },
+	{ "name": "Saturn",  "id": "699", "eq": Vector3( 9.5512,  2.1483,  0.5020), "radius": 17.0, "mass": 95.2,     "color": Color(0.88, 0.78, 0.55) },
+	{ "name": "Uranus",  "id": "799", "eq": Vector3( 9.4808, 16.6122,  7.1397), "radius": 8.4,  "mass": 14.5,     "color": Color(0.55, 0.82, 0.88) },
+	{ "name": "Neptune", "id": "899", "eq": Vector3(30.0174,  2.1421,  0.1558), "radius": 8.0,  "mass": 17.1,     "color": Color(0.30, 0.50, 0.95) },
+	# The Voyagers — real interstellar probes, fetched LIVE from Horizons (spacecraft
+	# IDs -31 / -32, same geocentric frame as the planets). The eq fallbacks are their
+	# approximate 2026 positions (~160 / ~136 AU out) so they appear even offline. We
+	# respect them: they sit at their true coordinates and get a safe-zone speed limit.
+	{ "name": "Voyager 1", "id": "-31", "eq": Vector3(-33.2, -155.9, 33.9),  "radius": 8.0, "mass": 8000.0, "color": Color(0.82, 0.86, 0.92), "model": "res://Space probe.glb", "glow": 0.1, "craft": true },
+	{ "name": "Voyager 2", "id": "-32", "eq": Vector3(39.0, -67.6, -111.4),  "radius": 8.0, "mass": 8000.0, "color": Color(0.82, 0.86, 0.92), "model": "res://Space probe.glb", "glow": 0.1, "craft": true },
+]
+
+# Major moons — they orbit their PARENT planet each frame (parent tracked live from
+# Horizons). orbit_r is in scene units, EXAGGERATED for visibility like the planets
+# (true lunar distances are sub-planet-radius at this scale). orbit_speed = rad/s.
+const MOONS := [
+	{ "name": "Moon",     "parent": "Earth",   "radius": 1.6, "mass": 0.0123, "orbit_r": 16.0, "orbit_speed": 0.45, "color": Color(0.78, 0.78, 0.80) },
+	{ "name": "Io",       "parent": "Jupiter", "radius": 1.4, "mass": 0.015,  "orbit_r": 34.0, "orbit_speed": 0.80, "color": Color(0.95, 0.90, 0.50) },
+	{ "name": "Europa",   "parent": "Jupiter", "radius": 1.3, "mass": 0.008,  "orbit_r": 45.0, "orbit_speed": 0.62, "color": Color(0.90, 0.88, 0.82) },
+	{ "name": "Ganymede", "parent": "Jupiter", "radius": 1.8, "mass": 0.025,  "orbit_r": 57.0, "orbit_speed": 0.46, "color": Color(0.70, 0.64, 0.56) },
+	{ "name": "Callisto", "parent": "Jupiter", "radius": 1.7, "mass": 0.018,  "orbit_r": 70.0, "orbit_speed": 0.34, "color": Color(0.50, 0.46, 0.44) },
+	{ "name": "Titan",    "parent": "Saturn",  "radius": 1.7, "mass": 0.0225, "orbit_r": 42.0, "orbit_speed": 0.50, "color": Color(0.92, 0.66, 0.30) },
 ]
 
 # Real nearby stars (J2000): RA(h,m,s), Dec(d,m,s), distance(ly). HYG/SIMBAD.
 # color ~ real spectral type.
 const STARS := [
-	{ "name": "Proxima Centauri", "ra": [14,29,42.9], "dec": [-62,40,46], "ly": 4.2465, "color": Color(1.0, 0.60, 0.42) },
-	{ "name": "Alpha Centauri",   "ra": [14,39,36.5], "dec": [-60,50, 2], "ly": 4.3650, "color": Color(1.0, 0.95, 0.82) },
-	{ "name": "Barnard's Star",   "ra": [17,57,48.5], "dec": [  4,41,36], "ly": 5.9630, "color": Color(1.0, 0.65, 0.45) },
-	{ "name": "Wolf 359",         "ra": [10,56,29.2], "dec": [  7, 0,53], "ly": 7.8560, "color": Color(1.0, 0.55, 0.40) },
-	{ "name": "Lalande 21185",    "ra": [11, 3,20.2], "dec": [ 35,58,12], "ly": 8.3070, "color": Color(1.0, 0.70, 0.50) },
-	{ "name": "Sirius",           "ra": [ 6,45, 8.9], "dec": [-16,42,58], "ly": 8.6110, "color": Color(0.80, 0.90, 1.0) },
-	{ "name": "Epsilon Eridani",  "ra": [ 3,32,55.8], "dec": [ -9,27,30], "ly": 10.475, "color": Color(1.0, 0.85, 0.60) },
-	{ "name": "Tau Ceti",         "ra": [ 1,44, 4.1], "dec": [-15,56,15], "ly": 11.912, "color": Color(1.0, 0.95, 0.85) },
+	# mass = real stellar mass in EARTH masses (≈ solar × 333000) — drives the size of
+	# the force-slow zone as you approach (heavier star = stronger, wider slow).
+	{ "name": "Proxima Centauri", "ra": [14,29,42.9], "dec": [-62,40,46], "ly": 4.2465, "mass": 40000.0,  "color": Color(1.0, 0.60, 0.42) },
+	{ "name": "Alpha Centauri",   "ra": [14,39,36.5], "dec": [-60,50, 2], "ly": 4.3650, "mass": 366000.0, "color": Color(1.0, 0.95, 0.82) },
+	{ "name": "Barnard's Star",   "ra": [17,57,48.5], "dec": [  4,41,36], "ly": 5.9630, "mass": 48000.0,  "color": Color(1.0, 0.65, 0.45) },
+	{ "name": "Wolf 359",         "ra": [10,56,29.2], "dec": [  7, 0,53], "ly": 7.8560, "mass": 30000.0,  "color": Color(1.0, 0.55, 0.40) },
+	{ "name": "Lalande 21185",    "ra": [11, 3,20.2], "dec": [ 35,58,12], "ly": 8.3070, "mass": 130000.0, "color": Color(1.0, 0.70, 0.50) },
+	{ "name": "Sirius",           "ra": [ 6,45, 8.9], "dec": [-16,42,58], "ly": 8.6110, "mass": 686000.0, "color": Color(0.80, 0.90, 1.0) },
+	{ "name": "Epsilon Eridani",  "ra": [ 3,32,55.8], "dec": [ -9,27,30], "ly": 10.475, "mass": 270000.0, "color": Color(1.0, 0.85, 0.60) },
+	{ "name": "Tau Ceti",         "ra": [ 1,44, 4.1], "dec": [-15,56,15], "ly": 11.912, "mass": 261000.0, "color": Color(1.0, 0.95, 0.85) },
 ]
 
 const _CACHE_PATH := "user://ephemeris_cache.json"

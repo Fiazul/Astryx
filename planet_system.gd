@@ -15,15 +15,27 @@ extends Node3D
 
 # Approach speed-zone (units/s). Ceiling stays >= cruise so normal flight near a
 # body isn't throttled.
-const APPROACH_MIN_SPEED := 8.0     # strict speed right at a body — stable for scanning
-const APPROACH_MAX_SPEED := 500.0
+# Force-slow "gravity safe-zones" (NO pull — just a speed cap). A body force-slows the
+# ship within radius × zone-mult (stars get the wider zone, like a much bigger gravity
+# reach), eased down to a floor that's LOWER for more massive bodies. Zones are finite,
+# so you can always fly back out — and outside every zone you're free to warp.
+const STAR_ZONE_MULT := 90.0     # star slow-zone radius = star radius × this
+const PLANET_ZONE_MULT := 45.0   # planet/moon slow-zone radius = radius × this
+# NOTE units: 1u = 0.01 AU, so 100 u/s = 1 AU/s. These are deliberately LOW so flight
+# near Sol/any body is a slow crawl (fractions of an AU per second), never "a few AU
+# per press". You only get warp-fast out in the deep, beyond every zone.
+const ZONE_EDGE_SPEED := 90.0    # speed cap at the zone's outer edge (~0.9 AU/s)
+const ZONE_FLOOR := 8.0          # slowest cap, at a very massive body's centre (~0.08 AU/s)
 
 # Gravity: a gentle, mass-scaled tug toward each planet (mass ~ radius²), falling
 # off with distance², clamped so thrust always wins. Retuned for the 0.1-AU scale.
-const GRAVITY_ENABLED := true
-const GRAVITY_STRENGTH := 9600.0    # mass-scaled pull (mass ~ radius²); retuned for the ×10 spread
-const GRAVITY_MAX_ACCEL := 120.0    # per-body cap (units/s²); thrust is ~1650 so you can climb out
-const GRAVITY_RANGE_MULT := 160.0   # bodies pull within radius × this (well reaches far in the big system)
+const GRAVITY_ENABLED := false   # no gravitational pull — bodies are SAFE ZONES (speed-limited), not wells
+# Mass-based gravity: accel = GRAV_G × mass(Earth=1) / dist². Real masses (see the
+# body specs) make the giants + Sun grab hard while Mercury/Mars barely tug. Capped
+# below thrust (~1650) so a planet can pull you in, but full throttle always escapes.
+const GRAV_G := 31400.0             # gravity constant for the gameplay scale
+const GRAVITY_MAX_ACCEL := 800.0    # per-body pull ceiling (units/s²)
+const GRAVITY_RANGE_MULT := 60.0    # a body's well reaches within radius × this
 # Stars are tiny on screen but carry a sun's mass — up close they pull hard enough to
 # visibly bend your hull's path and your gunfire. Felt only within STAR_GRAVITY_RANGE.
 const STAR_GRAVITY_K := 18000000000.0  # accel = K / dist² (capped) — retuned for the ×10 spread
@@ -40,6 +52,7 @@ var nearest_dir := Vector3.ZERO   # unit vector from ship toward the nearest bod
 var speed_limit := INF
 var gravity := Vector3.ZERO
 var star_dist := INF              # distance to this system's primary star (gates FTL / warp)
+var speed_zones := true           # planet "safe zone" speed limit — ON in Sol, OFF elsewhere (set by main)
 
 var _bodies := []
 var _stars := []        # named real stars as floating-origin destinations
@@ -140,9 +153,14 @@ func _build_planet(p: Dictionary) -> void:
 
 	_bodies.append({
 		"name": p.name, "radius": float(p.radius),
+		"mass": float(p.get("mass", float(p.radius) * float(p.radius) * 0.05)),   # Earth=1; fallback ~ size
 		"live": p.get("live", true),          # Sol bodies read live positions; others are static
 		"pos": p.get("pos", Vector3.ZERO),    # local position when not live
 		"star": is_star,                      # the system's primary — gates FTL (star field)
+		"parent": p.get("parent", ""),        # non-empty => a moon orbiting that body
+		"orbit_r": float(p.get("orbit_r", 0.0)),
+		"orbit_speed": float(p.get("orbit_speed", 0.0)),
+		"orbit_a": randf() * TAU,             # current orbital phase
 		"dot": dot, "sphere": sphere, "mat": mat, "model": model, "label": label,
 		"spin": randf_range(0.05, 0.2),
 	})
@@ -208,6 +226,7 @@ func _build_star_shell() -> void:
 
 		_stars.append({
 			"name": s.name, "true_pos": eph.star_true_pos(s), "ly": s.ly,
+			"mass": float(s.get("mass", 333000.0)),
 			"dot": dot, "sphere": sphere, "label": label,
 		})
 
@@ -222,15 +241,30 @@ func refresh(ship_pos: Vector3, delta: float) -> void:
 
 	for b in _bodies:
 		var rad: float = b.radius
-		# Sol's bodies read live Horizons positions; other systems are static local.
-		var bpos: Vector3 = eph.scene_pos(b.name) if b.live else b.pos
+		# Moons orbit their (live) parent; Sol bodies read live Horizons positions; others static.
+		var bpos: Vector3
+		if b.parent != "":
+			b.orbit_a += float(b.orbit_speed) * delta
+			var oa: float = b.orbit_a
+			var off: Vector3 = Vector3(cos(oa), 0.18 * sin(oa * 0.5), sin(oa)) * float(b.orbit_r)
+			bpos = eph.scene_pos(b.parent) + off
+		elif b.live:
+			bpos = eph.scene_pos(b.name)
+		else:
+			bpos = b.pos
 		var rel: Vector3 = bpos - ship_pos  # floating origin
 		var dist := rel.length()
 
 		if GRAVITY_ENABLED and dist > 0.001 and dist < rad * GRAVITY_RANGE_MULT:
-			var mass := rad * rad
-			var a := minf(GRAVITY_STRENGTH * mass / (dist * dist), GRAVITY_MAX_ACCEL)
+			var a := minf(GRAV_G * float(b.mass) / (dist * dist), GRAVITY_MAX_ACCEL)
 			gravity += (rel / dist) * a
+
+		# Force-slow safe-zone (NO pull): cap speed within a mass/size-scaled radius,
+		# eased from the edge speed down to a mass-based floor at the body.
+		var zone: float = rad * (STAR_ZONE_MULT if b.star else PLANET_ZONE_MULT)
+		if dist < zone:
+			var zt := dist / zone
+			speed_limit = minf(speed_limit, lerpf(_slow_min(float(b.mass)), ZONE_EDGE_SPEED, zt))
 
 		b.dot.position = rel
 		b.label.position = rel + Vector3(0.0, rad * 1.5 + 0.5, 0.0)
@@ -295,6 +329,11 @@ func refresh(ship_pos: Vector3, delta: float) -> void:
 			nearest_dist = sdist
 			nearest_name = st.name
 			nearest_radius = STAR_RADIUS
+		# Force-slow safe-zone around the star (no pull) — this is what eases you out
+		# of warp as you arrive, scaled by the star's mass.
+		var szone := STAR_RADIUS * STAR_ZONE_MULT
+		if sdist < szone:
+			speed_limit = minf(speed_limit, lerpf(_slow_min(float(st.mass)), ZONE_EDGE_SPEED, sdist / szone))
 		var sdir: Vector3 = srel.normalized()
 		if sdist < STAR_NEAR:
 			st.sphere.visible = true
@@ -310,15 +349,15 @@ func refresh(ship_pos: Vector3, delta: float) -> void:
 			st.label.position = sdir * rd + Vector3(0.0, 14.0, 0.0)
 		st.label.text = "%s\n%.2f ly" % [st.name, sdist / Ephemeris.UNITS_PER_LY]
 
-	# Approach "platform" zone: begins ~scan range out, eases to a strict crawl at
-	# the body. An absolute floor keeps small bodies usable too.
-	var slow_start := maxf(nearest_radius * 12.0, 55.0)
-	var slow_end := maxf(nearest_radius * 3.0, 8.0)
-	if nearest_dist < slow_start:
-		var tt := clampf((nearest_dist - slow_end) / maxf(slow_start - slow_end, 0.001), 0.0, 1.0)
-		speed_limit = lerpf(APPROACH_MIN_SPEED, APPROACH_MAX_SPEED, tt)
-	# Direction toward the nearest body (ship lets you escape freely AWAY from it).
+	# speed_limit was accumulated above from each body's force-slow zone (min cap).
+	# Direction toward the nearest body (for the warp arrival ease-out).
 	nearest_dir = _rel.get(nearest_name, Vector3.ZERO).normalized()
+
+
+# Slowest speed cap a body imposes at its centre, from its mass (Earth=1): heavier =>
+# slower. log() keeps the enormous mass range (Mercury 0.05 → Sun 333000) sensible.
+func _slow_min(mass: float) -> float:
+	return clampf(ZONE_EDGE_SPEED / (1.0 + log(1.0 + maxf(mass, 0.0)) * 0.42), ZONE_FLOOR, ZONE_EDGE_SPEED)
 
 
 # Gravitational acceleration at an arbitrary true-space position, summed over every
@@ -328,11 +367,19 @@ func gravity_at(pos: Vector3) -> Vector3:
 	if not GRAVITY_ENABLED:
 		return g
 	for b in _bodies:
-		var bpos: Vector3 = eph.scene_pos(b.name) if b.live else b.pos
+		var bpos: Vector3
+		if b.parent != "":
+			var oa: float = b.orbit_a
+			var off: Vector3 = Vector3(cos(oa), 0.18 * sin(oa * 0.5), sin(oa)) * float(b.orbit_r)
+			bpos = eph.scene_pos(b.parent) + off
+		elif b.live:
+			bpos = eph.scene_pos(b.name)
+		else:
+			bpos = b.pos
 		var rel: Vector3 = bpos - pos
 		var d := rel.length()
 		if d > 0.001 and d < float(b.radius) * GRAVITY_RANGE_MULT:
-			var a := minf(GRAVITY_STRENGTH * (float(b.radius) * float(b.radius)) / (d * d), GRAVITY_MAX_ACCEL)
+			var a := minf(GRAV_G * float(b.mass) / (d * d), GRAVITY_MAX_ACCEL)
 			g += (rel / d) * a
 	for st in _stars:
 		var rel: Vector3 = st.true_pos - pos

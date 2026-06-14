@@ -27,18 +27,20 @@ var planet_info: PlanetInfo
 var navigator: Navigator
 var minimap: MiniMap
 var codex: Codex
-var _nav_index := -1          # -1 = no waypoint; else index into nav targets
+var _nav_target := ""         # "" = the auto Survey guide; else a targetable name (Tab)
 var _scan := 0.0             # scan progress 0..1 of the nearest body
 var _scan_name := ""
 const SCAN_SECONDS := 2.0
-const SCAN_RANGE := 550.0     # how close you must be to scan a body (×10 for the spread)
+const SCAN_RANGE := 550.0     # how close you must be to capture a body (×10 for the spread)
+const GUARD_RANGE := 2500.0   # approach a guarded body within this → its guardians activate
+const GUARD_COUNT := 5        # guardian aliens per guarded body (placeholder meshes for now)
 var _env: Environment
 
 var docked := false
 var _dock_in_range := false
 var current_system := SystemDB.SOL
 var _music: AudioStreamPlayer
-const MUSIC_DB := -24.0    # bgm backdrop level once faded in (engine/SFX sit on top)
+const MUSIC_DB := -13.0    # bgm level once faded in — louder/present (engine ducks under it)
 const MUSIC_OFF_DB := -60.0  # silent end of the fade
 const MUSIC_FADE := 1.2    # fade speed (per second) for the gentle in/out
 
@@ -191,6 +193,7 @@ func _process(delta: float) -> void:
 	ship.star_field_dist = planets.star_dist # FTL only unlocks beyond the star's gravity field
 	ship.gravity = planets.gravity           # gentle pull toward bodies
 	props.update(ship.true_pos, delta)
+	ship.struct_limit = props.struct_speed_limit   # strict speed cap near stations/probes
 	if wormhole.update(ship.true_pos, delta):
 		_arrive(wormhole.dest_id)
 	# Combat runs in normal flight (not mid-transit, not docked). Docking at a
@@ -258,14 +261,26 @@ func _update_minimap() -> void:
 	minimap.set_blips(blips)
 
 
-# --- Scan-to-discover the nearest body (hold V within range) ---
+# --- Capture the nearest body (hold V within range). Guarded bodies (≈80%, never in
+# peaceful Sol) spawn alien guardians you must clear first. Capture = beacon + rank. ---
 func _update_scan(delta: float) -> void:
 	hud.toast_t = maxf(hud.toast_t - delta, 0.0)
 	var name := planets.nearest_name
+	var captured := name != "" and codex.is_discovered(name)
+	var guarded := name != "" and current_system != SystemDB.SOL and _is_guarded(name)
+
+	# Approaching a guarded, un-captured body activates its (non-respawning) guardians.
+	if guarded and not captured and planets.nearest_dist < GUARD_RANGE \
+			and combat.guard_body != name and not ship.transiting and not docked:
+		combat.set_guardians(ship.true_pos + planets.rel_of(name), GUARD_COUNT, name)
+
+	var guards := combat.guardians_alive() if (guarded and combat.guard_body == name) else 0
+	var clear := not guarded or guards == 0
+
 	var in_range := not docked and not ship.transiting and name != "" \
 		and planets.nearest_dist < SCAN_RANGE \
 		and Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED
-	var fresh := in_range and not codex.is_discovered(name)
+	var fresh := in_range and not captured and clear
 
 	if fresh and Input.is_physical_key_pressed(KEY_V):
 		if name != _scan_name:
@@ -274,8 +289,10 @@ func _update_scan(delta: float) -> void:
 		_scan = minf(_scan + delta / SCAN_SECONDS, 1.0)
 		if _scan >= 1.0:
 			if codex.discover(name):
-				hud.toast = "✓  %s  DISCOVERED" % name
-				hud.toast_t = 3.0
+				hud.toast = "✦  CAPTURED  %s   ·   %s" % [name, _rank_title()]
+				hud.toast_t = 3.5
+				if combat.guard_body == name:
+					combat.clear_guardians()
 			_scan = 0.0
 			_scan_name = ""
 	else:
@@ -285,42 +302,83 @@ func _update_scan(delta: float) -> void:
 
 	hud.scan_progress = _scan
 	hud.scan_name = _scan_name
-	hud.scan_hint = "» hold V to scan %s «" % name if (fresh and _scan <= 0.0) else ""
+	if name == "" or captured:
+		hud.scan_hint = ""
+	elif guarded and not clear:
+		hud.scan_hint = "⚠  %d GUARDIANS defend %s — destroy them" % [guards, name]
+	elif in_range and _scan <= 0.0:
+		hud.scan_hint = "» hold V to capture %s «" % name
+	else:
+		hud.scan_hint = ""
+
+
+# ≈80% of bodies are guarded (deterministic per name, so it's stable across visits).
+func _is_guarded(body_name: String) -> bool:
+	return (hash(body_name) % 5 + 5) % 5 != 0
+
+# Survey rank from how many bodies you've captured (the reward ladder).
+func _rank_title() -> String:
+	var n := codex.count()
+	if n >= 24: return "Star-Marshal"
+	elif n >= 14: return "Cartographer"
+	elif n >= 6: return "Surveyor"
+	return "Cadet"
 
 
 # --- Navigation waypoint (Tab cycles: off -> each body -> wormhole -> off) ---
+# Tab targeting, prioritised by AIM: the first press locks onto whatever you're
+# pointing at (the targetable most aligned with your view); each further press steps
+# to the next-most-aligned; past the last returns to the auto Survey guide.
 func _cycle_nav_target() -> void:
-	var count := planets.targetables().size() + 1   # + the wormhole
-	_nav_index += 1
-	if _nav_index >= count:
-		_nav_index = -1
+	var cands := _aim_sorted_targets()
+	if cands.is_empty():
+		_nav_target = ""
+		return
+	var idx: int = cands.find(_nav_target)
+	if idx < 0:
+		_nav_target = cands[0]                 # → what you're aiming at
+	elif idx + 1 < cands.size():
+		_nav_target = cands[idx + 1]           # → next-most-aligned
+	else:
+		_nav_target = ""                       # cycled through all → back to auto guide
+
+# Targetable names sorted by how closely they sit to the centre of your view.
+func _aim_sorted_targets() -> Array:
+	var fwd: Vector3 = -ship.camera.global_transform.basis.z
+	var list := []
+	for bname in planets.targetables():
+		var rel: Vector3 = planets.rel_of(bname)
+		if rel.length() > 0.001:
+			list.append({ "name": bname, "align": fwd.dot(rel.normalized()) })
+	var wrel: Vector3 = wormhole.portal_rel(ship.true_pos)
+	if wrel.length() > 0.001:
+		list.append({ "name": "Wormhole", "align": fwd.dot(wrel.normalized()) })
+	list.sort_custom(func(a, b): return a.align > b.align)
+	var names := []
+	for it in list:
+		names.append(it.name)
+	return names
 
 func _update_navigator() -> void:
 	if navigator == null:
 		return
-	var bodies: Array = planets.targetables()
-	var count := bodies.size() + 1
 	var tname: String
 	var rel: Vector3
 	if ship.transiting:
 		navigator.update_nav(ship.camera, false, Vector3.ZERO, "", "")   # gizmo only
 		hud.set_objective("")
 		return
-	elif _nav_index >= 0 and _nav_index < count:
-		# Manual Tab target (a specific body or the wormhole).
-		if _nav_index < bodies.size():
-			tname = bodies[_nav_index]
-			rel = planets.rel_of(tname)
-		else:
-			tname = "Wormhole"
-			rel = wormhole.portal_rel(ship.true_pos)
+	elif _nav_target != "":
+		# Manual Tab target (a specific body or the wormhole), picked by aim.
+		tname = _nav_target
+		rel = wormhole.portal_rel(ship.true_pos) if tname == "Wormhole" else planets.rel_of(tname)
 	else:
 		# Default: the Survey guide always points at the nearest unclaimed star, so
 		# the player is never lost. Tab overrides it; cycling past the end returns here.
 		var obj := _current_objective()
 		if obj.is_empty():
 			navigator.update_nav(ship.camera, false, Vector3.ZERO, "", "")
-			hud.set_objective("✦  All nearby stars claimed")
+			hud.set_objective("")
 			return
 		tname = obj.name
 		rel = obj.rel
@@ -329,9 +387,14 @@ func _update_navigator() -> void:
 	hud.set_objective("→  %s   %s" % [tname, dist_txt])
 
 
-# The current guidance objective: the nearest star not yet claimed (codex proxy until
-# the capture mechanic lands). Returns {} once every nearby star is claimed.
+# The current guidance objective:
+#  • In the Interstellar hub — the nearest destination gate (a system to dive into).
+#  • In any normal system — the nearest UN-surveyed star to fly to. Once they're all
+#    surveyed, fall back to guiding you to the exit gate so you know to move on.
 func _current_objective() -> Dictionary:
+	if current_system == SystemDB.INTERSTELLAR:
+		return _nearest_gate_objective()
+	# Fly to the nearest star you haven't logged yet (Tab still cycles every body/gate).
 	var best := ""
 	var best_d := INF
 	for s in Ephemeris.STARS:
@@ -341,12 +404,18 @@ func _current_objective() -> Dictionary:
 		if d < best_d:
 			best_d = d
 			best = s.name
-	if best == "":
+	if best != "":
+		return { "name": best, "rel": planets.rel_of(best) }
+	return _nearest_gate_objective()   # all surveyed here → point at the way out
+
+func _nearest_gate_objective() -> Dictionary:
+	if wormhole == null:
 		return {}
-	return { "name": best, "rel": planets.rel_of(best) }
+	var np := wormhole.nearest_portal(ship.true_pos)
+	return {} if np.is_empty() else { "name": str(np.name), "rel": np.rel }
 
 func _fmt_nav_dist(u: float) -> String:
-	var au := u * 0.1
+	var au := u * 0.01
 	if au >= 1000.0:
 		return "%.2f ly" % (au / 63241.077)
 	elif au >= 0.05:
@@ -364,6 +433,7 @@ func teleport_home() -> void:
 func _arrive(system_id: String) -> void:
 	current_system = system_id
 	planets.load_system(SystemDB.bodies(system_id))
+	planets.speed_zones = (system_id == SystemDB.SOL)   # planet safe-zone limits: Sol only
 	ship.true_pos = SystemDB.arrival_pos(system_id)
 	ship.transiting = false
 	ship.face_toward(-ship.true_pos)          # look back toward the system's star
@@ -371,10 +441,10 @@ func _arrive(system_id: String) -> void:
 	props.set_system(system_id)                    # show this system's stations/probes
 	# A large alien swarm haunts every star except peaceful Sol; Vortex (the boss)
 	# still only holds the true hostile Alien zone.
-	var fight := system_id != SystemDB.SOL
+	var fight := system_id != SystemDB.SOL and system_id != SystemDB.INTERSTELLAR
 	combat.reset(fight, SystemDB.is_hostile(system_id))
 	combat.player_hp = ship.max_hp
-	_nav_index = -1                                # clear the waypoint in the new system
+	_nav_target = ""                               # clear the waypoint in the new system
 	if docked:
 		_set_docked(false)
 	hud.origin_name = SystemDB.display_name(system_id) if system_id != SystemDB.SOL else "Earth"

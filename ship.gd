@@ -29,15 +29,18 @@ const SHIP_MODELS := [
 	#   Stella — the machine-gun: blistering fire rate + very fast small bolts, low HP.
 	#   Raptor — bruiser: high defence, fast fire, FTL warp form (X).
 	#   Vela   — glass cannon: squishy, fast fire like Raptor, the fastest FTL hull.
-	{ "name": "Lyra",   "path": "res://Rocket ship.glb",   "tint": Color(1.0, 1.0, 1.0),    "length": 0.45, "yaw": 180.0, "pitch": 0.0, "glow": 0.0, "engine_pitch": 1.0,  "hp": 220, "bolt_scale": 1.8, "bolt_speed": 820.0,  "fire_cd": 0.34, "dmg": 5, "warp": 2000.0 },
-	{ "name": "Stella", "path": "res://Spaceship.glb",     "tint": Color(0.70, 0.62, 0.95), "length": 0.40, "yaw": 180.0, "pitch": 0.0, "glow": 0.0, "engine_pitch": 0.92, "hp": 90,  "bolt_scale": 0.62, "bolt_speed": 1700.0, "fire_cd": 0.04, "dmg": 1, "warp": 2600.0 },
-	{ "name": "Raptor", "path": "res://Spaceship (2).glb", "tint": Color(0.70, 0.90, 0.95), "length": 0.42, "yaw": 180.0, "pitch": 0.0, "glow": 0.0, "engine_pitch": 0.82, "hp": 150, "bolt_scale": 0.95, "bolt_speed": 1050.0, "fire_cd": 0.05, "dual": true, "dmg": 2 },
+	{ "name": "Lyra",   "path": "res://Rocket ship.glb",   "tint": Color(1.0, 1.0, 1.0),    "length": 0.45, "yaw": 180.0, "pitch": 0.0, "glow": 0.0, "engine_pitch": 1.0,  "hp": 250, "bolt_scale": 1.8, "bolt_speed": 820.0,  "fire_cd": 0.34, "dmg": 3, "warp": 230.0, "raw": true },
+	{ "name": "Stella", "path": "res://Spaceship.glb",     "tint": Color(0.70, 0.62, 0.95), "length": 0.40, "yaw": 180.0, "pitch": 0.0, "glow": 0.0, "engine_pitch": 0.92, "hp": 100, "bolt_scale": 0.62, "bolt_speed": 1700.0, "fire_cd": 0.04, "dmg": 1, "warp": 345.0 },
+	{ "name": "Raptor", "path": "res://Spaceship (2).glb", "tint": Color(0.70, 0.90, 0.95), "length": 0.42, "yaw": 180.0, "pitch": 0.0, "glow": 0.0, "engine_pitch": 0.82, "hp": 135, "bolt_scale": 0.95, "bolt_speed": 1050.0, "fire_cd": 0.05, "dual": true, "dmg": 2, "warp": 345.0 },
 	# Vela: the FTL ship. warp 4312 -> max cruise ≈ 1.5 ly/s at full charge
 	# (THRUST·warp/DAMPING, 1 ly = 632,411 units). Her drive spools up over time
 	# (see WARP_CHARGE_*), so she eases into warp rather than snapping to it.
 	# "brake": her ultimate — hold R to ease to a full stop (she's so fast that stopping
 	# at a star is otherwise brutal; the air-brake makes her usable). Squishy hull.
-	{ "name": "Vela",   "path": "res://Spaceship (3).glb", "tint": Color(0.55, 0.80, 1.0),  "length": 0.42, "yaw": 180.0, "pitch": 0.0, "glow": 0.0, "warp": 4312.0, "engine_pitch": 1.14, "brake": true, "hp": 70, "bolt_scale": 0.9, "bolt_speed": 1050.0, "fire_cd": 0.05, "dmg": 2 },
+	{ "name": "Vela",   "path": "res://Spaceship (3).glb", "tint": Color(0.55, 0.80, 1.0),  "length": 0.42, "yaw": 180.0, "pitch": 0.0, "glow": 0.0, "warp": 5749.0, "engine_pitch": 1.14, "brake": true, "hp": 120, "bolt_scale": 0.9, "bolt_speed": 1050.0, "fire_cd": 0.05, "dmg": 2, "raw": true },
+	# Mule — a UTILITY hull: no weapons, very slow (0.001 ly), but a 1000-HP tank.
+	# Used later to tow/reposition stations. Three white-transparent boosters.
+	{ "name": "Mule",   "path": "res://utility_ship.glb",  "tint": Color(0.60, 0.66, 0.76), "length": 0.7,  "yaw": 0.0, "pitch": 0.0, "glow": 0.0, "warp": 3.0, "engine_pitch": 0.7, "hp": 1000, "can_fire": false, "raw": true },
 	# Vortex retired as a player ship — it's a boss enemy now (see combat.gd boss).
 ]
 const BOOSTER_COLOR := Color(0.35, 0.8, 1.0)
@@ -67,6 +70,11 @@ const BOOSTER_LAYOUTS := {
 	"Raptor": [
 		Vector2( 0.00, -0.02),   # single, centered
 	],
+	"Mule": [
+		Vector2(-0.20,  0.00),   # left engine pod
+		Vector2( 0.20,  0.00),   # right engine pod
+		Vector2( 0.00,  0.04),   # central thruster
+	],
 	"Vela": [
 		Vector2(-0.05, -0.01),   # twin engines, tight on the central block
 		Vector2( 0.05, -0.01),
@@ -74,9 +82,11 @@ const BOOSTER_LAYOUTS := {
 }
 const BOOSTER_FALLBACK := [Vector2(-0.08, 0.0), Vector2(0.08, 0.0)]  # if a name isn't listed
 # Per-ship plume shaping. Raptor: long/thin/small. Vela: long, thin, golden.
-const BOOSTER_RADIUS_SCALE := { "Raptor": 0.70, "Vela": 0.45, "Stella": 0.40 }   # Raptor: thin spike
-const BOOSTER_LENGTH_SCALE := { "Raptor": 7.5, "Vela": 4.2,  "Stella": 3.6, "Lyra": 1.5 }  # long trails
+const BOOSTER_RADIUS_SCALE := { "Lyra": 0.6, "Raptor": 0.70, "Vela": 0.45, "Stella": 0.40, "Mule": 0.6 }   # thin spikes
+const BOOSTER_LENGTH_SCALE := { "Raptor": 2.2, "Vela": 1.4,  "Stella": 0.8, "Lyra": 0.5, "Mule": 0.9 }  # plume length × hull
 const BOOSTER_COLOR_OVERRIDE := {
+	"Mule": Color(1.0, 1.0, 1.0),      # white (transparent additive plume)
+	"Lyra": Color(1.0, 0.94, 0.72),    # holy golden-white
 	"Vela": Color(1.0, 0.82, 0.32),    # transparent gold
 	"Stella": Color(1.0, 0.26, 0.20),  # sharp transparent red
 	"Raptor": Color(0.62, 0.22, 1.0),  # dangerous transparent purple
@@ -96,6 +106,10 @@ const THRUST := 1650.0        # forward/back accel (units/s^2) — ×10 for the 
 const STRAFE_THRUST := 1050.0 # lateral / vertical accel
 const BOOST_MULT := 3.0       # Shift multiplier
 const MAX_SPEED := 10000.0
+# Calm in-system cruise: sublight (non-warp) flight is capped here so you're not
+# blitzing past the planets near Sol. Boost (Shift) multiplies it for fast travel.
+# This is SEPARATE from warp — the per-ship ly tops are unaffected.
+const SUBLIGHT_MAX := 550.0
 # Damping vs thrust sets the real cruise speed (~THRUST/DAMPING here) — MAX_SPEED is
 # just a ceiling. Lower DAMPING = more glide/momentum (the "heavy" feel).
 const DAMPING := 0.75         # higher = eases to a stop faster when idle
@@ -106,9 +120,8 @@ const ROLL_RATE := 1.8        # manual Q/E roll (rad/s)
 
 # Warp arrival: a warp ship eases out of warp as it falls toward the nearest mark, so
 # it arrives instead of blasting past (and the star has time to bloom into a sphere).
-const WARP_ARRIVE_FAR := 80000.0   # start easing down within this of the body
-const WARP_ARRIVE_NEAR := 2600.0   # fully dropped out of warp by here
-const WARP_ARRIVE_SPEED := 1500.0  # the gentle speed it bleeds down to on arrival
+const WARP_ARRIVE_TIME := 2.0      # seconds-to-arrival at which warp starts easing out
+const WARP_ARRIVE_SPEED := 400.0   # gentle speed warp bleeds down to (slow enough to scan)
 const BANK_ANGLE := 0.5       # max cosmetic bank into turns (rad)
 const BANK_SMOOTH := 5.0
 const CAM_OFFSET := Vector3(0.0, 0.26, 1.0)  # behind (+Z) and above the now-tiny ship
@@ -128,6 +141,7 @@ var speed_limit := INF         # set by main from PlanetSystem; eases us down ne
 var nearest_dir := Vector3.ZERO  # toward nearest body; we only ease down when approaching it
 var nearest_dist := INF        # distance to nearest body; set by main (warp arrival ease-out)
 var star_field_dist := 0.0     # distance to this system's star; set by main (FTL gate; 0 = locked until known)
+var struct_limit := INF        # strict sublight cap near stations/probes; set by main from props
 var gravity := Vector3.ZERO    # set by main from PlanetSystem; gentle pull toward bodies
 var dock_approach := 0.0       # 0 outside the station's landing zone, 1 at the pad; set by main
 var frozen := false            # docked at a station — motion held, mouse freed
@@ -142,9 +156,11 @@ var max_hp := 100              # this hull's defence / hull integrity (combat re
 var bolt_speed := 950.0        # this hull's bullet velocity (combat reads this)
 var bolt_scale := 1.0          # this hull's bullet size multiplier (combat reads this)
 var bolt_damage := 1           # damage per bolt (combat reads this) — Lyra's hit hard
+var can_fire := true           # false for utility hulls (no weapons) — combat reads this
 var muzzle := 2.5              # forward distance bolts spawn at — this hull's nose tip
 var _dual := false             # Raptor: can toggle between combat + warp modes
-const RAPTOR_WARP := 4025.0    # Raptor's warp-mode multiplier (≈1.4 ly/s — just under Vela)
+const RAPTOR_WARP := 3450.0        # Raptor Warp mode (≈1.2 ly/s)
+const RAPTOR_COMBAT_WARP := 345.0  # Raptor Combat mode top (≈0.12 ly/s, like Stella)
 const HYPERSONIC_SPEED := 15000.0   # above this a warp ship is "hypersonic" (no combat)
 const WARP_FLOOR := 5.0        # warp multiplier at zero charge (controllable start)
 # FTL gate: warp can only spool up once you're beyond the system star's gravity field.
@@ -163,22 +179,23 @@ const DOCK_SPIN := 0.5             # showroom turntable spin (rad/s) while docke
 func is_hypersonic() -> bool:
 	return warp > 1.0 and velocity.length() > HYPERSONIC_SPEED
 
-# This hull can engage FTL right now: it has a warp drive AND it's clear of the
-# system star's gravity field. (HUD shows a "FTL READY" cue.)
+# This hull can build full FTL right now: it has a warp drive AND it's clear of every
+# force-slow safe-zone (deep space). Near a star/planet the zone caps your speed.
 func warp_ready() -> bool:
-	return warp > 1.0 and star_field_dist > SOL_FIELD_RADIUS
+	return warp > 1.0 and is_inf(speed_limit)
 
 # Raptor only: toggle between Combat mode (machine-gun, normal flight) and Warp
 # mode (Vela-style FTL). Returns the new mode name for HUD feedback.
 func toggle_warp_mode() -> String:
 	if not _dual:
 		return ""
-	if warp > 1.0:
-		warp = 1.0          # back to Combat mode
+	if warp >= RAPTOR_WARP:
+		warp = RAPTOR_COMBAT_WARP   # back to Combat mode (≈0.12 ly cap)
+		return "COMBAT"
 	else:
-		warp = RAPTOR_WARP  # Warp / FTL mode
+		warp = RAPTOR_WARP          # Warp / FTL mode (≈1.2 ly)
 		_warp_charge = 0.0
-	return "WARP" if warp > 1.0 else "COMBAT"
+		return "WARP"
 
 func is_warp_mode() -> bool:
 	return _dual and warp > 1.0
@@ -315,22 +332,17 @@ func fly(delta: float) -> void:
 	if Input.is_physical_key_pressed(KEY_CTRL):
 		lift -= 1.0
 
-	# FTL is a gated special: every hull can warp, but only once it's clear of the
-	# system star's gravity field. Inside it you fly normal sublight cruise (eff 1×);
-	# outside, holding W spools the drive up over time toward full warp.
+	# FTL: every hull can spool warp by holding W. There's no gate — instead the
+	# force-slow safe-zones around stars/planets cap your speed when you're near them,
+	# so you naturally drop out of warp near a body and fly free in the deep.
 	var eff_warp := 1.0
 	if warp > 1.0:
-		if star_field_dist <= SOL_FIELD_RADIUS:
-			# In the well — no FTL. Bleed any charge and cruise sublight.
-			_warp_charge = maxf(_warp_charge - delta / WARP_DECAY_TIME, 0.0)
-			eff_warp = 1.0
+		if Input.is_physical_key_pressed(KEY_W):
+			_warp_charge = minf(_warp_charge + delta / WARP_CHARGE_TIME, 1.0)
 		else:
-			if Input.is_physical_key_pressed(KEY_W):
-				_warp_charge = minf(_warp_charge + delta / WARP_CHARGE_TIME, 1.0)
-			else:
-				_warp_charge = maxf(_warp_charge - delta / WARP_DECAY_TIME, 0.0)
-			var c := _warp_charge * _warp_charge * (3.0 - 2.0 * _warp_charge)   # smoothstep
-			eff_warp = lerpf(WARP_FLOOR, warp, c)
+			_warp_charge = maxf(_warp_charge - delta / WARP_DECAY_TIME, 0.0)
+		var c := _warp_charge * _warp_charge * (3.0 - 2.0 * _warp_charge)   # smoothstep
+		eff_warp = lerpf(WARP_FLOOR, warp, c)
 
 	var local_accel := Vector3(strafe * STRAFE_THRUST, lift * STRAFE_THRUST, fwd * THRUST) * eff_warp
 	if local_accel != Vector3.ZERO:
@@ -346,18 +358,19 @@ func fly(delta: float) -> void:
 	if braking:
 		velocity = velocity.lerp(Vector3.ZERO, clampf(BRAKE_RATE * delta, 0.0, 1.0))
 		_warp_charge = 0.0
-	# While warping the cap is huge; sublight flight (eff 1×) obeys the approach limit.
 	var cap := MAX_SPEED * eff_warp * boost
-	# Ease down only when moving TOWARD the nearest body (so you can stabilise and
-	# scan). Pointing away is free, so you never get "stuck" at Earth/a planet.
-	if eff_warp <= 1.0 and velocity.dot(nearest_dir) >= 0.0:
-		cap = minf(cap, speed_limit)
-	# Warping toward a mark: ease out of warp as you fall toward it so the body grows
-	# into view and you actually arrive instead of skipping past. (Tap R to brake.)
-	elif eff_warp > 1.0 and velocity.dot(nearest_dir) > 0.0 and nearest_dist < WARP_ARRIVE_FAR:
-		var at := clampf((nearest_dist - WARP_ARRIVE_NEAR) / (WARP_ARRIVE_FAR - WARP_ARRIVE_NEAR), 0.0, 1.0)
-		cap = minf(cap, lerpf(WARP_ARRIVE_SPEED, cap, at))
-		_warp_charge = minf(_warp_charge, at)   # drive visibly drops out of warp on arrival
+	if eff_warp <= 1.0:
+		cap = minf(cap, SUBLIGHT_MAX * boost)   # calm sublight cruise when not warping
+	# Force-slow safe-zones around stars/planets/moons (NO pull) — applied in ANY mode
+	# and ANY direction, so you ease right down to orbit, analyse, and capture a body,
+	# and a star drops you out of warp as you arrive. Scaled by the body's mass.
+	cap = minf(cap, speed_limit)
+	# Harbour cap near stations — any mode, so you never blast through a structure.
+	cap = minf(cap, struct_limit)
+	# Bleed warp charge when something is force-slowing us, so the drive visibly drops
+	# out of warp as you settle near a body/station instead of pinning at full spool.
+	if (speed_limit < INF or struct_limit < INF) and cap < MAX_SPEED:
+		_warp_charge = minf(_warp_charge, cap / maxf(MAX_SPEED, 1.0))
 	velocity = velocity.limit_length(cap)
 
 	# Platform approach: inside the station's landing zone the speed is force-reduced
@@ -521,6 +534,7 @@ func _build_ship_model(idx: int) -> void:
 	bolt_speed = float(info.get("bolt_speed", 950.0))
 	bolt_scale = float(info.get("bolt_scale", 1.0))
 	bolt_damage = int(info.get("dmg", 1))
+	can_fire = bool(info.get("can_fire", true))
 	_dual = info.get("dual", false)
 	_engine_pitch = float(info.get("engine_pitch", 1.0))
 	_can_brake = info.get("brake", false)
@@ -540,7 +554,7 @@ func _build_ship_model(idx: int) -> void:
 	# past center so its first visible frame is already downrange and clear of the ship
 	# (scales with hull size — the muzzle moment itself isn't shown).
 	muzzle = box.size.z * 1.6
-	_recolor(model, info.tint, float(info.glow), info.get("chrome", false))
+	_recolor(model, info.tint, float(info.glow), info.get("chrome", false), info.get("raw", false))
 	_build_boosters(box, info.name)
 
 
@@ -626,7 +640,7 @@ func _gather_mesh_instances(node: Node) -> Array[MeshInstance3D]:
 # shine comes from the reflective sky (see main._setup_environment) plus a
 # fresnel rim; a gentle emission keeps it from ever going fully dark in deep
 # space. The model's own texture stays as surface detail.
-func _recolor(model: Node3D, tint: Color, glow: float, chrome := false) -> void:
+func _recolor(model: Node3D, tint: Color, glow: float, chrome := false, raw := false) -> void:
 	for mi in _gather_mesh_instances(model):
 		if mi.mesh == null:
 			continue
@@ -638,7 +652,14 @@ func _recolor(model: Node3D, tint: Color, glow: float, chrome := false) -> void:
 			else:
 				m = StandardMaterial3D.new()
 			m.transparency = BaseMaterial3D.TRANSPARENCY_DISABLED
-			if chrome:
+			if raw:
+				# Keep the model's AUTHORED colours/textures exactly (its beautiful
+				# design), and render them UNSHADED so they show full-colour in our
+				# light-less scene — no flat tint, no washout.
+				m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+				m.vertex_color_use_as_albedo = true   # honour per-vertex colours if any
+				m.emission_enabled = false
+			elif chrome:
 				# Pure sci-fi white brushed metal with a cyan edge glow — drop the
 				# model's own (purple) texture and make a clean polished hull.
 				m.albedo_texture = null
@@ -681,8 +702,10 @@ func _build_boosters(box: AABB, ship_name: String) -> void:
 	# Fewer engines read better a touch larger; scale radius down as count grows.
 	var rscale: float = BOOSTER_RADIUS_SCALE.get(ship_name, 1.0)
 	var lscale: float = BOOSTER_LENGTH_SCALE.get(ship_name, 1.0)
-	var r := clampf(s.x * (0.085 - 0.006 * mounts.size()), 0.035, 0.16) * rscale
-	var length := maxf(s.z * 0.20, 0.4) * lscale
+	# Sized PROPORTIONAL to the hull (no absolute floors — those blew up once the ships
+	# shrank ~9×). radius ~ fraction of width, length ~ fraction of hull length.
+	var r := s.x * (0.085 - 0.006 * mounts.size()) * rscale
+	var length := s.z * 0.55 * lscale
 	for m in mounts:
 		var pos := Vector3(m.x * s.x, rise + m.y * s.x, mount_z)
 		_boosters.append(_make_booster(pos, r, length))

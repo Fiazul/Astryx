@@ -15,6 +15,35 @@ const K2_18 := "k2-18"
 const PROXIMA := "proxima"
 const TRAPPIST := "trappist"
 const ALIEN := "alien"           # the hostile combat zone (Vortex + aliens)
+const INTERSTELLAR := "interstellar"   # the deep-space hub between systems (Stage 2)
+
+# Interstellar hub layout: each real system shows up as a flyable "sun" laid out from
+# its galaxy-map position. Kept to a few thousand units across — flyable + float-safe,
+# no real-distance free-flight (that's the whole point of the hub). FTL is free here
+# (these markers are NOT flagged `star`, so they don't gate warp).
+const HUB_SCALE := 70.0
+const HUB_DESTS := [SOL, PROXIMA, TRAPPIST, K2_18, ALIEN]
+
+static func _hub_pos(id: String) -> Vector3:
+	var g := galaxy_pos(id)
+	var y: float = { SOL: 0.0, PROXIMA: 300.0, TRAPPIST: -400.0, K2_18: 600.0, ALIEN: -800.0 }.get(id, 0.0)
+	return Vector3(g.x * HUB_SCALE, y, g.y * HUB_SCALE)
+
+static func _hub_color(id: String) -> Color:
+	return { SOL: Color(1.0, 0.85, 0.3), PROXIMA: Color(1.0, 0.55, 0.4),
+		TRAPPIST: Color(1.0, 0.5, 0.3), K2_18: Color(1.0, 0.45, 0.28),
+		ALIEN: Color(0.95, 0.15, 0.12) }.get(id, Color(1, 1, 1))
+
+# The hub's bodies: one glowing sun per destination system (visual + label anchor).
+static func _interstellar() -> Array:
+	var out := []
+	for id in HUB_DESTS:
+		out.append({
+			"name": "%s ✦" % display_name(id),   # ✦ marks a hub gate, distinct from in-system names
+			"radius": 40.0, "mass": 0.0, "color": _hub_color(id), "glow": 2.2,   # mass 0 → free FTL hub, no grab
+			"star": false, "live": false, "pos": _hub_pos(id), "model": "res://star.glb",
+		})
+	return out
 
 
 # Every system, and a 2D galaxy-map position for each (arbitrary "star chart"
@@ -36,7 +65,7 @@ static func is_hostile(id: String) -> bool:
 # Display name + real distance-from-Sol in light-years (metadata only).
 static func display_name(id: String) -> String:
 	return { SOL: "Sol", K2_18: "K2-18", PROXIMA: "Proxima b",
-		TRAPPIST: "TRAPPIST-1", ALIEN: "Alien Zone" }.get(id, id)
+		TRAPPIST: "TRAPPIST-1", ALIEN: "Alien Zone", INTERSTELLAR: "Interstellar" }.get(id, id)
 
 static func light_years(id: String) -> float:
 	return { SOL: 0.0, K2_18: 124.0, PROXIMA: 4.24, TRAPPIST: 39.0, ALIEN: 666.0 }.get(id, 0.0)
@@ -48,6 +77,7 @@ static func arrival_pos(id: String) -> Vector3:
 		SOL: Vector3(-8.1, -19.7, -45.3), K2_18: Vector3(30.0, 6.0, -25.0),
 		PROXIMA: Vector3(25.0, 5.0, -30.0), TRAPPIST: Vector3(32.0, 6.0, -35.0),
 		ALIEN: Vector3(0.0, 15.0, -70.0),
+		INTERSTELLAR: Vector3(0.0, 200.0, 600.0),   # emerge just "south" of the Sol gate-sun
 	}.get(id, Vector3.ZERO)
 
 # Wormhole portals present in each system. Earth (Sol) has a SEPARATE portal for
@@ -57,22 +87,22 @@ static func arrival_pos(id: String) -> Vector3:
 # of that system's station, which lives on the opposite side). The star map still
 # fast-travels anywhere directly. Each entry: { pos: local units, dest: system }.
 static func portals(id: String) -> Array:
+	# The hub is central: every system has ONE edge gate to INTERSTELLAR (placed well
+	# beyond the star's gravity field, ~2.5-3k u out), and the hub has one portal that
+	# dives into each destination system, parked beside that system's gate-sun.
+	if id == INTERSTELLAR:
+		var out := []
+		for dest in HUB_DESTS:
+			out.append({ "pos": _hub_pos(dest) + Vector3(150.0, 0.0, 0.0), "dest": dest })
+		return out
 	match id:
-		SOL:
-			return [
-				{ "pos": Vector3(34.0, 17.0, -100.0),  "dest": K2_18 },
-				{ "pos": Vector3(-110.0, 20.0, -60.0), "dest": PROXIMA },
-				{ "pos": Vector3(80.0, -25.0, 80.0),   "dest": TRAPPIST },
-			]
-		K2_18:    return [{ "pos": Vector3(75.0, 10.0, -15.0),  "dest": SOL }]
-		PROXIMA:  return [{ "pos": Vector3(65.0, 12.0, -22.0),  "dest": SOL }]
-		TRAPPIST: return [{ "pos": Vector3(70.0, 12.0, -22.0),  "dest": SOL }]
-		ALIEN:    return [{ "pos": Vector3(75.0, 12.0, -30.0),  "dest": SOL }]
-		_:        return [{ "pos": Vector3(50.0, 10.0, -20.0),  "dest": SOL }]
+		SOL:      return [{ "pos": Vector3(0.0, 400.0, -3000.0),  "dest": INTERSTELLAR }]
+		_:        return [{ "pos": Vector3(0.0, 250.0, -2600.0),  "dest": INTERSTELLAR }]
 
 
 static func bodies(id: String) -> Array:
 	match id:
+		INTERSTELLAR: return _interstellar()
 		K2_18:    return _k2_18()
 		PROXIMA:  return _proxima()
 		TRAPPIST: return _trappist()
@@ -88,11 +118,19 @@ static func _sol() -> Array:
 		var b := {
 			"name": p.name, "radius": p.radius, "color": p.color,
 			"glow": p.get("glow", 1.0), "star": p.get("star", false),
+			"mass": p.get("mass", 1.0),    # real mass (Earth=1) drives the force-slow zone
 			"live": true, "pos": Vector3.ZERO,
 		}
 		if p.has("model"):
 			b["model"] = p.model
 		out.append(b)
+	# Major moons orbit their live parent planet each frame (see PlanetSystem.refresh).
+	for m in Ephemeris.MOONS:
+		out.append({
+			"name": m.name, "radius": m.radius, "color": m.color, "glow": m.get("glow", 0.25),
+			"mass": m.get("mass", 0.01), "star": false, "live": false, "pos": Vector3.ZERO,
+			"parent": m.parent, "orbit_r": m.orbit_r, "orbit_speed": m.orbit_speed,
+		})
 	return out
 
 
@@ -102,11 +140,11 @@ static func _sol() -> Array:
 # Purely static — no live source, so the swap never calls Horizons.
 static func _k2_18() -> Array:
 	return [
-		{ "name": "K2-18",  "radius": 3.75, "color": Color(1.0, 0.45, 0.28), "glow": 2.0,
+		{ "name": "K2-18",  "radius": 6.0, "mass": 120000.0, "color": Color(1.0, 0.45, 0.28), "glow": 2.0,
 			"star": true, "live": false, "pos": Vector3(0, 0, 0), "model": "res://star.glb" },
-		{ "name": "K2-18b", "radius": 2.4,  "color": Color(0.32, 0.62, 0.78), "glow": 0.5,
+		{ "name": "K2-18b", "radius": 3.8,  "color": Color(0.32, 0.62, 0.78), "glow": 0.5,
 			"star": false, "live": false, "pos": Vector3(12.0, 1.0, 8.0) },   # 0.143 AU
-		{ "name": "K2-18c", "radius": 1.25, "color": Color(0.75, 0.6, 0.5),   "glow": 0.35,
+		{ "name": "K2-18c", "radius": 2.0,  "color": Color(0.75, 0.6, 0.5),   "glow": 0.35,
 			"star": false, "live": false, "pos": Vector3(-5.5, 0.5, 4.0) },   # 0.067 AU
 	]
 
@@ -114,9 +152,9 @@ static func _k2_18() -> Array:
 # Proxima Centauri (~4.24 ly) and its planet Proxima b.
 static func _proxima() -> Array:
 	return [
-		{ "name": "Proxima Centauri", "radius": 3.25, "color": Color(1.0, 0.4, 0.24), "glow": 2.0,
+		{ "name": "Proxima Centauri", "radius": 5.0, "mass": 40000.0, "color": Color(1.0, 0.4, 0.24), "glow": 2.0,
 			"star": true, "live": false, "pos": Vector3(0, 0, 0), "model": "res://star.glb" },
-		{ "name": "Proxima b", "radius": 2.1, "color": Color(0.62, 0.46, 0.40), "glow": 0.4,
+		{ "name": "Proxima b", "radius": 3.2, "color": Color(0.62, 0.46, 0.40), "glow": 0.4,
 			"star": false, "live": false, "pos": Vector3(4.9, 0.6, 3.0) },   # ~0.0485 AU
 	]
 
@@ -124,15 +162,15 @@ static func _proxima() -> Array:
 # TRAPPIST-1 (~39 ly): an ultra-cool red dwarf with several tightly-packed worlds.
 static func _trappist() -> Array:
 	return [
-		{ "name": "TRAPPIST-1", "radius": 2.5, "color": Color(1.0, 0.5, 0.30), "glow": 2.0,
+		{ "name": "TRAPPIST-1", "radius": 3.8, "mass": 30000.0, "color": Color(1.0, 0.5, 0.30), "glow": 2.0,
 			"star": true, "live": false, "pos": Vector3(0, 0, 0), "model": "res://star.glb" },
-		{ "name": "TRAPPIST-1b", "radius": 1.05, "color": Color(0.78, 0.5, 0.42), "glow": 0.35,
+		{ "name": "TRAPPIST-1b", "radius": 1.6, "color": Color(0.78, 0.5, 0.42), "glow": 0.35,
 			"star": false, "live": false, "pos": Vector3(1.1, 0.2, 0.5) },
-		{ "name": "TRAPPIST-1d", "radius": 1.0, "color": Color(0.55, 0.62, 0.7),  "glow": 0.35,
+		{ "name": "TRAPPIST-1d", "radius": 1.5, "color": Color(0.55, 0.62, 0.7),  "glow": 0.35,
 			"star": false, "live": false, "pos": Vector3(-1.8, 0.3, 1.2) },
-		{ "name": "TRAPPIST-1e", "radius": 1.15, "color": Color(0.35, 0.62, 0.78), "glow": 0.4,
+		{ "name": "TRAPPIST-1e", "radius": 1.7, "color": Color(0.35, 0.62, 0.78), "glow": 0.4,
 			"star": false, "live": false, "pos": Vector3(2.2, 0.4, -1.8) },
-		{ "name": "TRAPPIST-1g", "radius": 1.25, "color": Color(0.6, 0.6, 0.65),   "glow": 0.35,
+		{ "name": "TRAPPIST-1g", "radius": 1.9, "color": Color(0.6, 0.6, 0.65),   "glow": 0.35,
 			"star": false, "live": false, "pos": Vector3(-3.0, 0.5, -2.2) },
 	]
 
@@ -140,6 +178,10 @@ static func _trappist() -> Array:
 # The hostile zone — a dim, blood-red star to fight under. Aliens + Vortex live here.
 static func _alien() -> Array:
 	return [
-		{ "name": "Hostile Star", "radius": 3.5, "color": Color(0.9, 0.12, 0.12), "glow": 1.6,
+		{ "name": "Hostile Star", "radius": 5.25, "mass": 50000.0, "color": Color(0.9, 0.12, 0.12), "glow": 1.6,
 			"star": true, "live": false, "pos": Vector3(0, 0, 0), "model": "res://star.glb" },
+		# The deep-catalog nebula — a big, soft, colourful glow out past the hostiles
+		# (placeholder for a proper volumetric cloud later). No speed limit out here.
+		{ "name": "Veil Nebula", "radius": 160.0, "color": Color(0.65, 0.40, 0.95), "glow": 1.3,
+			"mass": 0.0, "star": false, "live": false, "pos": Vector3(420.0, 90.0, -560.0) },
 	]

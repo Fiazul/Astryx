@@ -12,7 +12,7 @@ extends Node3D
 # plays for ~ (ly × SEC_PER_LY) seconds, then main swaps to that portal's system.
 
 const PORTAL_RANGE := 60.0    # ×10 for the spread-out system
-const MAX_PORTALS := 4                  # pool size (Sol uses 3; others use 1)
+const MAX_PORTALS := 6                  # pool size (Interstellar hub uses 5; systems use 1)
 # Transit length = light-years × this (clamped). Tunable: 0.15 → ~18s for K2-18b
 # (dev-friendly); set ~2.9 for the ~6-minute "epic haul" the design calls for.
 const SEC_PER_LY := 0.15
@@ -101,6 +101,21 @@ func portal_rel(ship_pos: Vector3) -> Vector3:
 			best = d
 			rel = r
 	return rel
+
+
+# Nearest active portal as { rel, name } (for the HUD objective guide). {} if none.
+func nearest_portal(ship_pos: Vector3) -> Dictionary:
+	var best := INF
+	var out := {}
+	for p in _portals:
+		if not p.active:
+			continue
+		var r: Vector3 = p.pos - ship_pos
+		var d := r.length()
+		if d < best:
+			best = d
+			out = { "rel": r, "name": SystemDB.display_name(p.dest_id) }
+	return out
 
 
 func start_transit() -> void:

@@ -19,7 +19,9 @@ extends Node3D
 # yaw = initial facing. spin = rad/s idle self-rotation. glow = self-illum.
 # orbit = rad/s revolution around the system's star/origin (0 = parked).
 # system = which star system this prop lives in (defaults to Sol).
-const PROBE_SCAN_RANGE := 9.0    # fly within this of a probe to read its scan
+const PROBE_SCAN_RANGE := 90.0   # fly within this of a probe to read its scan (×10 spread)
+const STRUCT_SLOW_RANGE := 1600.0  # within this of any station/probe, the ship is force-slowed
+const STRUCT_MIN_SPEED := 55.0     # strict crawl right at a structure
 
 const PROP_LIST := [
 	# --- Sol: the home station (dockable) + Finn, drifting nearby ---
@@ -93,6 +95,9 @@ var dock_range := 0.0
 # Probe scan: set each frame — is the ship within range of a probe right now?
 var probe_in_range := false
 var probe_name := ""
+# Strict speed cap from structure proximity (stations + probes), read by main each
+# frame: INF when clear, easing down to STRUCT_MIN_SPEED right at a structure.
+var struct_speed_limit := INF
 
 
 func _ready() -> void:
@@ -160,6 +165,7 @@ func set_system(id: String) -> void:
 func update(ship_pos: Vector3, delta: float) -> void:
 	probe_in_range = false
 	probe_name = ""
+	var near_struct := INF
 	for it in _items:
 		if it.system != current_system:
 			continue
@@ -178,12 +184,23 @@ func update(ship_pos: Vector3, delta: float) -> void:
 		if it.is_probe and dist < PROBE_SCAN_RANGE:
 			probe_in_range = true
 			probe_name = it.name
+		# Stations are "safe zones" — track the nearest so the ship is force-slowed near
+		# any of them (a harbour speed limit), in every system. (Probes don't slow you;
+		# Voyagers are slowed via the Sol planet safe-zone since they're Sol bodies.)
+		if it.is_dock:
+			near_struct = minf(near_struct, dist)
 		if it.label != null:
 			it.label.visible = vis
 			if vis:
 				it.label.position = rel + Vector3(0.0, it.up, 0.0)
 				# Keep the name roughly readable regardless of distance.
-				it.label.pixel_size = clampf(dist * 0.0009, 0.01, 0.5)
+				it.label.pixel_size = clampf(dist * 0.00012, 0.02, 1.2)
+	# Force-slow zone: ease from full sublight down to a crawl as you near a structure.
+	if near_struct < STRUCT_SLOW_RANGE:
+		var t := clampf(near_struct / STRUCT_SLOW_RANGE, 0.0, 1.0)
+		struct_speed_limit = lerpf(STRUCT_MIN_SPEED, 100000.0, t)
+	else:
+		struct_speed_limit = INF
 
 
 # Scale model so its longest axis == target_len and recenter it on the holder.

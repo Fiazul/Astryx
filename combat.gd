@@ -8,7 +8,12 @@ extends Node3D
 # big GLB ships that drift toward you and auto-fire. Bolt↔target hits are simple
 # sphere checks. Dead aliens pop and respawn after a beat.
 
-const ALIEN_MODELS := ["res://Spaceship (1).glb", "res://Spaceship (2).glb"]
+# The monster roster — guardians/swarm pick one at random per spawn, so stars,
+# planets and moons are defended by a mix of UFOs, blobs, demons, ghosts, etc.
+const ALIEN_MODELS := [
+	"res://ufo.glb", "res://blob.glb", "res://demon.glb", "res://ghost.glb",
+	"res://enemy_small.glb", "res://mushnub.glb", "res://alien_ship.glb",
+]
 const ALIEN_COUNT := 3
 const SWARM_COUNT := 14           # "large chunk" of aliens around every non-Sol star
 const ALIEN_SIZE := 6.0           # big — longest axis in units
@@ -108,9 +113,9 @@ func update(ship: Node3D, pressed: bool, delta: float) -> void:
 	player_max = ship.max_hp if ship.has_method("is_hypersonic") else PLAYER_MAX_HP
 	player_hp = mini(player_hp, player_max)
 
-	# --- player firing: pure straight shots, no aim assist ---
+	# --- player firing: pure straight shots, no aim assist (utility hulls can't fire) ---
 	_cool = maxf(_cool - delta, 0.0)
-	if pressed and _cool <= 0.0:
+	if pressed and _cool <= 0.0 and ship.can_fire:
 		_cool = ship.fire_cooldown if ship.has_method("is_hypersonic") else BOLT_COOLDOWN
 		_spawn_bolt(_bolts, sp + fwd * ship.muzzle, fwd * ship.bolt_speed, _bolt_mat, ship.bolt_scale, ship.bolt_damage)
 		if audio != null:
@@ -125,6 +130,8 @@ func update(ship: Node3D, pressed: bool, delta: float) -> void:
 func _step_aliens(ship: Node3D, sp: Vector3, delta: float) -> void:
 	for a in _aliens:
 		if not a.alive:
+			if a.get("guardian", false):
+				continue   # guardians don't respawn — once cleared, the body is yours
 			a.respawn -= delta
 			if a.respawn <= 0.0:
 				_revive(a, sp)
@@ -228,6 +235,39 @@ func threat_report() -> Dictionary:
 	return { "alive": alive, "total": total, "boss": boss_state(), "kills": kills }
 
 
+# --- Guardians: a non-respawning cluster that defends a capturable body. main spawns
+# them when you approach a guarded body, and the body is capturable once they're clear.
+var guard_body := ""    # name of the body these guardians defend ("" = none)
+
+func set_guardians(center: Vector3, count: int, body: String) -> void:
+	clear_guardians()
+	guard_body = body
+	for i in count:
+		var a := _make_alien()
+		a["guardian"] = true
+		a["respawn_after"] = -1.0                       # never respawn
+		a.pos = center + _rand_dir() * (float(a.size) * 6.0 + 40.0)
+		a.node.position = a.pos                          # rendered at pos - ship each frame
+		_aliens.append(a)
+
+func clear_guardians() -> void:
+	var keep := []
+	for a in _aliens:
+		if a.get("guardian", false):
+			a.node.queue_free()
+		else:
+			keep.append(a)
+	_aliens = keep
+	guard_body = ""
+
+func guardians_alive() -> int:
+	var n := 0
+	for a in _aliens:
+		if a.get("guardian", false) and a.alive:
+			n += 1
+	return n
+
+
 # ---------------------------------------------------------------------------
 func _make_alien() -> Dictionary:
 	var node := _load_alien_model()   # already added to the tree (so fit can measure it)
@@ -297,7 +337,9 @@ func _make_enemy(node: Node3D, cfg: Dictionary) -> Dictionary:
 
 
 func _load_alien_model() -> Node3D:
-	for path in ALIEN_MODELS:
+	var paths := ALIEN_MODELS.duplicate()
+	paths.shuffle()                  # random monster type per spawn → variety
+	for path in paths:
 		var packed := load(path) as PackedScene
 		if packed != null:
 			var holder := Node3D.new()

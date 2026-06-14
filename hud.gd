@@ -7,8 +7,8 @@ extends Node3D
 # Layout is authored against the 1280x720 reference (project stretch = canvas_items),
 # so it scales to fullscreen. refresh() is called by main.gd each frame.
 
-# Scale conversions for the readouts. 1 unit = 0.1 AU (see ephemeris.gd).
-const AU_PER_UNIT := 0.1
+# Scale conversions for the readouts. 1 unit = 0.01 AU (see ephemeris.gd, AU_TO_UNITS=100).
+const AU_PER_UNIT := 0.01
 const LY_PER_AU := 1.0 / 63241.077
 
 # --- palette -----------------------------------------------------------------
@@ -767,8 +767,9 @@ func refresh() -> void:
 		return
 	# Hide the crosshair when Vela is hypersonic — combat is disabled then.
 	var hyper := ship.is_hypersonic()
-	_reticle.visible = not hyper
-	_hitmarker.visible = not hyper
+	var armed := ship.can_fire and not hyper   # utility hulls show no crosshair
+	_reticle.visible = armed
+	_hitmarker.visible = armed
 	# Feed the dynamic crosshair: bloom while firing, kick on a fresh hit.
 	var kick := clampf(combat.hitmarker / 0.18, 0.0, 1.0) if combat != null else 0.0
 	_reticle.set_target(1.0 if firing else 0.0, kick)
@@ -811,7 +812,7 @@ func refresh() -> void:
 	if codex != null:
 		_codex_label.text = "Discovered  %d / %d" % [codex.count(), codex.total()]
 	if scan_progress > 0.0 and scan_name != "":
-		_scan_label.text = "Scanning  %s …  %d%%" % [scan_name, int(scan_progress * 100.0)]
+		_scan_label.text = "Capturing  %s …  %d%%" % [scan_name, int(scan_progress * 100.0)]
 	else:
 		_scan_label.text = scan_hint
 	if toast_t > 0.0:
