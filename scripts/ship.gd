@@ -672,13 +672,13 @@ func _make_booster(mount: Vector3, radius: float, length: float) -> Dictionary:
 		bmesh.radial_segments = 16
 		bell.mesh = bmesh
 		var bmat := StandardMaterial3D.new()
-		bmat.albedo_color = Color(0.22, 0.22, 0.25)   # dark gunmetal
-		bmat.metallic = 0.85
-		bmat.roughness = 0.65                          # rough brushed metal
-		# Faint self-lit floor so the bell reads on ships that have no hull lights.
+		bmat.albedo_color = Color(0.03, 0.03, 0.04)   # deep black housing
+		bmat.metallic = 0.7
+		bmat.roughness = 0.5                           # subtle sheen, stays dark
+		# Very faint floor so the black bell still reads as a solid shape, not a void.
 		bmat.emission_enabled = true
-		bmat.emission = Color(0.22, 0.22, 0.25)
-		bmat.emission_energy_multiplier = 0.6
+		bmat.emission = Color(0.03, 0.03, 0.04)
+		bmat.emission_energy_multiplier = 0.5
 		bell.material_override = bmat
 		bell.position = Vector3(0.0, bmesh.height * 0.42, 0.0)
 		pivot.add_child(bell)
@@ -721,7 +721,7 @@ func _make_booster(mount: Vector3, radius: float, length: float) -> Dictionary:
 		var rmat := StandardMaterial3D.new()
 		rmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		rmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		rmat.albedo_color = Color(0.0, 0.0, 0.0, 0.55)   # black, transparent (smoked rim)
+		rmat.albedo_color = Color(0.0, 0.0, 0.0, 0.95)   # deep opaque black rim
 		ring.material_override = rmat
 		# Sit at the bell's mouth (the visible nozzle exit), not the buried pivot origin.
 		ring.position = Vector3(0.0, radius * 1.8 * 0.92, 0.0)
