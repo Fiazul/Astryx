@@ -50,7 +50,7 @@ static func fit_model(mesh_root: Node3D, model: Node3D, target_len: float) -> AA
 
 # --- Materials -------------------------------------------------------------
 
-static func recolor(model: Node3D, tint: Color, glow: float, chrome := false, raw := false, pbr := false, roles := []) -> void:
+static func recolor(model: Node3D, tint: Color, glow: float, chrome := false, raw := false, pbr := false, roles := [], metal := false) -> void:
 	for mi in gather_mesh_instances(model):
 		if mi.mesh == null:
 			continue
@@ -62,7 +62,25 @@ static func recolor(model: Node3D, tint: Color, glow: float, chrome := false, ra
 			else:
 				m = StandardMaterial3D.new()
 			m.transparency = BaseMaterial3D.TRANSPARENCY_DISABLED
-			if pbr:
+			if metal:
+				# Polished metal that KEEPS the model's own texture so its colours tint
+				# the alloy: white reads as SILVER, orange/warm as GOLD/copper. Needs the
+				# hull light rig (added for metal ships). The emission floor uses the same
+				# texture so it never goes fully black in the lightless scene.
+				var tex: Texture2D = (orig as BaseMaterial3D).albedo_texture if orig is BaseMaterial3D else null
+				m.albedo_texture = tex
+				m.albedo_color = Color(1, 1, 1)
+				m.metallic = 0.85
+				m.metallic_specular = 0.9
+				m.roughness = 0.22                  # smooth, mirror-like sheen
+				m.rim_enabled = true
+				m.rim = 0.3
+				m.rim_tint = 0.4
+				m.emission_enabled = true
+				m.emission_texture = tex
+				m.emission = Color(1, 1, 1)
+				m.emission_energy_multiplier = 0.35  # self-lit floor, keeps the colours readable
+			elif pbr:
 				# Feminine pink-crystal hull (HaniStar). Each surface gets a ROLE:
 				#   "hull" -> light pastel-pink porcelain/crystal with a soft rim aura
 				#   "gold" -> shiny rose-gold metallic accent (keel, top, wings)

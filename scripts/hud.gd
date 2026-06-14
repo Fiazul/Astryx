@@ -75,12 +75,25 @@ var map_button: Button        # -> StarMap.toggle()
 var codex_button: Button      # -> CodexPanel.toggle()
 var settings_button: Button   # -> SettingsMenu.toggle()
 var controls_button: Button   # toggles the controls cheat-sheet
+var nav_button: Button        # -> main.toggle_nav() (stop/resume the Survey guide)
 var _detail_range := 600.0    # show the Details button within this of a body (×10 spread)
 
 # --- HUD layout editor -------------------------------------------------------
 # Each movable widget is tracked by a stable id; positions are saved to disk and
 # re-applied on launch. Edit mode (opened from Settings) lets you drag them.
 const LAYOUT_PATH := "user://hud_layout.cfg"
+# The shipped DEFAULT layout (the hand-tuned "best" arrangement). Used as each
+# widget's built-in position/scale, so fresh installs and Reset land here. A saved
+# user layout still overrides it.
+const DEFAULT_LAYOUT := {
+	"nav": Vector2(16, 14), "combat": Vector2(11.33, 620), "hull": Vector2(15.33, 98.67),
+	"teleport": Vector2(1088, 674), "buttons": Vector2(10.67, 676.67),
+	"details": Vector2(552, 650), "radar": Vector2(1129.33, 11.33),
+}
+const DEFAULT_SCALE := {
+	"nav": 0.76, "combat": 0.76, "hull": 0.94, "teleport": 1.0,
+	"buttons": 0.76, "details": 1.0, "radar": 0.76,
+}
 var ship_ref: Ship                 # set by main, used to free/recapture the cursor in edit mode
 var _movable: Array = []           # [{ id, node, def }]
 var _saved := {}                   # id -> Vector2 position loaded from disk
@@ -268,25 +281,34 @@ func _build_button_bar(canvas: CanvasLayer) -> void:
 	# the whole bar drags as a single unit. The container's right edge sits at
 	# RIGHT_EDGE so it lines up with the combat readout above it.
 	var gap := 6.0
+	var w_nav := 64.0
 	var w_map := 66.0
 	var w_codex := 74.0
 	var w_icon := 28.0
-	var bar_w := w_map + gap + w_codex + gap + w_icon + gap + w_icon
+	var bar_w := w_nav + gap + w_map + gap + w_codex + gap + w_icon + gap + w_icon
 	_btn_bar = Control.new()
 	_btn_bar.position = Vector2(RIGHT_EDGE - bar_w, 80.0)
 	_btn_bar.size = Vector2(bar_w, 26)
 	canvas.add_child(_btn_bar)
 
-	var x_map := 0.0
+	var x_nav := 0.0
+	var x_map := x_nav + w_nav + gap
 	var x_codex := x_map + w_map + gap
 	var x_controls := x_codex + w_codex + gap
 	var x_settings := x_controls + w_icon + gap
+	nav_button = _icon_button(_btn_bar, "⊘ NAV", Vector2(x_nav, 0), w_nav, C_WARN)
 	map_button = _icon_button(_btn_bar, "◎ MAP", Vector2(x_map, 0), w_map, C_ACCENT)
 	codex_button = _icon_button(_btn_bar, "▤ CODEX", Vector2(x_codex, 0), w_codex, C_GREEN)
 	controls_button = _icon_button(_btn_bar, "?", Vector2(x_controls, 0), w_icon, Color(0.8, 0.85, 1.0))
 	settings_button = _icon_button(_btn_bar, "⚙", Vector2(x_settings, 0), w_icon, Color(0.8, 0.85, 1.0))
 	controls_button.pressed.connect(toggle_controls)
 	_track("buttons", _btn_bar)
+
+
+# Reflect nav on/off in the button label so it's clear what tapping it does.
+func set_nav_stopped(stopped: bool) -> void:
+	if nav_button != null:
+		nav_button.text = "▶ NAV" if stopped else "⊘ NAV"
 
 func _icon_button(parent: Node, text: String, pos: Vector2, w: float, edge: Color) -> Button:
 	var b := Button.new()
@@ -309,7 +331,17 @@ func _icon_button(parent: Node, text: String, pos: Vector2, w: float, edge: Colo
 # as the "default", and snap it to any saved position. Called for the built-in
 # widgets in _ready, and by main for external ones (e.g. the radar).
 func _track(id: String, node: Control) -> void:
-	_movable.append({ "id": id, "node": node, "def": node.position, "defs": node.scale })
+	# Built-in default = the shipped tuned layout (falls back to the node's own
+	# code position/scale if this id isn't in the default tables).
+	var def_pos: Vector2 = DEFAULT_LAYOUT.get(id, node.position)
+	var def_scl := node.scale
+	if DEFAULT_SCALE.has(id):
+		var ds: float = DEFAULT_SCALE[id]
+		def_scl = Vector2(ds, ds)
+	node.position = def_pos
+	node.scale = def_scl
+	_movable.append({ "id": id, "node": node, "def": def_pos, "defs": def_scl })
+	# A saved user layout still wins over the default.
 	if _saved.has(id):
 		node.position = _saved[id]
 	if _saved_scale.has(id):

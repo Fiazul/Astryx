@@ -6,7 +6,8 @@ extends Control
 #  2) A waypoint marker for the current Tab target: a diamond + label when it's
 #     on screen, or an arrow pinned to the screen edge pointing toward it.
 
-const COL := Color(0.45, 1.0, 0.75)
+const COL := Color(0.62, 1.0, 0.82)   # light silvery-teal
+const MARKER_FONT := 12               # smaller, designed marker label
 const EDGE_MARGIN := 46.0
 const GIZMO_POS := Vector2(1208, 486)
 const GIZMO_LEN := 42.0
@@ -79,10 +80,10 @@ func _draw_marker() -> void:
 	var on_screen := in_front and Rect2(Vector2.ZERO, vp).has_point(screen)
 
 	if on_screen:
-		_draw_diamond(screen, 13.0)
+		_draw_diamond(screen, 9.0)
 		var txt := "%s   %s" % [_name, _dist]
-		var w := font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x
-		draw_string(font, screen + Vector2(-w * 0.5, 30), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, COL)
+		var w := font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, MARKER_FONT).x
+		_draw_label(font, screen + Vector2(-w * 0.5, 24), txt)
 	else:
 		var dir := screen - center
 		if not in_front:
@@ -92,10 +93,17 @@ func _draw_marker() -> void:
 		var edge := _edge_point(center, dir.normalized(), vp)
 		_draw_arrow(edge, dir.angle())
 		var txt := "%s  %s" % [_name, _dist]
-		var tw := font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 15).x
+		var tw := font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, MARKER_FONT).x
 		var tx := clampf(edge.x - tw * 0.5, 8.0, vp.x - tw - 8.0)
-		var ty := clampf(edge.y + 34.0, 24.0, vp.y - 10.0)
-		draw_string(font, Vector2(tx, ty), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, COL)
+		var ty := clampf(edge.y + 30.0, 24.0, vp.y - 10.0)
+		_draw_label(font, Vector2(tx, ty), txt)
+
+
+# Designed marker text: a soft dark drop-shadow behind a bright top layer reads as
+# crisp, slightly metallic lettering (draw_string can't gradient, so this fakes depth).
+func _draw_label(font: Font, pos: Vector2, txt: String) -> void:
+	draw_string(font, pos + Vector2(1, 1), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, MARKER_FONT, Color(0.02, 0.06, 0.04, 0.85))
+	draw_string(font, pos, txt, HORIZONTAL_ALIGNMENT_LEFT, -1, MARKER_FONT, COL)
 
 
 func _draw_diamond(c: Vector2, r: float) -> void:

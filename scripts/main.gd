@@ -28,6 +28,7 @@ var navigator: Navigator
 var minimap: MiniMap
 var codex: Codex
 var _nav_target := ""         # "" = the auto Survey guide; else a targetable name (Tab)
+var _nav_off := false         # NAV button: stop the Survey guide + waypoint marker entirely
 var _scan := 0.0             # scan progress 0..1 of the nearest body
 var _scan_name := ""
 const SCAN_SECONDS := 2.0
@@ -182,6 +183,7 @@ func _ready() -> void:
 	add_child(map)
 	hud.map_button.pressed.connect(map.toggle)
 	hud.settings_button.pressed.connect(settings.toggle)
+	hud.nav_button.pressed.connect(toggle_nav)
 
 
 func _process(delta: float) -> void:
@@ -383,12 +385,22 @@ func _aim_sorted_targets() -> Array:
 		names.append(it.name)
 	return names
 
+# NAV button: stop / resume the Survey guide and waypoint marker (the orientation
+# gizmo always stays). Also clears any manual Tab target when stopping.
+func toggle_nav() -> void:
+	_nav_off = not _nav_off
+	if _nav_off:
+		_nav_target = ""
+	hud.set_nav_stopped(_nav_off)
+	_update_navigator()
+
+
 func _update_navigator() -> void:
 	if navigator == null:
 		return
 	var tname: String
 	var rel: Vector3
-	if ship.transiting:
+	if _nav_off or ship.transiting:
 		navigator.update_nav(ship.camera, false, Vector3.ZERO, "", "")   # gizmo only
 		hud.set_objective("")
 		return
