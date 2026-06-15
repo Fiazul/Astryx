@@ -32,27 +32,27 @@ const SHIP_MODELS := [
 	# Lyra: clean multi-part OBJ (cockpitglass, fighter, engine, guns, enginecanopy).
 	# Per-surface roles give glass canopy + silver body + gold accents; neutral dim
 	# light rig so the metal reads without glowing. One engine -> one booster.
-	{ "name": "Lyra",   "path": "res://assets/lyra.obj",   "tint": Color(1.0, 1.0, 1.0),    "length": 0.7, "yaw": 180.0, "pitch": 0.0, "glow": 0.0, "engine_pitch": 1.0,  "hp": 280, "bolt_scale": 1.8, "bolt_speed": 820.0,  "fire_cd": 0.22, "dmg": 3, "warp": 10.7, "pbr": true,
+	{ "name": "Lyra",   "path": "res://assets/lyra.obj",   "tint": Color(1.0, 1.0, 1.0),    "length": 0.7, "yaw": 180.0, "pitch": 0.0, "glow": 0.0, "engine_pitch": 1.0,  "hp": 280, "bolt_scale": 1.8, "bolt_speed": 820.0,  "fire_cd": 0.22, "dmg": 3, "bolt_laser": true, "energy_max": 130.0, "energy_use": 0.85, "warp": 10.7, "pbr": true,
 		"surf_roles": ["glass", "red", "red", "goldtrim", "goldtrim"],
 		"light_accent": Color(1.0, 0.86, 0.84), "light_energy": 0.85 },
-	{ "name": "Stella", "path": "res://assets/Spaceship.glb",     "tint": Color(0.70, 0.62, 0.95), "length": 0.55, "yaw": 180.0, "pitch": 0.0, "glow": 0.0, "engine_pitch": 0.92, "hp": 80, "bolt_scale": 0.62, "bolt_speed": 1700.0, "fire_cd": 0.04, "dmg": 1, "warp": 10.0 },
-	{ "name": "Raptor", "path": "res://assets/Spaceship (2).glb", "tint": Color(0.70, 0.90, 0.95), "length": 0.55, "yaw": 180.0, "pitch": 0.0, "glow": 0.0, "engine_pitch": 0.82, "hp": 170, "bolt_scale": 0.95, "bolt_speed": 1050.0, "fire_cd": 0.10, "dual": true, "dmg": 2, "warp": 7.3 },
+	{ "name": "Stella", "path": "res://assets/Spaceship.glb",     "tint": Color(0.70, 0.62, 0.95), "length": 0.55, "yaw": 180.0, "pitch": 0.0, "glow": 0.0, "engine_pitch": 0.92, "hp": 80, "bolt_scale": 0.62, "bolt_speed": 1700.0, "fire_cd": 0.04, "dmg": 1, "energy_max": 80.0, "energy_use": 1.6, "warp": 10.0 },
+	{ "name": "Raptor", "path": "res://assets/Spaceship (2).glb", "tint": Color(0.70, 0.90, 0.95), "length": 0.55, "yaw": 180.0, "pitch": 0.0, "glow": 0.0, "engine_pitch": 0.82, "hp": 170, "bolt_scale": 0.95, "bolt_speed": 1050.0, "fire_cd": 0.10, "dual": true, "dmg": 2, "energy_max": 170.0, "energy_use": 0.55, "warp": 7.3 },
 	# Vela: the FTL ship. warp 4312 -> max cruise ≈ 1.5 ly/s at full charge
 	# (THRUST·warp/DAMPING, 1 ly = 632,411 units). Her drive spools up over time
 	# (see WARP_CHARGE_*), so she eases into warp rather than snapping to it.
 	# "brake": her ultimate — hold R to ease to a full stop (she's so fast that stopping
 	# at a star is otherwise brutal; the air-brake makes her usable). Squishy hull.
-	{ "name": "Vela",   "path": "res://assets/Spaceship (3).glb", "tint": Color(0.55, 0.80, 1.0),  "length": 0.55, "yaw": 180.0, "pitch": 0.0, "glow": 0.0, "warp": 14.0, "engine_pitch": 1.14, "brake": true, "hp": 90, "bolt_scale": 0.9, "bolt_speed": 1050.0, "fire_cd": 0.06, "dmg": 2, "raw": true },
+	{ "name": "Vela",   "path": "res://assets/Spaceship (3).glb", "tint": Color(0.55, 0.80, 1.0),  "length": 0.55, "yaw": 180.0, "pitch": 0.0, "glow": 0.0, "energy_max": 100.0, "energy_use": 1.2, "warp": 14.0, "engine_pitch": 1.14, "brake": true, "hp": 90, "bolt_scale": 0.9, "bolt_speed": 1050.0, "fire_cd": 0.06, "dmg": 2, "raw": true },
 	# HaniStar — a slow, pretty support hull that CAN fight: fires a touch faster than
 	# Lyra, hits a bit harder than Stella, 125 HP. Three light-blue boosters.
 	# surf_roles indexes the GLB's 9 surfaces: gold = shiny rose-gold (7 = wings), glass =
 	# top-front canopy (3), orb = soft neon-pink accents, hull = pink crystal body.
 	# (4 = the two upright tail fins, kept pink hull.)
-	{ "name": "HaniStar",   "path": "res://assets/utility_ship.glb",  "tint": Color(1.0, 0.412, 0.706), "length": 0.6,  "yaw": 90.0, "pitch": 0.0, "glow": 0.18, "warp": 8.3, "engine_pitch": 0.7, "hp": 200, "fire_cd": 0.18, "dmg": 2, "bolt_scale": 1.0, "bolt_speed": 900.0, "pbr": true,
+	{ "name": "HaniStar",   "path": "res://assets/utility_ship.glb",  "tint": Color(1.0, 0.412, 0.706), "length": 0.6,  "yaw": 90.0, "pitch": 0.0, "glow": 0.18, "energy_max": 120.0, "energy_use": 0.95, "warp": 8.3, "engine_pitch": 0.7, "hp": 200, "fire_cd": 0.18, "dmg": 2, "bolt_scale": 1.0, "bolt_speed": 900.0, "pbr": true,
 		"surf_roles": ["hull", "hull", "gold", "glass", "hull", "hull", "hull", "gold", "hull"] },
 	# Raptor 2 Neo ("mother ship"): the powerhouse — Stella's fire rate, Vela's top speed,
 	# Lyra's damage, HaniStar's hull. Silver-blue metal body + glass illuminators.
-	{ "name": "Raptor 2 Neo", "path": "res://assets/raptor2.obj", "tint": Color(1, 1, 1), "length": 0.65, "yaw": 0.0, "pitch": 0.0, "glow": 0.0, "engine_pitch": 0.7, "hp": 200, "bolt_scale": 1.0, "bolt_speed": 1700.0, "fire_cd": 0.06, "dmg": 3, "warp": 13.0, "pbr": true, "laser": true, "auto_capture": true,
+	{ "name": "Raptor 2 Neo", "path": "res://assets/raptor2.obj", "tint": Color(1, 1, 1), "length": 0.65, "yaw": 0.0, "pitch": 0.0, "glow": 0.0, "engine_pitch": 0.7, "hp": 200, "bolt_scale": 1.0, "bolt_speed": 1700.0, "fire_cd": 0.06, "dmg": 3, "energy_max": 150.0, "energy_use": 0.7, "warp": 13.0, "pbr": true, "laser": true, "auto_capture": true,
 		"laser_offset": Vector3(0.0, -0.03, -0.10),   # beam emitter point (slightly down)
 		"surf_roles": ["glass", "silver"],
 		"light_accent": Color(0.82, 0.90, 1.0), "light_energy": 0.8 },
@@ -127,9 +127,7 @@ const ZOOM_STEP := 0.12             # per wheel notch
 const THRUST := 1650.0        # forward/back accel (units/s^2) — ×10 for the spread-out system
 const STRAFE_THRUST := 1050.0 # lateral / vertical accel
 const BOOST_MULT := 3.0       # Shift multiplier
-const BOOST_ENERGY_MAX := 100.0
-const BOOST_DRAIN := 30.0     # boost energy/sec burned while boosting
-const BOOST_REGEN := 26.0     # boost energy/sec recovered when not boosting
+const BOOST_DRAIN := 16.0     # boost energy/sec burned while boosting (generous; combat owns the pool)
 const MAX_SPEED := 10000.0
 # Calm in-system cruise: sublight (non-warp) flight is capped here so you're not
 # blitzing past the planets near Sol. Boost (Shift) multiplies it for fast travel.
@@ -185,13 +183,19 @@ var max_hp := 100              # this hull's defence / hull integrity (combat re
 var bolt_speed := 950.0        # this hull's bullet velocity (combat reads this)
 var bolt_scale := 1.0          # this hull's bullet size multiplier (combat reads this)
 var bolt_damage := 1           # damage per bolt (combat reads this) — Lyra's hit hard
+var bolt_laser := false        # bolts render as red laser beams (Lyra) — combat reads this
+var energy_max := 100.0        # per-ship energy cap (both bars); combat reads this
+var energy_use := 1.0          # per-ship consume multiplier; combat + boost read this
 var can_fire := true           # false for utility hulls (no weapons) — combat reads this
 var has_laser := false         # right-click nose laser beam (Raptor 2 Neo) — combat reads this
 var laser_offset := Vector3.ZERO   # local muzzle offset for the beam (x=right, y=up)
 var auto_capture := false       # captures bodies in range automatically (no V) — Raptor 2 Neo
 var combat_lock := false        # set by main while in combat — no interstellar/FTL speed
-var boost_energy := BOOST_ENERGY_MAX   # separate boost pool (HUD shows its own bar)
+var combat_ref: Node                   # set by main — owns the shared energy pools
 var _boost_starved := false            # true while boosting on an empty tank -> plume sputters
+var is_boosting := false               # true while boost is actually engaged (combat pauses boost regen)
+var boost_blocked := false             # true when Shift pressed in a slow-zone (boost unavailable)
+var auto_cruise := false        # Num Lock: hold W+Shift hands-free (forward thrust + boost)
 var autopilot := false          # hands-off cinematic flight to autopilot_target (M-map)
 var autopilot_target := Vector3.ZERO   # world position to fly to
 var autopilot_name := ""        # body the autopilot is bound to (main refreshes the target)
@@ -364,21 +368,30 @@ func fly(delta: float) -> void:
 		_look_pitch = 0.0
 
 	# --- Thrust (local axes -> world via current basis) ---
-	# Shift = boost, burning its OWN boost-energy pool. No boost energy = no boost.
+	# Shift = boost, draining the shared boost pool (owned by combat). It only ENGAGES
+	# (and only burns energy) when the boost can actually push you faster — i.e. you're
+	# NOT pinned by a star/station slow-zone. Pressing Shift in a slow-zone does nothing
+	# and costs nothing.
 	var boost := 1.0
-	if Input.is_physical_key_pressed(KEY_SHIFT) and boost_energy > 0.0:
+	var be: float = combat_ref.boost_energy if combat_ref != null else 1.0
+	var boost_effective := minf(speed_limit, struct_limit) >= SUBLIGHT_MAX
+	var want_boost := Input.is_physical_key_pressed(KEY_SHIFT) or auto_cruise
+	is_boosting = false
+	# Pressed Shift where boost can't help (a slow-zone) -> tell the player, cost nothing.
+	boost_blocked = want_boost and not boost_effective
+	if want_boost and be > 0.0 and boost_effective:
 		boost = BOOST_MULT
-		boost_energy = maxf(boost_energy - BOOST_DRAIN * delta, 0.0)
-	else:
-		boost_energy = minf(boost_energy + BOOST_REGEN * delta, BOOST_ENERGY_MAX)
-	# Holding boost with an empty tank = the engine chokes (plume sputters).
-	_boost_starved = Input.is_physical_key_pressed(KEY_SHIFT) and boost_energy <= 0.0
+		is_boosting = true
+		if combat_ref != null:
+			combat_ref.boost_energy = maxf(combat_ref.boost_energy - BOOST_DRAIN * energy_use * delta, 0.0)
+	# Plume only chokes if you're trying to boost effectively but the tank is empty.
+	_boost_starved = want_boost and boost_effective and be <= 0.0
 	var fwd := 0.0
 	var strafe := 0.0
 	var lift := 0.0
 	# S is reverse thrust on every hull (Vela included) — with the heavier flight model
 	# you need to be able to back off and reposition.
-	if Input.is_physical_key_pressed(KEY_W):
+	if Input.is_physical_key_pressed(KEY_W) or auto_cruise:
 		fwd -= 1.0
 	if Input.is_physical_key_pressed(KEY_S):
 		fwd += 1.0
@@ -405,7 +418,7 @@ func fly(delta: float) -> void:
 		braking = false
 	var eff_warp := 1.0
 	if warp > 1.0 and not combat_lock:
-		if Input.is_physical_key_pressed(KEY_W) or autopilot:   # autopilot spools warp too
+		if Input.is_physical_key_pressed(KEY_W) or auto_cruise or autopilot:   # auto-cruise/autopilot spool warp too
 			_warp_charge = minf(_warp_charge + delta / WARP_CHARGE_TIME, 1.0)
 		else:
 			_warp_charge = maxf(_warp_charge - delta / WARP_DECAY_TIME, 0.0)
@@ -466,7 +479,7 @@ func fly(delta: float) -> void:
 	_mesh_root.rotation.z = _bank
 
 	# --- Engine / booster intensity ---
-	var throttle := 1.0 if Input.is_physical_key_pressed(KEY_W) else 0.18
+	var throttle := 1.0 if (Input.is_physical_key_pressed(KEY_W) or auto_cruise) else 0.18
 	if Input.is_physical_key_pressed(KEY_S):
 		throttle = maxf(throttle, 0.55)
 	if boost > 1.0:
@@ -619,6 +632,9 @@ func _build_ship_model(idx: int) -> void:
 	bolt_speed = float(info.get("bolt_speed", 950.0))
 	bolt_scale = float(info.get("bolt_scale", 1.0))
 	bolt_damage = int(info.get("dmg", 1))
+	bolt_laser = bool(info.get("bolt_laser", false))
+	energy_max = float(info.get("energy_max", 100.0))
+	energy_use = float(info.get("energy_use", 1.0))
 	can_fire = bool(info.get("can_fire", true))
 	has_laser = bool(info.get("laser", false))
 	laser_offset = info.get("laser_offset", Vector3.ZERO)

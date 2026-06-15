@@ -80,11 +80,11 @@ static func arrival_pos(id: String) -> Vector3:
 		INTERSTELLAR: Vector3(0.0, 200.0, 600.0),   # emerge just "south" of the Sol gate-sun
 	}.get(id, Vector3.ZERO)
 
-# Wormhole portals present in each system. Earth (Sol) has a SEPARATE portal for
-# each exoplanet destination — spread far apart, parked, clear of every other
-# object (Earth sits at the origin; the Sun is ~10 u out). Every other system
-# keeps a single portal back to Sol, pushed well out from its star (and well clear
-# of that system's station, which lives on the opposite side). The star map still
+# Wormhole portals present in each system. Travel is HUB-AND-SPOKE: every system
+# (Sol included) has a SINGLE edge gate to the Interstellar hub, pushed well out
+# beyond the star's gravity field (and clear of any station). The hub holds one
+# portal per destination system, each parked beside that system's gate-sun, so you
+# emerge from Sol at the hub and pick your exoplanet there. The star map still
 # fast-travels anywhere directly. Each entry: { pos: local units, dest: system }.
 static func portals(id: String) -> Array:
 	# The hub is central: every system has ONE edge gate to INTERSTELLAR (placed well

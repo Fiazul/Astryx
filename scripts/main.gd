@@ -35,6 +35,7 @@ const PROFILE_PATH := "user://profile.cfg"
 const CAPTURE_REWARD := 100
 const NAV_COST := 40          # coins to buy a navigator (map Navigate / Auto-pilot)
 var _nav_off := false         # NAV button: stop the Survey guide + waypoint marker entirely
+var _was_boost_blocked := false   # edge-trigger for the "boost unavailable" toast
 var _scan := 0.0             # scan progress 0..1 of the nearest body
 var _scan_name := ""
 const SCAN_SECONDS := 2.0
@@ -134,6 +135,7 @@ func _ready() -> void:
 	combat.planets = planets                            # bolts curve through gravity wells
 	combat.reset(SystemDB.is_hostile(current_system))   # Sol starts peaceful
 	combat.player_hp = ship.max_hp                      # start at the hull's full defence
+	ship.combat_ref = combat                            # shared energy pools (boost)
 
 	# HUD labels (light-year distance, speed, nearest body).
 	hud = HUD.new()
@@ -226,6 +228,11 @@ func _process(delta: float) -> void:
 	hud.firing = firing                          # blooms the dynamic crosshair
 	hud.coins = coins
 	hud.set_cancel_nav_visible(_nav_locked != "")
+	# Tell the player (once) when they try to boost in a slow-zone where it does nothing.
+	if ship.boost_blocked and not _was_boost_blocked:
+		hud.toast = "⚠  Boost unavailable here — clear the slow-zone first"
+		hud.toast_t = 1.6
+	_was_boost_blocked = ship.boost_blocked
 	_update_dock_ui()
 	if ship.autopilot:
 		ship.autopilot_target = ship.true_pos + planets.rel_of(ship.autopilot_name)
@@ -640,6 +647,11 @@ func _input(event: InputEvent) -> void:
 	elif key == KEY_TAB:
 		_cycle_nav_target()
 		get_viewport().set_input_as_handled()
+	elif key == KEY_NUMLOCK:
+		# Num Lock = auto-cruise: hold W + Shift hands-free until toggled off.
+		ship.auto_cruise = not ship.auto_cruise
+		hud.toast = "AUTO-CRUISE  ON  ·  hands-free W + boost" if ship.auto_cruise else "AUTO-CRUISE  OFF"
+		hud.toast_t = 2.0
 	elif key == KEY_N:
 		toggle_nav()          # keyboard shortcut for the ⊘ NAV stop/resume button
 	elif key == KEY_X:

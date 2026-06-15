@@ -29,19 +29,25 @@ const ALIEN_KEEP_DIST := 30.0     # they hover around this range and strafe
 const ALIEN_FIRE_EVERY := 1.4         # more aggressive (was 2.2)
 const RESPAWN_AFTER := 4.0
 const COMBAT_HOLD := 10.0          # stay "in combat" this long after the last attack (either way)
-# Weapon energy: firing drains it, it regenerates; empty = can't fire (rapid-fire limit).
-const ENERGY_MAX := 100.0
-const ENERGY_REGEN := 24.0         # per second
-const BOLT_ENERGY := 7.0           # per bolt
-const LASER_ENERGY := 32.0         # per second while the beam is on
-# Shiny pickups appear often as you fly — grab them to restore energy + a little hull.
-const PICKUP_EVERY := 2.2          # seconds between spawns
-const PICKUP_AHEAD := 450.0        # spawn this far ahead of the ship
-const PICKUP_SCATTER := 280.0      # random scatter around that point
-const PICKUP_COLLECT := 70.0       # grab radius
-const PICKUP_LIFE := 14.0          # seconds before it fades out
-const PICKUP_ENERGY := 45.0        # weapon + boost energy restored
-const PICKUP_HEAL := 18            # hull restored
+# Energy: two auto-regen bars (weapon + boost). Caps + consume rate are PER-SHIP
+# (ship.energy_max / ship.energy_use): Raptor = big tank, low burn; Stella = small
+# tank, high burn. Boost only burns where boost actually works (not in slow-zones).
+const ENERGY_MAX := 100.0          # fallback cap if a ship doesn't specify one
+const WEAPON_REGEN := 34.0         # rapid weapon-energy regen (per second)
+const BOOST_REGEN := 22.0          # boost-energy regen (per second)
+const BOLT_ENERGY := 7.0           # base per bolt (× ship.energy_use)
+const LASER_ENERGY := 26.0         # base per second of beam (× ship.energy_use)
+# Energy pickups appear ONLY in open interstellar flight (never in a slow-zone, where
+# boost does nothing). They spawn ahead with a gap so you can see + fly into them.
+const PICKUP_EVERY := 2.4
+const PICKUP_AHEAD := 800.0        # base gap ahead (scales up with speed)
+const PICKUP_SCATTER := 220.0
+const PICKUP_COLLECT := 130.0      # grab radius (scales up with speed)
+const PICKUP_LIFE := 18.0
+const PICKUP_REFILL := 60.0        # energy restored to BOTH bars
+const PICKUP_HEAL := 14            # hull restored
+const PICKUP_CAP := 4              # max alive at once
+# Probes: rare beacons far out in empty space — fly to one for a big refuel.
 const SPAWN_RADIUS := 60.0        # where new aliens appear around the player
 
 # --- VORTEX: the boss. Vortex's own ship hull, scaled up huge and menacing. ---
@@ -106,6 +112,7 @@ var _combat_t := 0.0              # >0 while in combat (counts down from COMBAT_
 var _bolt_mesh: SphereMesh
 var _bolt_mat: StandardMaterial3D
 var _abolt_mat: StandardMaterial3D
+var _laser_bolt_mat: StandardMaterial3D   # Lyra's red laser bolts
 var _glow_tex: Texture2D
 var _splatters: Array[Texture2D] = []    # irregular hit-spark shapes, picked at random
 
@@ -124,6 +131,7 @@ func _ready() -> void:
 	_bolt_mesh.rings = 6
 	_bolt_mat = _bolt_material(Color(0.5, 0.9, 1.0))     # your bolts: cyan
 	_abolt_mat = _bolt_material(Color(1.0, 0.4, 0.3))    # alien bolts: red
+	_laser_bolt_mat = _bolt_material(Color(1.0, 0.12, 0.08))   # Lyra: red laser bolts
 	# No enemies spawn until main calls reset(true) for a hostile system.
 
 
@@ -158,12 +166,18 @@ func reset(active := false, with_boss := false, count := SWARM_COUNT) -> void:
 func update(ship: Node3D, pressed: bool, delta: float, laser := false) -> void:
 	hitmarker = maxf(hitmarker - delta, 0.0)
 	_combat_t = maxf(_combat_t - delta, 0.0)
-	energy = minf(energy + ENERGY_REGEN * delta, ENERGY_MAX)
+	# Slow passive regen, then a fast top-up of both bars drawn from the storage reserve.
+	# Per-ship cap; both bars auto-regen toward it (weapon faster than boost).
+	e_max = float(ship.energy_max) if ship.has_method("is_hypersonic") else ENERGY_MAX
+	energy = minf(energy + WEAPON_REGEN * delta, e_max)
+	# Boost regen pauses WHILE boosting, so holding Shift visibly drains the bar.
+	if not ship.is_boosting:
+		boost_energy = minf(boost_energy + BOOST_REGEN * delta, e_max)
 	var sp: Vector3 = ship.true_pos
 	var fwd: Vector3 = -ship.transform.basis.z
 	var laser_on: bool = laser and ship.can_fire and energy > 0.0
 	if laser_on:
-		energy = maxf(energy - LASER_ENERGY * delta, 0.0)
+		energy = maxf(energy - LASER_ENERGY * ship.energy_use * delta, 0.0)
 	_update_laser(ship, laser_on, sp, fwd, delta)
 
 	# Per-hull combat identity: defence (max HP), bullet speed and bullet size all come
@@ -173,10 +187,12 @@ func update(ship: Node3D, pressed: bool, delta: float, laser := false) -> void:
 
 	# --- player firing: pure straight shots, no aim assist (utility hulls can't fire) ---
 	_cool = maxf(_cool - delta, 0.0)
-	if pressed and _cool <= 0.0 and ship.can_fire and energy >= BOLT_ENERGY:
+	var bolt_cost: float = BOLT_ENERGY * ship.energy_use
+	if pressed and _cool <= 0.0 and ship.can_fire and energy >= bolt_cost:
 		_cool = ship.fire_cooldown if ship.has_method("is_hypersonic") else BOLT_COOLDOWN
-		energy -= BOLT_ENERGY
-		_spawn_bolt(_bolts, sp + fwd * ship.muzzle, fwd * ship.bolt_speed, _bolt_mat, ship.bolt_scale, ship.bolt_damage)
+		energy -= bolt_cost
+		var bmat: StandardMaterial3D = _laser_bolt_mat if ship.bolt_laser else _bolt_mat
+		_spawn_bolt(_bolts, sp + fwd * ship.muzzle, fwd * ship.bolt_speed, bmat, ship.bolt_scale, ship.bolt_damage, ship.bolt_laser)
 		if _any_alien_alive():
 			_combat_t = COMBAT_HOLD            # attacking while enemies are present = in combat
 		if audio != null:
@@ -407,8 +423,10 @@ var guard_body := ""    # name of the body these guardians defend ("" = none)
 
 var _zone_power := 1.0   # current guard zone's strength (scales with the body's size)
 var zone_kills := 0      # hostiles defeated in the current guard zone (HUD reads this)
-var energy := ENERGY_MAX # weapon energy (HUD reads this); regenerates over time
-var _pickups := []       # { pos, node, life } — shiny energy/health orbs while flying
+var energy := ENERGY_MAX       # weapon energy (HUD reads this)
+var boost_energy := ENERGY_MAX # boost energy (drained by the ship's Shift boost)
+var e_max := ENERGY_MAX        # current per-ship cap for BOTH bars (set each frame)
+var _pickups := []             # { pos, node, life } — interstellar energy pickups
 var _pickup_cd := PICKUP_EVERY
 
 # `power` ~ the body's size; bigger stars get a tougher, bigger boss + bigger waves.
@@ -508,21 +526,35 @@ func _boss_burst(a: Dictionary, sp: Vector3) -> void:
 # Shiny pickups: spawn often ahead of the ship; flying through one restores energy +
 # a little hull. Floating-origin: stored in world space, drawn relative to the ship.
 func _step_pickups(ship: Node3D, sp: Vector3, fwd: Vector3, delta: float) -> void:
+	# Pickups ONLY in open interstellar flight — never in a slow-zone (where boost,
+	# and thus the energy economy, doesn't apply). Don't waste screen space otherwise.
+	# Same rule the boost uses: pickups appear exactly where boost works / energy is spent
+	# (open interstellar flight). In a star/station slow-zone -> no boost, no pickups.
+	var min_limit: float = minf(ship.speed_limit, ship.struct_limit)
+	var open_space: bool = min_limit >= ship.SUBLIGHT_MAX and not ship.transiting
+	var speed: float = ship.velocity.length()
 	_pickup_cd -= delta
-	if _pickup_cd <= 0.0 and not ship.transiting:
+	if open_space and _pickup_cd <= 0.0 and _pickups.size() < PICKUP_CAP:
 		_pickup_cd = PICKUP_EVERY
-		_spawn_pickup(sp + fwd * PICKUP_AHEAD + _rand_dir() * PICKUP_SCATTER)
+		var ahead: float = maxf(PICKUP_AHEAD, speed * 1.3)   # a GAP in front; lead grows with speed so it's on-screen long enough to see
+		_spawn_pickup(sp + fwd * ahead + _rand_dir() * PICKUP_SCATTER)
 	var i := _pickups.size() - 1
 	while i >= 0:
 		var p = _pickups[i]
 		p.life -= delta
 		p.node.position = p.pos - sp
-		p.node.rotate_y(delta * 2.0)                  # gentle spin -> "shiny"
-		if sp.distance_to(p.pos) < PICKUP_COLLECT:
-			energy = minf(energy + PICKUP_ENERGY, ENERGY_MAX)
-			ship.boost_energy = minf(ship.boost_energy + PICKUP_ENERGY, 100.0)
+		var d: float = sp.distance_to(p.pos)
+		# Keep a constant ON-SCREEN size regardless of how far ahead it spawned or how
+		# fast we're closing — otherwise at interstellar/warp speed it's a sub-pixel dot
+		# you absorb before it ever renders. Grows a touch as you near it.
+		var s: float = clampf(d * 0.006, 0.6, 900.0)
+		p.node.scale = Vector3(s, s, s)
+		var grab: float = PICKUP_COLLECT + speed * 0.4   # window widens with speed
+		if d < grab:
+			energy = minf(energy + PICKUP_REFILL, e_max)
+			boost_energy = minf(boost_energy + PICKUP_REFILL, e_max)
 			player_hp = mini(player_hp + PICKUP_HEAL, player_max)
-			_boom(p.pos - sp, 10.0)
+			_boom(p.pos - sp, 9.0)
 			if audio != null:
 				audio.play_click()
 			p.node.queue_free()
@@ -534,6 +566,7 @@ func _step_pickups(ship: Node3D, sp: Vector3, fwd: Vector3, delta: float) -> voi
 
 
 func _spawn_pickup(world_pos: Vector3) -> void:
+	# A small, soft glowing energy orb — clean and modest (no giant glyphs).
 	var mi := MeshInstance3D.new()
 	var q := QuadMesh.new(); q.size = Vector2(16, 16)
 	mi.mesh = q
@@ -542,8 +575,9 @@ func _spawn_pickup(world_pos: Vector3) -> void:
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
 	mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	mat.billboard_keep_scale = true   # without this a billboard ignores node scale -> stays a dot at distance
 	mat.albedo_texture = _glow_tex
-	mat.albedo_color = Color(0.5, 1.0, 0.8, 0.95)   # shiny mint-green orb
+	mat.albedo_color = Color(0.5, 1.0, 0.9, 0.95)   # soft cyan-mint glow
 	mi.material_override = mat
 	add_child(mi)
 	_pickups.append({ "pos": world_pos, "node": mi, "life": PICKUP_LIFE })
@@ -677,13 +711,25 @@ func _load_alien_model(size := ALIEN_SIZE) -> Node3D:
 	return mi
 
 
-func _spawn_bolt(list: Array, pos: Vector3, vel: Vector3, mat: StandardMaterial3D, scale := 1.0, dmg := 1) -> void:
+func _spawn_bolt(list: Array, pos: Vector3, vel: Vector3, mat: StandardMaterial3D, scale := 1.0, dmg := 1, laser := false) -> void:
 	var mi := MeshInstance3D.new()
-	mi.mesh = _bolt_mesh
 	mi.material_override = mat
-	mi.position = pos
-	mi.scale = Vector3.ONE * scale   # per-hull bullet size (Lyra's big, Stella's small)
 	add_child(mi)
+	if laser:
+		# An elongated red laser BOLT (not a continuous beam) aligned to its travel.
+		var bm := CapsuleMesh.new()
+		bm.radius = 0.35 * scale
+		bm.height = 9.0 * scale
+		bm.radial_segments = 8
+		mi.mesh = bm
+		mi.global_position = pos
+		if vel.length() > 0.001:
+			mi.look_at(pos + vel, Vector3.UP)             # -Z faces travel...
+			mi.rotate_object_local(Vector3.RIGHT, deg_to_rad(90.0))  # ...capsule's long Y -> travel
+	else:
+		mi.mesh = _bolt_mesh
+		mi.position = pos
+		mi.scale = Vector3.ONE * scale   # per-hull bullet size (Lyra's big, Stella's small)
 	# A bigger bolt also lands fatter: its radius widens the swept hit test below.
 	list.append({ "pos": pos, "vel": vel, "life": BOLT_LIFE, "node": mi, "dmg": dmg, "r": _bolt_mesh.radius * scale })
 

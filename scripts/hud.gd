@@ -188,6 +188,7 @@ func _ready() -> void:
 	_build_teleport_button(_canvas)
 	_build_button_bar(_canvas)
 	_build_controls_menu(_canvas)
+	_build_guide(_canvas)
 
 	# "Details" button — appears (bottom-center) when you're near a planet.
 	details_button = Button.new()
@@ -295,6 +296,21 @@ func _build_boss_bar(canvas: CanvasLayer) -> void:
 
 
 # Styled top-right control bar: open the map / codex / controls / settings by click.
+# Tiny bold instruction line, bottom-centre — a quick reminder of the core verbs.
+func _build_guide(canvas: CanvasLayer) -> void:
+	var g := Label.new()
+	g.text = "W warp · Shift boost · grab ⚡ cells & ✦ probes to refuel · M map · G claim coins · L-click fire / R-click laser"
+	g.position = Vector2(0, SCREEN.y - 22)
+	g.size = Vector2(SCREEN.x, 18)
+	g.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	g.add_theme_font_size_override("font_size", 11)
+	g.add_theme_color_override("font_color", Color(0.78, 0.86, 1.0, 0.85))
+	g.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.9))
+	g.add_theme_constant_override("shadow_offset_y", 1)
+	g.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	canvas.add_child(g)
+
+
 func _build_button_bar(canvas: CanvasLayer) -> void:
 	# The four buttons live inside one Control container laid out left-to-right, so
 	# the whole bar drags as a single unit. The container's right edge sits at
@@ -867,12 +883,12 @@ func refresh() -> void:
 		# Green when healthy, amber at half, red when critical.
 		_hull_fill.color = Color(0.4, 1.0, 0.55).lerp(Color(1.0, 0.35, 0.3), 1.0 - hp_ratio)
 		if _energy_fill != null:
-			var e_ratio: float = clampf(combat.energy / 100.0, 0.0, 1.0)
+			var e_ratio: float = clampf(combat.energy / maxf(combat.e_max, 1.0), 0.0, 1.0)
 			_energy_fill.size.x = _energy_bar_w * e_ratio
 			# Cyan when charged, dim red when nearly empty (can't fire).
 			_energy_fill.color = Color(0.4, 0.85, 1.0).lerp(Color(0.9, 0.4, 0.4), 1.0 - e_ratio)
-		if _boost_fill != null and ship_ref != null:
-			var b_ratio: float = clampf(ship_ref.boost_energy / 100.0, 0.0, 1.0)
+		if _boost_fill != null:
+			var b_ratio: float = clampf(combat.boost_energy / maxf(combat.e_max, 1.0), 0.0, 1.0)
 			_boost_fill.size.x = _boost_bar_w * b_ratio
 			_boost_fill.color = Color(1.0, 0.65, 0.25).lerp(Color(0.6, 0.4, 0.3), 1.0 - b_ratio)
 		# Hitmarker flash (alpha tracks the combat hit timer).
