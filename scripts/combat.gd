@@ -91,6 +91,19 @@ const BOLT_COOLDOWN := 0.22        # ~4.5 shots/sec — same comfortable delay b
 const ALIEN_BOLT_SPEED := 90.0
 const HIT_RADIUS_MULT := 0.95      # enemy hit box as a fraction of body size (was 0.55 — more forgiving)
 const SHIP_HIT_RADIUS := 2.0
+# Bullet LOOK is decoupled from bullet HITBOX. The chase cam sits ~1 unit off the
+# ship, so a fat bolt born at the muzzle fills the screen. These keep bolts as small,
+# slim TRACERS that read by perspective (small downrange, modest near) instead of
+# popping huge at the crosshair. Nudge BOLT_RADIUS/BOLT_LENGTH to taste.
+const BOLT_RADIUS := 0.10          # tracer thickness (world units)
+const BOLT_LENGTH := 2.4           # tracer streak length (stretched along travel)
+const LASER_BOLT_RADIUS := 0.09    # Lyra/Neo laser bolts: a touch thinner + longer
+const LASER_BOLT_LENGTH := 3.4
+const BOLT_HIT_RADIUS := 0.55      # GAMEPLAY hit radius — stays generous regardless of visual size
+# A soft "shadowy" tail behind each bolt: a dim, semi-transparent streak that anchors
+# back at the firing point so shots clearly emanate from the nose, then trails the head.
+const TRAIL_MAX := 14.0            # how far the tail streaks behind the head (world units)
+const TRAIL_WIDTH := 0.06          # thin wisp, like a booster plume — not a fat bar
 const PLAYER_MAX_HP := 100
 
 var player_hp := PLAYER_MAX_HP
@@ -109,7 +122,13 @@ var _laser: MeshInstance3D        # the beam mesh (child of the ship, points out
 var _laser_ring: MeshInstance3D   # glowing emitter "belt" the beam fires through
 var _laser_tick := 0.0
 var _combat_t := 0.0              # >0 while in combat (counts down from COMBAT_HOLD)
-var _bolt_mesh: SphereMesh
+var _bolt_mesh: CapsuleMesh
+var _laser_bolt_mesh: CapsuleMesh
+var _trail_mesh: CylinderMesh
+var _trail_grad: Texture2D
+var _bolt_trail_mat: StandardMaterial3D
+var _abolt_trail_mat: StandardMaterial3D
+var _laser_trail_mat: StandardMaterial3D
 var _bolt_mat: StandardMaterial3D
 var _abolt_mat: StandardMaterial3D
 var _laser_bolt_mat: StandardMaterial3D   # Lyra's red laser bolts
@@ -124,14 +143,35 @@ func _ready() -> void:
 	rng.seed = 9137
 	for i in 5:
 		_splatters.append(_make_splatter(rng))
-	_bolt_mesh = SphereMesh.new()                # round "ball" bolts, slightly larger
-	_bolt_mesh.radius = 0.48
-	_bolt_mesh.height = 0.96
-	_bolt_mesh.radial_segments = 12
-	_bolt_mesh.rings = 6
+	# Slim tracer capsules (stretched along travel), shared by all bolts. Small world
+	# size -> perspective shrinks them downrange instead of them filling the lens.
+	_bolt_mesh = CapsuleMesh.new()
+	_bolt_mesh.radius = BOLT_RADIUS
+	_bolt_mesh.height = BOLT_LENGTH
+	_bolt_mesh.radial_segments = 8
+	_bolt_mesh.rings = 2
+	_laser_bolt_mesh = CapsuleMesh.new()
+	_laser_bolt_mesh.radius = LASER_BOLT_RADIUS
+	_laser_bolt_mesh.height = LASER_BOLT_LENGTH
+	_laser_bolt_mesh.radial_segments = 8
+	_laser_bolt_mesh.rings = 2
 	_bolt_mat = _bolt_material(Color(0.5, 0.9, 1.0))     # your bolts: cyan
 	_abolt_mat = _bolt_material(Color(1.0, 0.4, 0.3))    # alien bolts: red
 	_laser_bolt_mat = _bolt_material(Color(1.0, 0.12, 0.08))   # Lyra: red laser bolts
+	# Same gradient the ship's boosters use, so the bullet's tail fades like a plume.
+	_trail_grad = ShipMesh.make_plume_gradient(true)     # bright at the head (+Y), clear at the tail
+	_bolt_trail_mat = _trail_material(Color(0.5, 0.9, 1.0))
+	_abolt_trail_mat = _trail_material(Color(1.0, 0.4, 0.3))
+	_laser_trail_mat = _trail_material(Color(1.0, 0.12, 0.08))
+	# A smooth cone (not a boxy prism): wide at the head, tapering to a SHARP point at
+	# the tail. Length lives on Y (height=1), scaled per-frame. Enough sides to read round.
+	_trail_mesh = CylinderMesh.new()
+	_trail_mesh.height = 1.0
+	_trail_mesh.top_radius = TRAIL_WIDTH    # +Y end -> oriented to the bolt head (wide)
+	_trail_mesh.bottom_radius = 0.0         # -Y end -> the trailing point (sharp)
+	_trail_mesh.radial_segments = 12
+	_trail_mesh.cap_top = false
+	_trail_mesh.cap_bottom = false
 	# No enemies spawn until main calls reset(true) for a hostile system.
 
 
@@ -147,9 +187,11 @@ func reset(active := false, with_boss := false, count := SWARM_COUNT) -> void:
 	_aliens.clear()
 	for b in _bolts:
 		b.node.queue_free()
+		b.trail.queue_free()
 	_bolts.clear()
 	for b in _abolts:
 		b.node.queue_free()
+		b.trail.queue_free()
 	_abolts.clear()
 	for p in _pickups:
 		p.node.queue_free()
@@ -192,7 +234,8 @@ func update(ship: Node3D, pressed: bool, delta: float, laser := false) -> void:
 		_cool = ship.fire_cooldown if ship.has_method("is_hypersonic") else BOLT_COOLDOWN
 		energy -= bolt_cost
 		var bmat: StandardMaterial3D = _laser_bolt_mat if ship.bolt_laser else _bolt_mat
-		_spawn_bolt(_bolts, sp + fwd * ship.muzzle, fwd * ship.bolt_speed, bmat, ship.bolt_scale, ship.bolt_damage, ship.bolt_laser)
+		var muzzle_pos: Vector3 = sp + fwd * ship.muzzle - ship.transform.basis.y * ship.muzzle_drop
+		_spawn_bolt(_bolts, muzzle_pos, fwd * ship.bolt_speed, bmat, ship.bolt_scale, ship.bolt_damage, ship.bolt_laser)
 		if _any_alien_alive():
 			_combat_t = COMBAT_HOLD            # attacking while enemies are present = in combat
 		if audio != null:
@@ -346,6 +389,7 @@ func _step_bolts(list: Array, sp: Vector3, delta: float, player: bool) -> void:
 		b.pos += b.vel * delta
 		b.life -= delta
 		b.node.position = b.pos - sp
+		_update_trail(b, sp)
 		var hit := false
 		if player:
 			# Swept test: the bolt moves far each frame, so check the whole
@@ -365,8 +409,28 @@ func _step_bolts(list: Array, sp: Vector3, delta: float, player: bool) -> void:
 				hit = true
 		if hit or b.life <= 0.0:
 			b.node.queue_free()
+			b.trail.queue_free()
 			list.remove_at(i)
 		i -= 1
+
+
+# Stretch a bolt's tail from its firing point toward the head: anchored at the muzzle
+# while the head is within TRAIL_MAX, then a fixed-length streak chasing the bolt.
+func _update_trail(b: Dictionary, sp: Vector3) -> void:
+	var head: Vector3 = b.pos
+	var back: float = minf(TRAIL_MAX, head.distance_to(b.origin))
+	var tail: Vector3 = head - b.dir * back
+	var mid: Vector3 = (head + tail) * 0.5 - sp
+	var trail: MeshInstance3D = b.trail
+	trail.position = mid
+	if back > 0.01:
+		var up := Vector3.UP if absf(b.dir.dot(Vector3.UP)) < 0.99 else Vector3.RIGHT
+		trail.look_at(trail.position + b.dir, up)                 # -Z faces travel...
+		trail.rotate_object_local(Vector3.RIGHT, deg_to_rad(90.0)) # ...cone's long Y -> travel (+Y at head)
+		trail.scale = Vector3(b.tw, back, b.tw)                    # Y = length, X/Z = thickness
+		trail.visible = true
+	else:
+		trail.visible = false
 
 
 func _damage_alien(a: Dictionary, sp: Vector3, dmg := 1) -> void:
@@ -712,26 +776,35 @@ func _load_alien_model(size := ALIEN_SIZE) -> Node3D:
 
 
 func _spawn_bolt(list: Array, pos: Vector3, vel: Vector3, mat: StandardMaterial3D, scale := 1.0, dmg := 1, laser := false) -> void:
+	# Every gun fires a slim TRACER aligned to its travel — small in world space so
+	# perspective (not a screen clamp) does the work: modest near the nose, shrinking
+	# downrange toward the crosshair. per-ship `scale` nudges thickness/length.
 	var mi := MeshInstance3D.new()
 	mi.material_override = mat
+	mi.mesh = _laser_bolt_mesh if laser else _bolt_mesh
 	add_child(mi)
-	if laser:
-		# An elongated red laser BOLT (not a continuous beam) aligned to its travel.
-		var bm := CapsuleMesh.new()
-		bm.radius = 0.35 * scale
-		bm.height = 9.0 * scale
-		bm.radial_segments = 8
-		mi.mesh = bm
-		mi.global_position = pos
-		if vel.length() > 0.001:
-			mi.look_at(pos + vel, Vector3.UP)             # -Z faces travel...
-			mi.rotate_object_local(Vector3.RIGHT, deg_to_rad(90.0))  # ...capsule's long Y -> travel
+	mi.global_position = pos
+	if vel.length() > 0.001:
+		var d := vel.normalized()
+		var up := Vector3.UP if absf(d.dot(Vector3.UP)) < 0.99 else Vector3.RIGHT
+		mi.look_at(pos + vel, up)                               # -Z faces travel...
+		mi.rotate_object_local(Vector3.RIGHT, deg_to_rad(90.0)) # ...capsule's long Y -> travel
+	mi.scale = Vector3.ONE * scale
+	# Trailing "shadow" streak: anchored at the firing point (the nose), it stretches to
+	# the bolt so shots visibly leave the ship, then trails the head as it flies.
+	var trail := MeshInstance3D.new()
+	trail.mesh = _trail_mesh
+	if mat == _laser_bolt_mat:
+		trail.material_override = _laser_trail_mat
+	elif mat == _abolt_mat:
+		trail.material_override = _abolt_trail_mat
 	else:
-		mi.mesh = _bolt_mesh
-		mi.position = pos
-		mi.scale = Vector3.ONE * scale   # per-hull bullet size (Lyra's big, Stella's small)
-	# A bigger bolt also lands fatter: its radius widens the swept hit test below.
-	list.append({ "pos": pos, "vel": vel, "life": BOLT_LIFE, "node": mi, "dmg": dmg, "r": _bolt_mesh.radius * scale })
+		trail.material_override = _bolt_trail_mat
+	add_child(trail)
+	# HITBOX is decoupled from the (now small) visual: stays generous so guns still land.
+	list.append({ "pos": pos, "vel": vel, "life": BOLT_LIFE, "node": mi, "dmg": dmg,
+		"r": BOLT_HIT_RADIUS * scale, "trail": trail, "origin": pos,
+		"dir": (vel.normalized() if vel.length() > 0.001 else Vector3.FORWARD), "tw": scale })
 
 
 # Shortest distance from point p to the segment a→b (for swept bolt hits).
@@ -821,6 +894,20 @@ func _bolt_material(c: Color) -> StandardMaterial3D:
 	m.emission = c
 	m.albedo_color = c.lerp(Color.WHITE, 0.45)   # white-hot core reads brighter
 	m.emission_energy_multiplier = 7.0           # well above the glow HDR threshold (1.0) so they bloom
+	return m
+
+
+# A mini engine-plume tail for a bolt — built exactly like the ship's boosters: an
+# additive, double-sided cone whose alpha is driven by the plume gradient so it fades
+# smoothly from a bright nozzle (at the bolt) to a clear point behind it.
+func _trail_material(c: Color) -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED   # both sides -> a full plume, not a half curve
+	m.albedo_texture = _trail_grad               # gradient drives the nozzle->tail fade
+	m.albedo_color = Color(c.r, c.g, c.b, 0.6)   # tint; gradient handles the falloff
 	return m
 
 

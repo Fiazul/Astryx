@@ -202,6 +202,7 @@ var autopilot_name := ""        # body the autopilot is bound to (main refreshes
 const AP_ARRIVE := 600.0        # stop autopilot within this distance of the target
 const AP_TURN := 2.5            # autopilot turn rate toward the target
 var muzzle := 2.5              # forward distance bolts spawn at — this hull's nose tip
+var muzzle_drop := 0.0         # how far BELOW the nose bolts emerge (set per hull from its height)
 var _dual := false             # Raptor: can toggle between combat + warp modes
 # Warp is now a TOP-SPEED multiplier (cap = MAX_SPEED × warp). Tuned so the fastest
 # hull crosses ~1 light-year in ~45 seconds (1 ly = 6.32M units; 14×10000 ≈ 140k u/s).
@@ -660,11 +661,11 @@ func _build_ship_model(idx: int) -> void:
 	_mesh_root.add_child(model)
 	model.rotation = Vector3(deg_to_rad(float(info.pitch)), deg_to_rad(float(info.yaw)), 0.0)
 	var box := ShipMesh.fit_model(_mesh_root, model, float(info.length))
-	# Bolts spawn out in FRONT of the nose, not at it: from the chase camera a bolt
-	# right at the tip reads as sitting above/behind the hull. Push it ~1.5 hull-depths
-	# past center so its first visible frame is already downrange and clear of the ship
-	# (scales with hull size — the muzzle moment itself isn't shown).
-	muzzle = box.size.z * 1.6
+	# Bolts now spawn right AT the nose tip (~half the hull depth ahead of center) so
+	# their trailing streak visibly emerges from the ship — even from a side view. The
+	# slim bright tracer + soft trail keep it readable without sitting on the hull.
+	muzzle = box.size.z * 0.55
+	muzzle_drop = box.size.y * 0.25   # emerge a little below the nose, where the guns sit
 	# Optionally lop off the model's rear (behind the ring) so the bell disc caps a
 	# clean cut instead of the GLB's messy tail.
 	if info.get("clip_back", false):
