@@ -166,6 +166,27 @@ static func metal_split(root: Node3D, mesh_root: Node3D, gold_y: float) -> void:
 
 # --- Materials -------------------------------------------------------------
 
+# Glassy finish: re-coat every surface's material with a mirror-smooth, wet clear-coat
+# sheen (glossy, glass-like) instead of the matte/metal default. Applied after recolor.
+static func set_glassy(model: Node3D) -> void:
+	for mi in gather_mesh_instances(model):
+		if mi.mesh == null:
+			continue
+		for si in mi.mesh.get_surface_count():
+			var m = mi.get_active_material(si)
+			if m is BaseMaterial3D:
+				var mm := m as BaseMaterial3D
+				mm.transparency = BaseMaterial3D.TRANSPARENCY_DISABLED   # stay opaque
+				# A metallic mirror just reflects the empty starfield -> looks like clear
+				# glass. Drop metallic so the body COLOUR shows, then a wet clear-coat on top.
+				mm.metallic = 0.0
+				mm.metallic_specular = 1.0
+				mm.roughness = 0.06                # smooth, candy-gloss sheen
+				mm.clearcoat_enabled = true
+				mm.clearcoat = 1.0
+				mm.clearcoat_roughness = 0.03
+
+
 static func recolor(model: Node3D, tint: Color, glow: float, chrome := false, raw := false, pbr := false, roles := [], metal := false) -> void:
 	for mi in gather_mesh_instances(model):
 		if mi.mesh == null:
@@ -217,16 +238,18 @@ static func recolor(model: Node3D, tint: Color, glow: float, chrome := false, ra
 				m.albedo_texture = null
 				m.emission_texture = null
 				if role == "gold":
-					# Polished silver alloy. Metallic 1.0 / roughness 0.12 for a smooth
-					# mirroring sheen; a small emission floor keeps it readable (no
-					# reflection probe in scene, so pure metal would render near-black).
+					# Brushed silver alloy. Metallic kept MODERATE (not 1.0): a full mirror in
+					# this probe-less scene just reflects the empty starfield and reads as glass.
+					# 0.6 + a bright self-glow shows solid silver with a metal sheen.
 					m.albedo_color = Color(0.82, 0.84, 0.88)       # cool silver
-					m.metallic = 1.0                               # true polished alloy
-					m.roughness = 0.12                             # smooth mirroring sheen
-					m.rim_enabled = false
+					m.metallic = 0.6
+					m.metallic_specular = 0.85
+					m.roughness = 0.22                             # soft brushed sheen, not a mirror
+					m.rim_enabled = true
+					m.rim = 0.25
 					m.emission_enabled = true
 					m.emission = Color(0.82, 0.84, 0.88)           # silver glow
-					m.emission_energy_multiplier = 0.4             # slight glow over the plates
+					m.emission_energy_multiplier = 0.5
 				elif role == "glass":
 					# Tinted canopy glass for the top front view — clear, glossy, reflective.
 					m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
@@ -248,18 +271,18 @@ static func recolor(model: Node3D, tint: Color, glow: float, chrome := false, ra
 					m.emission = Color(1.0, 0.714, 0.757)          # bright magenta-pink
 					m.emission_energy_multiplier = 0.7             # subtle lit accent, no flare
 				elif role == "silver":
-					# Metallic steel-BLUE with a soft self-lit floor so she reads in the
-					# dark (pure metal goes near-black with no reflection probe).
+					# Steel-BLUE metal. Metallic moderate (0.55) so the blue diffuse shows
+					# instead of mirroring the empty starfield (which reads as glass).
 					m.albedo_color = Color(0.42, 0.60, 0.95)
-					m.metallic = 0.85
-					m.metallic_specular = 0.7
-					m.roughness = 0.22
+					m.metallic = 0.55
+					m.metallic_specular = 0.8
+					m.roughness = 0.26
 					m.rim_enabled = true
-					m.rim = 0.35
+					m.rim = 0.3
 					m.rim_tint = 0.3                               # bluish edge
 					m.emission_enabled = true
-					m.emission = Color(0.30, 0.45, 0.85)
-					m.emission_energy_multiplier = 0.35
+					m.emission = Color(0.42, 0.60, 0.95)
+					m.emission_energy_multiplier = 0.5
 				elif role == "red":
 					# Pure BLOOD-RED metal with a self-lit floor so it reads in the dark.
 					m.albedo_color = Color(0.62, 0.03, 0.03)
@@ -288,6 +311,31 @@ static func recolor(model: Node3D, tint: Color, glow: float, chrome := false, ra
 					m.roughness = 0.5
 					m.rim_enabled = false
 					m.emission_enabled = false
+				# --- Accent palettes (HaniNebula body). METALLIC must stay MODERATE: at 1.0 the
+				# surface has no diffuse and only reflects the empty starfield -> reads as clear
+				# glass. ~0.55 keeps a metal sheen while the colour shows; emission = the colour
+				# itself so it self-lights and never goes glassy/black in the probe-less scene.
+				elif role == "rosegold":
+					m.albedo_color = Color(0.86, 0.58, 0.52); m.metallic = 0.55; m.metallic_specular = 0.8; m.roughness = 0.30
+					m.emission_enabled = true; m.emission = Color(0.86, 0.58, 0.52); m.emission_energy_multiplier = 0.45
+				elif role == "blush":
+					m.albedo_color = Color(0.96, 0.74, 0.76); m.metallic = 0.4; m.roughness = 0.34
+					m.emission_enabled = true; m.emission = Color(0.96, 0.74, 0.76); m.emission_energy_multiplier = 0.4
+				elif role == "navy":
+					m.albedo_color = Color(0.16, 0.24, 0.60); m.metallic = 0.55; m.metallic_specular = 0.8; m.roughness = 0.28
+					m.emission_enabled = true; m.emission = Color(0.16, 0.24, 0.60); m.emission_energy_multiplier = 0.5
+				elif role == "teal":
+					m.albedo_color = Color(0.09, 0.64, 0.64); m.metallic = 0.55; m.metallic_specular = 0.8; m.roughness = 0.26
+					m.emission_enabled = true; m.emission = Color(0.09, 0.64, 0.64); m.emission_energy_multiplier = 0.5
+				elif role == "charcoal":
+					m.albedo_color = Color(0.11, 0.11, 0.13); m.metallic = 0.4; m.roughness = 0.55   # matte gunmetal
+					m.rim_enabled = true; m.rim = 0.2; m.emission_enabled = false
+				elif role == "emerald":
+					m.albedo_color = Color(0.06, 0.48, 0.24); m.metallic = 0.55; m.metallic_specular = 0.8; m.roughness = 0.26
+					m.emission_enabled = true; m.emission = Color(0.06, 0.48, 0.24); m.emission_energy_multiplier = 0.5
+				elif role == "burgundy":
+					m.albedo_color = Color(0.48, 0.08, 0.17); m.metallic = 0.55; m.metallic_specular = 0.8; m.roughness = 0.27
+					m.emission_enabled = true; m.emission = Color(0.48, 0.08, 0.17); m.emission_energy_multiplier = 0.5
 				else:
 					# Light pink crystal body with a feminine rim aura.
 					m.diffuse_mode = BaseMaterial3D.DIFFUSE_TOON   # clean gradients on low-poly faces

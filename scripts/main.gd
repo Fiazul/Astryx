@@ -31,6 +31,7 @@ var _nav_target := ""         # Tab aim-help target (basic guidance; lowest prio
 var _nav_locked := ""         # LOCKED map waypoint (orange) — persists until cancelled
 var coins := 0                # player currency; persisted to the profile
 var _claimed := {}            # body name -> true once its capture reward is claimed
+var _loaded_custom := {}      # saved per-ship colour/bell/finish, applied to the ship in _ready
 const PROFILE_PATH := "user://profile.cfg"
 const CAPTURE_REWARD := 100
 const NAV_COST := 40          # coins to buy a navigator (map Navigate / Auto-pilot)
@@ -48,6 +49,9 @@ var docked := false
 var _dock_in_range := false
 var current_system := SystemDB.SOL
 var _music: AudioStreamPlayer
+var _music_default: AudioStream   # the shared bgm every hull flies to
+var _music_hani: AudioStream      # HaniNebula's dedicated theme (null if missing)
+var _music_track := ""            # which stream is loaded: "default" | "hani"
 const MUSIC_DB := -13.0    # bgm level once faded in — louder/present (engine ducks under it)
 const MUSIC_OFF_DB := -60.0  # silent end of the fade
 const MUSIC_FADE := 1.2    # fade speed (per second) for the gentle in/out
@@ -72,6 +76,7 @@ func _ready() -> void:
 	add_child(ship)
 	ship.true_pos = START_POS
 	ship.face_toward(-START_POS)   # open looking at Earth (the origin)
+	ship.load_customization(_loaded_custom)   # restore saved per-ship colours/bell/finish
 
 	# Chase camera lives on the world root; the ship drives its transform each
 	# frame (with a little lag) so it isn't rigidly bolted to the hull.
@@ -146,6 +151,9 @@ func _ready() -> void:
 	hud.combat = combat
 	hud.teleport_button.pressed.connect(teleport_home)
 	hud.ship_selected.connect(_on_hangar_pick)   # click a hangar row to swap ship
+	hud.ship_color_selected.connect(_on_ship_color_pick)   # click a swatch to recolour the hull
+	hud.ship_bell_toggled.connect(_on_ship_bell_toggle)    # add/remove the booster engine bell
+	hud.ship_finish_selected.connect(_on_ship_finish_pick)  # metallic / glassy surface finish
 
 	# Discovery progress (persisted) + real planet facts + the Details panel.
 	codex = Codex.new()
@@ -247,6 +255,18 @@ func _process(delta: float) -> void:
 func _update_music(delta: float) -> void:
 	if _music == null:
 		return
+	# Swap to the equipped hull's track only while the music is silent (paused or fully
+	# faded out) so the change is never an audible cut. We reset to MUSIC_OFF_DB so the
+	# new track always fades IN from zero (and the old one has already faded OUT before
+	# we get here). HaniNebula flies to her own theme; everyone else shares the bgm.
+	var track := _desired_music_track()
+	if track != _music_track \
+		and (_music.stream_paused or _music.volume_db <= MUSIC_OFF_DB + 1.0):
+		_music_track = track
+		_music.stream = _music_hani if track == "hani" else _music_default
+		_music.volume_db = MUSIC_OFF_DB   # start silent -> _update_music fades it in
+		_music.play()
+		_music.stream_paused = true
 	# The bgm is gated by the engine's continuous-drive clock: silent for the first
 	# MUSIC_IN_TIME (8s) of a run — engine only — then it fades in. It never plays on
 	# the platform or in a wormhole (drive_time resets to 0 there).
@@ -259,6 +279,15 @@ func _update_music(delta: float) -> void:
 	_music.volume_db = lerpf(_music.volume_db, target_db, clampf(MUSIC_FADE * delta, 0.0, 1.0))
 	if not want and _music.volume_db <= MUSIC_OFF_DB + 1.0:
 		_music.stream_paused = true   # fully faded out — pause to idle
+
+
+# Which bgm the equipped hull should fly to: HaniNebula has a dedicated theme; every
+# other ship shares the default bgm. Falls back to default if her track failed to load.
+func _desired_music_track() -> String:
+	if _music_hani != null and ship != null \
+		and ship.ship_name_at(ship.current_index()) == "HaniNebula":
+		return "hani"
+	return "default"
 
 
 # Jump straight to a system from the star map (fast-travel, no tunnel).
@@ -425,12 +454,16 @@ func _load_profile() -> void:
 		_claimed.clear()
 		for n in cfg.get_value("player", "claimed", []):
 			_claimed[n] = true
+		# Saved per-ship colour/bell/finish choices — applied to the ship once it exists.
+		_loaded_custom = cfg.get_value("player", "customization", {})
 
 func _save_profile() -> void:
 	var cfg := ConfigFile.new()
 	cfg.load(PROFILE_PATH)            # keep any other keys we add later
 	cfg.set_value("player", "coins", coins)
 	cfg.set_value("player", "claimed", _claimed.keys())
+	if ship != null:
+		cfg.set_value("player", "customization", ship.customization_state())
 	cfg.save(PROFILE_PATH)
 
 
@@ -739,6 +772,24 @@ func _on_hangar_pick(index: int) -> void:
 		combat.player_hp = ship.max_hp   # new hull -> its full defence
 
 
+func _on_ship_color_pick(part: String, key: String) -> void:
+	if docked:
+		ship.set_ship_color(part, key)
+		_save_profile()   # remember this hull's colour across sessions
+
+
+func _on_ship_bell_toggle(on: bool) -> void:
+	if docked:
+		ship.set_ship_bell(on)
+		_save_profile()
+
+
+func _on_ship_finish_pick(key: String) -> void:
+	if docked:
+		ship.set_ship_finish(key)
+		_save_profile()
+
+
 # Looping background music, spawned from code like everything else.
 # Mix hierarchy (loudest/most present first): gunfire/SFX > engine > music.
 # Music is a backdrop that only plays while flying outside (not on the platform);
@@ -746,18 +797,29 @@ func _on_hangar_pick(index: int) -> void:
 func _setup_music() -> void:
 	# OGG Vorbis, not MP3: MP3 carries encoder padding that leaves an audible gap at
 	# the loop point. Vorbis loops seamlessly, so the track repeats cleanly.
-	var stream := load("res://assets/bgm.ogg")
-	if stream == null:
+	_music_default = _load_music("res://assets/bgm.ogg")
+	if _music_default == null:
 		return
-	if stream is AudioStreamOggVorbis:
-		(stream as AudioStreamOggVorbis).loop = true   # seamless loop, no gap
+	# HaniNebula gets her own dedicated theme — swapped in while docked (see _update_music).
+	_music_hani = _load_music("res://assets/bgm_hani.ogg")
 	_music = AudioStreamPlayer.new()
-	_music.stream = stream
+	_music.stream = _music_default
+	_music_track = "default"
 	_music.volume_db = MUSIC_OFF_DB   # starts silent; _update_music fades it in once driving
 	_music.bus = "Master"
 	add_child(_music)
 	_music.play()
 	_music.stream_paused = true   # silent until you've been flying for MUSIC_IN_TIME
+
+
+# Load a bgm track and flag it as a seamless loop (null if the file is missing).
+func _load_music(path: String) -> AudioStream:
+	var stream := load(path)
+	if stream == null:
+		return null
+	if stream is AudioStreamOggVorbis:
+		(stream as AudioStreamOggVorbis).loop = true   # seamless loop, no gap
+	return stream
 
 
 func _setup_environment() -> void:

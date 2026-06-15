@@ -27,6 +27,9 @@ const RIGHT_EDGE := 1264.0
 var _text_shader := load("res://shaders/hud_text.gdshader") as Shader
 
 signal ship_selected(index: int)   # emitted when a hangar row is clicked
+signal ship_color_selected(part: String, key: String)   # part = "body" | "wing", key = palette
+signal ship_bell_toggled(on: bool)   # add/remove the booster engine bell
+signal ship_finish_selected(key: String)   # "metallic" | "glassy"
 
 var ship: Ship
 var planets: PlanetSystem
@@ -789,7 +792,15 @@ func _linear_gradient(top: Color, bottom: Color) -> GradientTexture2D:
 # Show/refresh the ship-pickup table. Rebuilds rows only when the contents change
 # (ship set, current selection, or station name), so it's cheap to call per frame.
 func set_hangar(open: bool, names: PackedStringArray, current: int, station: String) -> void:
-	var sig := ("%d|%s|%s" % [current, station, ",".join(names)]) if open else ""
+	# Body-colour swatches show for hulls that allow it (HaniNebula). Track the chosen key in
+	# the signature so the table rebuilds (and re-highlights) when the colour changes.
+	var has_color: bool = open and ship != null and ship.current_has_color_pick()
+	var body_key: String = ship.current_body_color() if has_color else ""
+	var wing_key: String = ship.current_wing_color() if has_color else ""
+	var has_wing: bool = has_color and ship.current_has_wing_pick()
+	var bell: bool = has_color and ship.current_bell()
+	var finish: String = ship.current_finish() if has_color else ""
+	var sig := ("%d|%s|%s|%s|%s|%s|%s" % [current, station, ",".join(names), body_key, wing_key, str(bell), finish]) if open else ""
 	if sig == _hangar_sig:
 		return
 	_hangar_sig = sig
@@ -801,6 +812,16 @@ func set_hangar(open: bool, names: PackedStringArray, current: int, station: Str
 		c.queue_free()
 	for i in names.size():
 		_hangar_rows.add_child(_make_hangar_row(names[i], i, i == current))
+	if has_color:
+		_hangar_rows.add_child(_make_color_swatches("BODY COLOUR", "body", body_key))
+		if has_wing:
+			_hangar_rows.add_child(_make_color_swatches("WING COLOUR", "wing", wing_key))
+		_hangar_rows.add_child(_make_choice_row("ENGINE BELL",
+			[{"key": "on", "label": "ADD"}, {"key": "off", "label": "REMOVE"}],
+			"on" if bell else "off", _on_bell_choice))
+		_hangar_rows.add_child(_make_choice_row("FINISH",
+			[{"key": "metallic", "label": "METALLIC"}, {"key": "glassy", "label": "GLASSY"}],
+			finish, _on_finish_choice))
 
 
 # One bordered table row: ◈ icon · ship name · number key. Current ship is lit up.
@@ -846,6 +867,88 @@ func _on_hangar_row_input(event: InputEvent, idx: int) -> void:
 	if event is InputEventMouseButton and event.pressed \
 			and event.button_index == MOUSE_BUTTON_LEFT:
 		ship_selected.emit(idx)
+
+
+# A "BODY COLOUR" label + a row of clickable colour swatches. The current colour is ringed
+# in white. Clicking a swatch emits ship_color_selected(key); main rebuilds the hull.
+func _make_color_swatches(title: String, part: String, current_key: String) -> Control:
+	var pad := MarginContainer.new()
+	pad.add_theme_constant_override("margin_top", 6)
+	var wrap := VBoxContainer.new()
+	wrap.add_theme_constant_override("separation", 4)
+	pad.add_child(wrap)
+	var lbl := _new_label(10, Color(0.7, 0.95, 1.0))
+	lbl.text = title
+	wrap.add_child(lbl)
+	var grid := HBoxContainer.new()
+	grid.add_theme_constant_override("separation", 5)
+	wrap.add_child(grid)
+	for p in Ship.SHIP_PALETTES:
+		var sel: bool = String(p.key) == current_key
+		var btn := Button.new()
+		btn.custom_minimum_size = Vector2(24, 24)
+		btn.tooltip_text = String(p.name)
+		btn.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+		var sb := StyleBoxFlat.new()
+		sb.bg_color = p.swatch
+		sb.set_border_width_all(3 if sel else 1)
+		sb.border_color = Color(1, 1, 1, 0.95) if sel else Color(0.35, 0.5, 0.65, 0.8)
+		sb.set_corner_radius_all(4)
+		# Same look in every button state (no theme tint flicker on hover/press).
+		for st in ["normal", "hover", "pressed", "focus", "disabled"]:
+			btn.add_theme_stylebox_override(st, sb)
+		btn.pressed.connect(_on_swatch_pressed.bind(part, String(p.key)))
+		grid.add_child(btn)
+	return pad
+
+
+func _on_swatch_pressed(part: String, key: String) -> void:
+	ship_color_selected.emit(part, key)
+
+
+# A labelled row of small segmented option buttons (the active one is lit). `opts` is an
+# Array of { key, label }; clicking calls `cb` with the chosen key.
+func _make_choice_row(title: String, opts: Array, current_key: String, cb: Callable) -> Control:
+	var pad := MarginContainer.new()
+	pad.add_theme_constant_override("margin_top", 6)
+	var wrap := VBoxContainer.new()
+	wrap.add_theme_constant_override("separation", 3)
+	pad.add_child(wrap)
+	var lbl := _new_label(10, Color(0.7, 0.95, 1.0))
+	lbl.text = title
+	wrap.add_child(lbl)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 4)
+	wrap.add_child(row)
+	for o in opts:
+		var sel: bool = String(o.key) == current_key
+		var btn := Button.new()
+		btn.text = String(o.label)
+		btn.custom_minimum_size = Vector2(0, 18)
+		btn.add_theme_font_size_override("font_size", 9)
+		btn.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+		var sb := StyleBoxFlat.new()
+		sb.bg_color = Color(0.18, 0.45, 0.70, 0.55) if sel else Color(0.10, 0.16, 0.24, 0.40)
+		sb.border_color = Color(0.6, 0.95, 1.0, 0.95) if sel else Color(0.35, 0.5, 0.65, 0.6)
+		sb.set_border_width_all(1)
+		sb.set_corner_radius_all(3)
+		sb.content_margin_left = 8
+		sb.content_margin_right = 8
+		sb.content_margin_top = 3
+		sb.content_margin_bottom = 3
+		for st in ["normal", "hover", "pressed", "focus"]:
+			btn.add_theme_stylebox_override(st, sb)
+		btn.pressed.connect(cb.bind(String(o.key)))
+		row.add_child(btn)
+	return pad
+
+
+func _on_bell_choice(key: String) -> void:
+	ship_bell_toggled.emit(key == "on")
+
+
+func _on_finish_choice(key: String) -> void:
+	ship_finish_selected.emit(key)
 
 
 func refresh() -> void:
