@@ -35,7 +35,7 @@ const PLANETS := [
 	# the Sun grab hard, Mercury/Mars barely tug. Radii follow real size order, gently
 	# compressed so they read as dominant without engulfing neighbours.
 	{ "name": "Earth",   "id": "399", "eq": Vector3(0, 0, 0),               "radius": 5.6,  "mass": 1.0,      "color": Color(0.20, 0.45, 1.0), "model": "res://assets/earth.glb", "glow": 0.12, "fixed": true },
-	{ "name": "Sun",     "id": "10",  "eq": Vector3( 0.1640,  0.9194,  0.3985), "radius": 14.0, "mass": 333000.0, "color": Color(1.00, 0.85, 0.30), "star": true, "model": "res://assets/star.glb", "glow": 2.0 },
+	{ "name": "Sun",     "id": "10",  "eq": Vector3( 0.1640,  0.9194,  0.3985), "radius": 14.0, "mass": 333000.0, "color": Color(1.00, 0.85, 0.30), "star": true, "model": "res://assets/sol.obj", "glow": 2.0 },
 	{ "name": "Mercury", "id": "199", "eq": Vector3(-0.2269,  0.7801,  0.3646), "radius": 2.2,  "mass": 0.055,    "color": Color(0.70, 0.62, 0.52) },
 	{ "name": "Venus",   "id": "299", "eq": Vector3(-0.5535,  0.9404,  0.4534), "radius": 5.3,  "mass": 0.815,    "color": Color(0.95, 0.85, 0.55) },
 	{ "name": "Mars",    "id": "499", "eq": Vector3( 1.4583,  1.4672,  0.6149), "radius": 3.0,  "mass": 0.107,    "color": Color(0.90, 0.40, 0.20) },

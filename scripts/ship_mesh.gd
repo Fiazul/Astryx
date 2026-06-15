@@ -166,8 +166,8 @@ static func metal_split(root: Node3D, mesh_root: Node3D, gold_y: float) -> void:
 
 # --- Materials -------------------------------------------------------------
 
-# Glassy finish: re-coat every surface's material with a mirror-smooth, wet clear-coat
-# sheen (glossy, glass-like) instead of the matte/metal default. Applied after recolor.
+# Glassy finish: REAL see-through tinted glass — the body colour as a translucent,
+# wet, edge-lit pane you can partly see through, not an opaque gloss. Applied after recolor.
 static func set_glassy(model: Node3D) -> void:
 	for mi in gather_mesh_instances(model):
 		if mi.mesh == null:
@@ -176,15 +176,43 @@ static func set_glassy(model: Node3D) -> void:
 			var m = mi.get_active_material(si)
 			if m is BaseMaterial3D:
 				var mm := m as BaseMaterial3D
-				mm.transparency = BaseMaterial3D.TRANSPARENCY_DISABLED   # stay opaque
-				# A metallic mirror just reflects the empty starfield -> looks like clear
-				# glass. Drop metallic so the body COLOUR shows, then a wet clear-coat on top.
-				mm.metallic = 0.0
-				mm.metallic_specular = 1.0
-				mm.roughness = 0.06                # smooth, candy-gloss sheen
+				# Translucent: keep the colour but let it read as glass you see THROUGH.
+				mm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+				var a: Color = mm.albedo_color
+				a.a = 0.38                         # see-through pane
+				mm.albedo_color = a
+				mm.metallic = 0.0                  # glass isn't metal
+				mm.metallic_specular = 1.0         # sharp surface reflections / glints
+				mm.roughness = 0.03                # clear, polished glass
 				mm.clearcoat_enabled = true
 				mm.clearcoat = 1.0
-				mm.clearcoat_roughness = 0.03
+				mm.clearcoat_roughness = 0.02
+				# Bright fresnel edge so the glass silhouette reads; kill most of the
+				# self-glow so light passes through instead of looking like a lit solid.
+				mm.rim_enabled = true
+				mm.rim = 0.6
+				mm.rim_tint = 0.2
+				if mm.emission_enabled:
+					mm.emission_energy_multiplier *= 0.25
+
+
+# Metallic finish: PURE SMOOTH polished metal — drop the brushed roughness to a clean,
+# mirror-sharp sheen while keeping the role's colour + self-glow (a full mirror in this
+# probe-less scene would read as glass, so we don't touch metallic/emission). Glass
+# surfaces (e.g. canopy/illuminators) are left alone so they stay see-through.
+static func set_polished(model: Node3D) -> void:
+	for mi in gather_mesh_instances(model):
+		if mi.mesh == null:
+			continue
+		for si in mi.mesh.get_surface_count():
+			var m = mi.get_active_material(si)
+			if m is BaseMaterial3D:
+				var mm := m as BaseMaterial3D
+				if mm.transparency != BaseMaterial3D.TRANSPARENCY_DISABLED:
+					continue   # leave glass/illuminators see-through
+				mm.roughness = minf(mm.roughness, 0.1)          # polished, mirror-sharp
+				mm.metallic_specular = maxf(mm.metallic_specular, 0.9)
+				mm.clearcoat_enabled = false                    # clean metal, no wet coat
 
 
 static func recolor(model: Node3D, tint: Color, glow: float, chrome := false, raw := false, pbr := false, roles := [], metal := false) -> void:

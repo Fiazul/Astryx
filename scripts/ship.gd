@@ -809,9 +809,13 @@ func _build_ship_model(idx: int) -> void:
 		ShipMesh.metal_split(model, _mesh_root, box.size.y * float(info.gold_above))
 	else:
 		ShipMesh.recolor(model, info.tint, float(info.glow), info.get("chrome", false), info.get("raw", false), info.get("pbr", false), roles, info.get("metal", false))
-	# Surface finish (color_pick ships): "glassy" gives a glossy clear-coat sheen.
-	if info.get("color_pick", false) and _finish_for(info.name) == "glassy":
-		ShipMesh.set_glassy(model)
+	# Surface finish (color_pick ships): "glassy" = real see-through tinted glass;
+	# "metallic" = pure smooth polished metal.
+	if info.get("color_pick", false):
+		if _finish_for(info.name) == "glassy":
+			ShipMesh.set_glassy(model)
+		else:
+			ShipMesh.set_polished(model)
 	# Some hulls (HaniNebula, early stage) fly without authored booster plumes yet.
 	if not info.get("no_boosters", false):
 		_build_boosters(box, info.name)
@@ -995,9 +999,10 @@ func _build_boosters(box: AABB, ship_name: String) -> void:
 	var rise := s.y * BOOSTER_RISE
 	var mounts: Array = BOOSTER_LAYOUTS.get(ship_name, BOOSTER_FALLBACK)
 	_booster_color = BOOSTER_COLOR_OVERRIDE.get(ship_name, BOOSTER_COLOR)
-	# Most ships get the metal engine bell + nozzle ring. Hulls whose model ALREADY has its
-	# own nozzles (HaniNebula) skip it — we just drop a small fire plume into each real hole.
-	_booster_ring = not BOOSTER_NO_RING.get(ship_name, false)
+	# Most ships get the metal engine bell + nozzle ring; hulls with their own nozzles
+	# (HaniNebula) default to none. _bell_for() honours the player's hangar toggle — it
+	# falls back to BOOSTER_NO_RING the first time, then tracks add/remove choices.
+	_booster_ring = _bell_for(ship_name)
 	# Fewer engines read better a touch larger; scale radius down as count grows.
 	var rscale: float = BOOSTER_RADIUS_SCALE.get(ship_name, 1.0)
 	var lscale: float = BOOSTER_LENGTH_SCALE.get(ship_name, 1.0)

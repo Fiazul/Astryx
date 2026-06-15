@@ -215,13 +215,21 @@ func _make_ring_mesh(inner: float, outer: float, seg: int) -> ArrayMesh:
 # Instantiate a GLB body, scale it to the visual radius, self-light it (no scene
 # lights) and add it hidden. Returns null if the model can't load (-> sphere).
 func _make_glb_body(p: Dictionary) -> Node3D:
-	var packed := load(p.model) as PackedScene
-	if packed == null:
+	# Loads a PackedScene (.glb/.gltf) OR a bare Mesh (.obj) — wrap a Mesh in a
+	# MeshInstance3D so both paths produce a model Node3D.
+	var res := load(p.model)
+	var inst: Node3D = null
+	if res is PackedScene:
+		inst = (res as PackedScene).instantiate() as Node3D
+	elif res is Mesh:
+		var mi := MeshInstance3D.new()
+		mi.mesh = res
+		inst = mi
+	if inst == null:
 		push_warning("PlanetSystem: couldn't load %s — using sphere" % p.model)
 		return null
 	var holder := Node3D.new()
 	add_child(holder)
-	var inst := packed.instantiate() as Node3D
 	holder.add_child(inst)
 	_fit(holder, inst, float(p.radius) * 2.0)   # longest axis == diameter
 	_self_light(inst, p.color, float(p.get("glow", 1.0)), p.get("star", false))
