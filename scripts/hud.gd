@@ -77,6 +77,9 @@ var _boss_bar: Control       # red boss HP bar (top-center, shown only while a b
 var _boss_fill: ColorRect
 var _boss_bar_w := 0.0
 var _reticle: Control   # dynamic crosshair (crosshair.gd)
+const RETICLE_AIM_DIST := 800.0   # how far down the nose the crosshair marks the shot line
+var _lock_ring: Control # radial progress arc drawn around the crosshair while holding X
+var _lock_frac := 0.0   # 0..1 hold progress (set by main from the X-hold timer)
 var firing := false     # set by main each frame — blooms the crosshair while held
 var _hitmarker: Label   # flashes on the crosshair when a shot lands
 var _codex_label: Label # "Discovered N/M"
@@ -237,6 +240,13 @@ func _ready() -> void:
 	_reticle.size = Vector2(80, 80)
 	_reticle.position = Vector2(640.0 - 40.0, 360.0 - 40.0)
 	_canvas.add_child(_reticle)
+
+	# Hold-X lock ring — a radial progress arc that fills around the crosshair while you hold X.
+	_lock_ring = Control.new()
+	_lock_ring.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_lock_ring.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_lock_ring.draw.connect(_draw_lock_ring)
+	_canvas.add_child(_lock_ring)
 
 	# Hitmarker — a bright ✕ that pops over the crosshair when a shot connects.
 	_hitmarker = _make_label(Vector2(0, 344), 23, Color(1, 1, 1, 0))
@@ -1063,8 +1073,10 @@ func _make_color_swatches(title: String, part: String, current_key: String) -> C
 	var lbl := _new_label(10, Color(0.7, 0.95, 1.0))
 	lbl.text = title
 	wrap.add_child(lbl)
-	var grid := HBoxContainer.new()
-	grid.add_theme_constant_override("separation", 5)
+	var grid := GridContainer.new()
+	grid.columns = 7   # wrap to multiple rows so the swatch strip never overflows the panel
+	grid.add_theme_constant_override("h_separation", 5)
+	grid.add_theme_constant_override("v_separation", 5)
 	wrap.add_child(grid)
 	for p in Ship.SHIP_PALETTES:
 		var sel: bool = String(p.key) == current_key
@@ -1134,6 +1146,28 @@ func _on_finish_choice(key: String) -> void:
 	ship_finish_selected.emit(key)
 
 
+# Hold-X lock progress (0..1), fed by main each frame; redraws the ring around the crosshair.
+func set_lock_progress(f: float) -> void:
+	f = clampf(f, 0.0, 1.0)
+	if f != _lock_frac:
+		_lock_frac = f
+		if _lock_ring != null:
+			_lock_ring.queue_redraw()
+
+
+func _draw_lock_ring() -> void:
+	if _lock_frac <= 0.0:
+		return
+	var c: Vector2 = _reticle.position + _reticle.size * 0.5   # centre on the crosshair
+	var r := 30.0
+	_lock_ring.draw_arc(c, r, 0.0, TAU, 40, Color(0.5, 0.7, 1.0, 0.22), 3.0, true)   # track
+	# Filling arc from the top, clockwise — orange (it locks an orange waypoint).
+	var col := Color(1.0, 0.72, 0.30, 0.95)
+	_lock_ring.draw_arc(c, r, -PI * 0.5, -PI * 0.5 + TAU * _lock_frac, 48, col, 4.0, true)
+	if _lock_frac >= 1.0:                                                            # complete flash
+		_lock_ring.draw_arc(c, r, 0.0, TAU, 48, Color(1.0, 0.85, 0.4, 1.0), 5.0, true)
+
+
 func refresh() -> void:
 	if ship == null:
 		return
@@ -1142,6 +1176,16 @@ func refresh() -> void:
 	var armed := ship.can_fire and not hyper   # utility hulls show no crosshair
 	_reticle.visible = armed
 	_hitmarker.visible = armed
+	# Pin the crosshair to where the NOSE points (bullets fly along the ship's forward).
+	# The chase camera lags + sways, so a fixed-centre reticle drifts off the true shot
+	# line — projecting the nose ray each frame keeps the crosshair exactly on aim.
+	if armed and ship.camera != null:
+		var cam: Camera3D = ship.camera
+		var aim: Vector3 = (-ship.transform.basis.z) * RETICLE_AIM_DIST   # ship is at render origin
+		if (cam.global_transform.affine_inverse() * aim).z < 0.0:         # aim is in front of cam
+			var sp: Vector2 = cam.unproject_position(aim)
+			_reticle.position = sp - _reticle.size * 0.5
+			_hitmarker.position = Vector2(sp.x - 640.0, sp.y - 18.0)      # 1280-wide centred label
 	# Feed the dynamic crosshair: bloom while firing, kick on a fresh hit.
 	var kick := clampf(combat.hitmarker / 0.18, 0.0, 1.0) if combat != null else 0.0
 	_reticle.set_target(1.0 if firing else 0.0, kick)

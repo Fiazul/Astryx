@@ -4,8 +4,9 @@ importer="texture"
 type="CompressedTexture2D"
 uid="uid://c2p7hfa3aq6pj"
 path.s3tc="res://.godot/imported/Spaceship (1)_Atlas.png-2881ddfe7ad17e81a6070c11a17c8f46.s3tc.ctex"
+path.etc2="res://.godot/imported/Spaceship (1)_Atlas.png-2881ddfe7ad17e81a6070c11a17c8f46.etc2.ctex"
 metadata={
-"imported_formats": ["s3tc_bptc"],
+"imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
 }
 generator_parameters={
@@ -15,7 +16,7 @@ generator_parameters={
 [deps]
 
 source_file="res://assets/Spaceship (1)_Atlas.png"
-dest_files=["res://.godot/imported/Spaceship (1)_Atlas.png-2881ddfe7ad17e81a6070c11a17c8f46.s3tc.ctex"]
+dest_files=["res://.godot/imported/Spaceship (1)_Atlas.png-2881ddfe7ad17e81a6070c11a17c8f46.s3tc.ctex", "res://.godot/imported/Spaceship (1)_Atlas.png-2881ddfe7ad17e81a6070c11a17c8f46.etc2.ctex"]
 
 [params]
 

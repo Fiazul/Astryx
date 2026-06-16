@@ -243,8 +243,7 @@ static func _compute_stations() -> Dictionary:
 # ("go to Proxima first, then Alpha"). Built from the real 3D coords: a minimum spanning
 # tree backbone (guarantees EVERY star is reachable from Sol — the whole point of the game)
 # plus a few extra short edges for alternate routes. Links are bidirectional.
-const WH_EXTRA_EDGES := 9     # short non-tree links added on top of the MST (alternate routes)
-const WH_MAX_DEGREE := 4      # cap links per system for the EXTRA edges (keeps each "limited")
+const WH_HUBS := 5            # spread-out wormhole hubs (each linked to Earth + to each other)
 
 static var _adj := {}          # id -> Array[ neighbour id ]  (lazy, see _ensure_graph)
 static var _edges := []        # Array[ [a, b] ]  with a,b ids (each link once)
@@ -252,50 +251,80 @@ static var _edges := []        # Array[ [a, b] ]  with a,b ids (each link once)
 static func _ensure_graph() -> void:
 	if not _adj.is_empty():
 		return
-	# The Interstellar hub is kept as a graph NODE you can pass through (user's call), placed
-	# centrally just "above" Sol so the MST links it in as a low-degree junction near home.
-	var ids := all() + [INTERSTELLAR]      # 51 systems + the hub
+	# MULTI-HUB hub-and-spoke (≤ 3 hops to anywhere), instead of a deep MST tree:
+	#   • Earth (Sol) is the home anchor, linked to all WH_HUBS hubs           (Earth→hub = 1)
+	#   • the hubs are fully interconnected                                     (hub↔hub = 1)
+	#   • every other system hangs off its NEAREST hub                          (hub→star = 1)
+	# So Earth→any = 2, and any star→any star = 3 (A→hubA→hubB→B). Hubs are chosen spread out
+	# (farthest-point sampling, kept away from Sol) so they're not all bunched in one place,
+	# and the ~50 systems split across 5 hubs so no single hub carries the whole field.
+	var ids := all() + [INTERSTELLAR]
 	var pos := {}
 	for id in ids:
 		_adj[id] = []
 		pos[id] = Vector3(0.0, 3.0, 0.0) if id == INTERSTELLAR else coord(id)
-	# Prim's MST from Sol — connects every system over the shortest total link length.
-	var in_tree := {}
-	var start: String = SOL if ids.has(SOL) else ids[0]
-	in_tree[start] = true
-	while in_tree.size() < ids.size():
-		var bd := INF
-		var ba := ""
-		var bb := ""
-		for a in in_tree:
-			for b in ids:
-				if in_tree.has(b):
-					continue
-				var d: float = pos[a].distance_to(pos[b])
-				if d < bd:
-					bd = d; ba = a; bb = b
-		if bb == "":
-			break
-		in_tree[bb] = true
-		_link(ba, bb)
-	# A few extra SHORT non-tree links (alternate routes), respecting the degree cap.
-	var cand := []
-	for i in ids.size():
-		for j in range(i + 1, ids.size()):
-			var a: String = ids[i]
-			var b: String = ids[j]
-			if _adj[a].has(b):
+	# Hub candidates: every real destination except Sol.
+	var pool := []
+	for id in all():
+		if id != SOL:
+			pool.append(id)
+	# Seed the hub set with the system FARTHEST from Sol, then repeatedly add the system
+	# whose nearest already-chosen hub (and Sol) is farthest away → well-spread hubs.
+	var hubs := []
+	var seed := ""
+	var sd := -1.0
+	for id in pool:
+		var d: float = pos[SOL].distance_to(pos[id])
+		if d > sd:
+			sd = d; seed = id
+	if seed != "":
+		hubs.append(seed)
+	while hubs.size() < WH_HUBS and hubs.size() < pool.size():
+		var best := ""
+		var best_min := -1.0
+		for id in pool:
+			if hubs.has(id):
 				continue
-			cand.append({ "a": a, "b": b, "d": pos[a].distance_to(pos[b]) })
-	cand.sort_custom(func(x, y): return x.d < y.d)
-	var added := 0
-	for c in cand:
-		if added >= WH_EXTRA_EDGES:
+			var mind: float = pos[SOL].distance_to(pos[id])
+			for h in hubs:
+				mind = minf(mind, pos[h].distance_to(pos[id]))
+			if mind > best_min:
+				best_min = mind; best = id
+		if best == "":
 			break
-		if _adj[c.a].size() >= WH_MAX_DEGREE or _adj[c.b].size() >= WH_MAX_DEGREE:
-			continue
-		_link(c.a, c.b)
-		added += 1
+		hubs.append(best)
+	var is_hub := {}
+	for h in hubs:
+		is_hub[h] = true
+	# Earth → every hub, and the Interstellar gate stays a home-adjacent node.
+	for h in hubs:
+		_link(SOL, h)
+	_link(SOL, INTERSTELLAR)
+	# Fully interconnect the hubs (complete graph) → any hub reaches any hub in one jump.
+	for i in hubs.size():
+		for j in range(i + 1, hubs.size()):
+			_link(hubs[i], hubs[j])
+	# Every remaining system hangs off a hub — assigned to its NEAREST hub that still has room.
+	# A spoke cap (≈ systems / hubs) keeps the load balanced so no single hub hoards the field;
+	# overflow spills to the next-nearest hub. Hop guarantee is unaffected (all hubs interlink).
+	var spokes := []
+	for id in ids:
+		if id != SOL and not is_hub.has(id):
+			spokes.append(id)
+	var cap: int = int(ceil(float(spokes.size()) / float(maxi(hubs.size(), 1))))
+	var load := {}
+	for h in hubs:
+		load[h] = 0
+	for id in spokes:
+		var order: Array = hubs.duplicate()
+		order.sort_custom(func(a, b): return pos[a].distance_to(pos[id]) < pos[b].distance_to(pos[id]))
+		var chosen: String = order[0]
+		for h in order:
+			if load[h] < cap:
+				chosen = h
+				break
+		_link(id, chosen)
+		load[chosen] += 1
 
 static func _link(a: String, b: String) -> void:
 	if not _adj[a].has(b):

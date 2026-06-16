@@ -4,8 +4,9 @@ importer="texture"
 type="CompressedTexture2D"
 uid="uid://cvpe22guwyrnp"
 path.s3tc="res://.godot/imported/International Space Station_InternationalSpaceStation_BaseColor.png-7a4336a87abc1ad466a418e14c9d92eb.s3tc.ctex"
+path.etc2="res://.godot/imported/International Space Station_InternationalSpaceStation_BaseColor.png-7a4336a87abc1ad466a418e14c9d92eb.etc2.ctex"
 metadata={
-"imported_formats": ["s3tc_bptc"],
+"imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
 }
 generator_parameters={
@@ -15,7 +16,7 @@ generator_parameters={
 [deps]
 
 source_file="res://assets/International Space Station_InternationalSpaceStation_BaseColor.png"
-dest_files=["res://.godot/imported/International Space Station_InternationalSpaceStation_BaseColor.png-7a4336a87abc1ad466a418e14c9d92eb.s3tc.ctex"]
+dest_files=["res://.godot/imported/International Space Station_InternationalSpaceStation_BaseColor.png-7a4336a87abc1ad466a418e14c9d92eb.s3tc.ctex", "res://.godot/imported/International Space Station_InternationalSpaceStation_BaseColor.png-7a4336a87abc1ad466a418e14c9d92eb.etc2.ctex"]
 
 [params]
 

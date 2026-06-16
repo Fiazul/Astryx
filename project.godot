@@ -31,7 +31,7 @@ window/handheld/orientation=4
 
 [rendering]
 
-scaling_3d/scale=2.0
+textures/vram_compression/import_etc2_astc=true
+anti_aliasing/quality/msaa_3d=2
 environment/defaults/default_clear_color=Color(0.01, 0.01, 0.03, 1)
 scaling_3d/scale.mobile=0.75
-textures/vram_compression/import_etc2_astc=true

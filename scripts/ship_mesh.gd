@@ -368,6 +368,18 @@ static func recolor(model: Node3D, tint: Color, glow: float, chrome := false, ra
 					# Polished champagne-gold metal — high metallic, low roughness for a real gold sheen.
 					m.albedo_color = Color(0.83, 0.69, 0.42); m.metallic = 0.85; m.metallic_specular = 0.9; m.roughness = 0.16
 					m.emission_enabled = true; m.emission = Color(0.83, 0.69, 0.42); m.emission_energy_multiplier = 0.4
+				elif role == "ash":
+					# Bright light-grey polished alloy. Emission floor keeps it luminous, not flat.
+					m.albedo_color = Color(0.74, 0.76, 0.80); m.metallic = 0.55; m.metallic_specular = 0.85; m.roughness = 0.22
+					m.emission_enabled = true; m.emission = Color(0.74, 0.76, 0.80); m.emission_energy_multiplier = 0.5
+				elif role == "graphite":
+					# Dark grey gunmetal with a soft sheen — reads as solid mid-dark metal.
+					m.albedo_color = Color(0.30, 0.31, 0.34); m.metallic = 0.6; m.metallic_specular = 0.8; m.roughness = 0.30
+					m.emission_enabled = true; m.emission = Color(0.30, 0.31, 0.34); m.emission_energy_multiplier = 0.4
+				elif role == "onyx":
+					# Brightened glossy black — deep, but a sheen + emission floor so it never goes dead-black.
+					m.albedo_color = Color(0.10, 0.10, 0.12); m.metallic = 0.7; m.metallic_specular = 0.9; m.roughness = 0.16
+					m.emission_enabled = true; m.emission = Color(0.13, 0.13, 0.16); m.emission_energy_multiplier = 0.35
 				else:
 					# Light pink crystal body with a feminine rim aura.
 					m.diffuse_mode = BaseMaterial3D.DIFFUSE_TOON   # clean gradients on low-poly faces

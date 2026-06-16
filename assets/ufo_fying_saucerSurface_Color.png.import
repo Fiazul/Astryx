@@ -4,8 +4,9 @@ importer="texture"
 type="CompressedTexture2D"
 uid="uid://cq1xms62xwynv"
 path.s3tc="res://.godot/imported/ufo_fying_saucerSurface_Color.png-47356160fb5527de3327d4fa2c7fca16.s3tc.ctex"
+path.etc2="res://.godot/imported/ufo_fying_saucerSurface_Color.png-47356160fb5527de3327d4fa2c7fca16.etc2.ctex"
 metadata={
-"imported_formats": ["s3tc_bptc"],
+"imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
 }
 generator_parameters={
@@ -15,7 +16,7 @@ generator_parameters={
 [deps]
 
 source_file="res://assets/ufo_fying_saucerSurface_Color.png"
-dest_files=["res://.godot/imported/ufo_fying_saucerSurface_Color.png-47356160fb5527de3327d4fa2c7fca16.s3tc.ctex"]
+dest_files=["res://.godot/imported/ufo_fying_saucerSurface_Color.png-47356160fb5527de3327d4fa2c7fca16.s3tc.ctex", "res://.godot/imported/ufo_fying_saucerSurface_Color.png-47356160fb5527de3327d4fa2c7fca16.etc2.ctex"]
 
 [params]
 

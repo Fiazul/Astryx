@@ -87,6 +87,9 @@ const SHIP_PALETTES := [
 	{ "key": "silver",   "name": "Steel Blue","swatch": Color(0.42, 0.60, 0.95), "accent": Color(0.72, 0.85, 1.00) },
 	{ "key": "gold",     "name": "Silver",    "swatch": Color(0.82, 0.84, 0.88), "accent": Color(0.90, 0.93, 1.00) },
 	{ "key": "champagne","name": "Champagne Gold", "swatch": Color(0.83, 0.69, 0.42), "accent": Color(1.00, 0.94, 0.78) },
+	{ "key": "ash",      "name": "Silver Ash",  "swatch": Color(0.74, 0.76, 0.80), "accent": Color(0.92, 0.95, 1.00) },
+	{ "key": "graphite", "name": "Graphite",    "swatch": Color(0.30, 0.31, 0.34), "accent": Color(0.85, 0.90, 1.00) },
+	{ "key": "onyx",     "name": "Onyx Black",  "swatch": Color(0.10, 0.10, 0.12), "accent": Color(0.80, 0.86, 1.00) },
 ]
 var _color_choice := {}   # ship name -> { "body": key, "wing": key } (overrides default_color/default_wing)
 var _bell_choice := {}    # ship name -> bool (booster engine bell on); default from BOOSTER_NO_RING
@@ -166,8 +169,8 @@ const BOOSTER_MOUNT_BACK := { "HaniStar": [0.08, 0.0, 0.0],
 	# Real rear-opening depth of each hole group: mains/sublayers at -0.08, bottom 4 at +0.10.
 	"HaniNebula": [-0.080, -0.080,  0.100, 0.100, 0.100, 0.100,  -0.081, -0.081, -0.081, -0.081, -0.081,  -0.081, -0.081, -0.081, -0.081, -0.081] }
 # Camera zoom (mouse wheel)
-const ZOOM_MIN := 0.45              # closest
-const ZOOM_MAX := 3.0               # farthest
+const ZOOM_MIN := 0.2               # closest
+const ZOOM_MAX := 6.0               # farthest
 const ZOOM_STEP := 0.12             # per wheel notch
 # =================================================================
 
@@ -359,7 +362,7 @@ var _steer := Vector2.ZERO     # eased mouse-steer (rotational inertia for curvi
 var _strafe := 0.0             # eased A/D lateral input (heavy, drifting thrust)
 var _lift := 0.0              # eased Space/Ctrl vertical input
 var _mouse_captured := false
-var _free_look := false       # true while holding RMB / T — mouse orbits the view
+var _free_look := false       # true while RMB or T is held
 var _look_yaw := 0.0          # target orbit angles (set in fly)
 var _look_pitch := 0.0
 var _look_yaw_s := 0.0        # smoothed orbit angles actually applied to the camera
@@ -435,8 +438,8 @@ func fly(delta: float) -> void:
 		return
 
 	# --- Look vs. steer ---
-	# Hold RMB or T for free-look: the mouse orbits the camera around the ship while
-	# the ship holds its heading and keeps flying. Release to steer normally again.
+	# HOLD RMB or T for free-look: the mouse orbits the camera (full 360°) around the ship
+	# while it keeps flying. Release to steer normally again.
 	# (On laser ships RMB fires the nose beam instead, so free-look there is T-only.)
 	_free_look = (Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) and not has_laser) \
 		or Input.is_physical_key_pressed(KEY_T)
@@ -451,7 +454,7 @@ func fly(delta: float) -> void:
 		_look_pitch = 0.0
 	elif _free_look:
 		_steer = Vector2.ZERO
-		_look_yaw = clampf(_look_yaw - md.x * mouse_sens, -LOOK_YAW_LIMIT, LOOK_YAW_LIMIT)
+		_look_yaw -= md.x * mouse_sens
 		_look_pitch = clampf(_look_pitch - md.y * mouse_sens, -LOOK_PITCH_LIMIT, LOOK_PITCH_LIMIT)
 	else:
 		# Normal steering: mouse aims, Q/E roll. View eases back behind the ship.
@@ -542,8 +545,17 @@ func fly(delta: float) -> void:
 	if local_accel.length_squared() > 0.0001:
 		velocity += (transform.basis * local_accel) * boost * delta
 
-	# Gravitational tug toward nearby bodies (gentle; thrust overpowers it).
-	velocity += gravity * delta
+	# Gravitational tug toward nearby bodies. It draws you in and helps you settle to land,
+	# but must NEVER trap you: as soon as you thrust AWAY from the pull, the gravity fades
+	# out (fully gone when thrusting straight out), so a star's slow-zone can't hold you in.
+	var g := gravity
+	if g.length() > 0.01 and local_accel.length_squared() > 0.0001:
+		var thrust_dir := (transform.basis * local_accel).normalized()
+		var outward := -g.normalized()
+		var align := thrust_dir.dot(outward)   # 1 = thrusting straight out, -1 = straight in
+		if align > 0.0:
+			g *= (1.0 - align)                  # fade the pull as you head outward
+	velocity += g * delta
 
 	# Damping: velocity eases toward zero when you're not thrusting. Sublight uses the
 	# light DRIFT_DAMPING so the ship glides and carries momentum through turns; as warp
@@ -837,10 +849,9 @@ func _build_ship_model(idx: int) -> void:
 	_mesh_root.add_child(model)
 	model.rotation = Vector3(deg_to_rad(float(info.pitch)), deg_to_rad(float(info.yaw)), 0.0)
 	var box := ShipMesh.fit_model(_mesh_root, model, float(info.length))
-	# Bolts now spawn right AT the nose tip (~half the hull depth ahead of center) so
-	# their trailing streak visibly emerges from the ship — even from a side view. The
-	# slim bright tracer + soft trail keep it readable without sitting on the hull.
-	muzzle = box.size.z * 0.55
+	# Bolts spawn close to the nose — just shy of the hull's front tip — so the bright tracer
+	# clearly emerges from the ship rather than floating ahead of it.
+	muzzle = box.size.z * 0.42
 	muzzle_drop = box.size.y * 0.18   # emerge a little below centre (lowered to match the
 									  # hull's new lower framing), where the guns sit
 	# Optionally lop off the model's rear (behind the ring) so the bell disc caps a

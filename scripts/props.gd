@@ -22,6 +22,12 @@ extends Node3D
 const PROBE_SCAN_RANGE := 90.0   # fly within this of a probe to read its scan (×10 spread)
 const STRUCT_SLOW_RANGE := 1600.0  # within this of any station/probe, the ship is force-slowed
 const STRUCT_MIN_SPEED := 55.0     # strict crawl right at a structure
+# Generic dockable platform for has_station systems that have no hand-placed station. ONE
+# reusable node, re-homed to the current system in set_system — so the whole 50% of platforms
+# is never rendered at once. (Placeholder mesh for now; swap when the custom art arrives.)
+const GEN_PLATFORM_GLB := "res://assets/space station.glb"
+const GEN_PLATFORM_SIZE := 60.0
+const GEN_PLATFORM_POS := Vector3(320.0, 70.0, -240.0)   # parked in view, off the arrival point
 
 const PROP_LIST := [
 	# --- Sol: the home station (dockable) + Finn, drifting nearby ---
@@ -98,6 +104,7 @@ var probe_name := ""
 # Strict speed cap from structure proximity (stations + probes), read by main each
 # frame: INF when clear, easing down to STRUCT_MIN_SPEED right at a structure.
 var struct_speed_limit := INF
+var _gen := {}   # the reusable generic platform item (re-homed per has_station system)
 
 
 func _ready() -> void:
@@ -141,6 +148,30 @@ func _ready() -> void:
 			"dock_range": float(p.get("dock_range", float(p.size) * 1.8)),
 		})
 
+	# Build the single reusable generic platform (re-homed per system in set_system).
+	var gp := load(GEN_PLATFORM_GLB) as PackedScene
+	if gp != null:
+		var gholder := Node3D.new()
+		add_child(gholder)
+		var gmodel := gp.instantiate() as Node3D
+		gholder.add_child(gmodel)
+		_fit(gholder, gmodel, GEN_PLATFORM_SIZE)
+		_self_light(gmodel, 0.0)
+		var glabel := Label3D.new()
+		glabel.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		glabel.outline_modulate = Color(0, 0, 0, 0.7)
+		glabel.outline_size = 8
+		glabel.font_size = 40
+		glabel.no_depth_test = true
+		add_child(glabel)
+		_gen = {
+			"holder": gholder, "label": glabel, "name": "", "system": "",
+			"pos": GEN_PLATFORM_POS, "up": GEN_PLATFORM_SIZE * 0.7, "spin": 0.05, "orbit": 0.0,
+			"cull": GEN_PLATFORM_SIZE * 90.0, "is_dock": true, "is_probe": false,
+			"dock_range": 90.0, "generic": true,
+		}
+		_items.append(_gen)
+
 	set_system(current_system)
 
 
@@ -148,6 +179,21 @@ func _ready() -> void:
 # by main on arrival (replaces the old Sol-only visibility toggle).
 func set_system(id: String) -> void:
 	current_system = id
+	# Decide the generic platform: shown only where this system HAS a promised platform
+	# (SystemDB.has_station) but no hand-placed station, so every promised system has one.
+	if not _gen.is_empty():
+		var hand_dock := false
+		for it in _items:
+			if it.system == id and it.is_dock and not it.get("generic", false):
+				hand_dock = true
+				break
+		if id != "" and id != SystemDB.SOL and SystemDB.has_station(id) and not hand_dock:
+			_gen.system = id
+			_gen.pos = GEN_PLATFORM_POS
+			_gen.name = "%s Platform" % SystemDB.display_name(id)
+			_gen.label.text = _gen.name
+		else:
+			_gen.system = ""
 	has_dock = false
 	dock_name = ""
 	for it in _items:

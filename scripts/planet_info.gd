@@ -38,9 +38,27 @@ func open_for_nearest() -> void:
 		open_for(planets.nearest_name)
 
 func open_for(name: String) -> void:
-	if data == null or name == "" or not data.has(name):
+	if name == "":
 		return
-	_populate(name, data.get_facts(name))
+	var facts: Dictionary
+	if data != null and data.has(name):
+		facts = data.get_facts(name)
+	else:
+		# No exoplanet-archive entry for this body — most of the 50+ nearby stars (Ross 128,
+		# Wolf 359, …) simply have no confirmed planets, so there are no planetary facts. Show
+		# the REAL stellar details we do have (spectral type + distance from the star catalog)
+		# plus the body's mission story, so G always opens with genuine info, not nothing.
+		facts = {}
+		var sys := MissionDB.system_of(name)
+		if sys != "":
+			facts["distance"] = "%.2f ly" % SystemDB.light_years(sys)
+			var sp := SystemDB.spectral(sys)
+			if sp != "":
+				facts["spectral"] = sp
+				facts["type"] = "Star" if name == SystemDB.display_name(sys) else "Body"
+		var blurb := MissionDB.story_for(name)
+		facts["blurb"] = blurb if blurb != "" else "Deep-space object — no survey data on file yet."
+	_populate(name, facts)
 	_open = true
 	_root.visible = true
 	get_tree().paused = true

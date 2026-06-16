@@ -4,8 +4,9 @@ importer="texture"
 type="CompressedTexture2D"
 uid="uid://br36dfe61lbdi"
 path.s3tc="res://.godot/imported/space station_SolarPanel03_col.jpg-1568856b48e609cc3caa539d185fd7b5.s3tc.ctex"
+path.etc2="res://.godot/imported/space station_SolarPanel03_col.jpg-1568856b48e609cc3caa539d185fd7b5.etc2.ctex"
 metadata={
-"imported_formats": ["s3tc_bptc"],
+"imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
 }
 generator_parameters={
@@ -15,7 +16,7 @@ generator_parameters={
 [deps]
 
 source_file="res://assets/space station_SolarPanel03_col.jpg"
-dest_files=["res://.godot/imported/space station_SolarPanel03_col.jpg-1568856b48e609cc3caa539d185fd7b5.s3tc.ctex"]
+dest_files=["res://.godot/imported/space station_SolarPanel03_col.jpg-1568856b48e609cc3caa539d185fd7b5.s3tc.ctex", "res://.godot/imported/space station_SolarPanel03_col.jpg-1568856b48e609cc3caa539d185fd7b5.etc2.ctex"]
 
 [params]
 

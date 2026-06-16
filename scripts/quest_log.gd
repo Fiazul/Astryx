@@ -45,6 +45,12 @@ func _input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 
 
+# A click that reaches the dim backdrop (i.e. outside the log panel) closes the log.
+func _on_backdrop_input(event: InputEvent) -> void:
+	if _open and event is InputEventMouseButton and event.pressed:
+		_close()
+
+
 func toggle() -> void:
 	if _open:
 		_close()
@@ -86,9 +92,11 @@ func _build() -> void:
 	_root.color = Color(0.01, 0.01, 0.04, 0.55)
 	_root.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_root.mouse_filter = Control.MOUSE_FILTER_STOP
+	_root.gui_input.connect(_on_backdrop_input)   # click outside the panel closes the log
 	add_child(_root)
 
 	_panel = PanelContainer.new()
+	_panel.mouse_filter = Control.MOUSE_FILTER_STOP   # panel consumes its own clicks (don't close)
 	_panel.position = PANEL_POS
 	_panel.size = PANEL
 	var frame := StyleBoxFlat.new()

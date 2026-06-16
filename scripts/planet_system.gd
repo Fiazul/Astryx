@@ -19,7 +19,9 @@ extends Node3D
 # ship within radius × zone-mult (stars get the wider zone, like a much bigger gravity
 # reach), eased down to a floor that's LOWER for more massive bodies. Zones are finite,
 # so you can always fly back out — and outside every zone you're free to warp.
-const STAR_ZONE_MULT := 90.0     # star slow-zone radius = star radius × this
+const STAR_ZONE_MULT := 120.0    # star slow-zone radius = star radius × this (wider: felt sooner)
+const STAR_EDGE_SPEED := 64.0    # speed cap at a STAR's zone edge — lower than planets, so you
+                                 # notice the drag the moment you enter a star's range
 const PLANET_ZONE_MULT := 45.0   # planet/moon slow-zone radius = radius × this
 # NOTE units: 1u = 0.01 AU, so 100 u/s = 1 AU/s. These are deliberately LOW so flight
 # near Sol/any body is a slow crawl (fractions of an AU per second), never "a few AU
@@ -37,7 +39,10 @@ const GRAV_G := 31400.0             # gravity constant for the gameplay scale
 const GRAVITY_MAX_ACCEL := 800.0    # per-body pull ceiling (units/s²)
 const GRAVITY_RANGE_MULT := 60.0    # a body's well reaches within radius × this
 # Stars are tiny on screen but carry a sun's mass — up close they pull hard enough to
-# visibly bend your hull's path and your gunfire. Felt only within STAR_GRAVITY_RANGE.
+# visibly bend your hull's path. Felt only within STAR_GRAVITY_RANGE. This is ON (the
+# ship feels star gravity) while planet gravity + BOLT gravity stay OFF (GRAVITY_ENABLED):
+# keeping gravity_at() returning zero means bullets fly dead-straight near every star.
+const STAR_GRAVITY_ENABLED := true     # stars pull the SHIP (planets don't; bullets don't)
 const STAR_GRAVITY_K := 18000000000.0  # accel = K / dist² (capped) — retuned for the ×10 spread
 const STAR_GRAVITY_RANGE := 90000.0    # the well reaches out far enough to "call" you in
 const STAR_GRAVITY_MAX := 160.0        # ceiling (units/s²); thrust (~1650) still wins
@@ -77,6 +82,46 @@ func targetables() -> Array:
 # Current render-space position of a body (relative to the ship).
 func rel_of(name: String) -> Vector3:
 	return _rel.get(name, Vector3.ZERO)
+
+
+# Rich targetable list for the aim-based Tab picker: each entry carries the body's
+# render-space offset, its kind (star/planet/moon/craft) and visual radius, so the
+# picker can apply a per-type pick range (a big star reaches out many ly, a probe
+# only a fraction of one). See main._aim_sorted_targets / _tab_pick_range.
+func target_candidates() -> Array:
+	var out := []
+	for b in _bodies:
+		var kind := "planet"
+		if b.get("star", false):
+			kind = "star"
+		elif b.get("craft", false):
+			kind = "craft"
+		elif String(b.get("parent", "")) != "":
+			kind = "moon"
+		out.append({ "name": b.name, "rel": _rel.get(b.name, Vector3.ZERO),
+			"kind": kind, "radius": float(b.radius) })
+	for st in _stars:
+		out.append({ "name": st.name, "rel": _rel.get(st.name, Vector3.ZERO),
+			"kind": "star", "radius": STAR_RADIUS })
+	return out
+
+
+# Kind of a body by name: "star" | "planet" | "moon" | "craft" | "" (unknown). Used to label
+# an undiscovered Tab target ("Unknown Star" / "Unknown Planet" …) without leaking its name.
+func kind_of(name: String) -> String:
+	for b in _bodies:
+		if b.name == name:
+			if b.get("star", false):
+				return "star"
+			elif b.get("craft", false):
+				return "craft"
+			elif String(b.get("parent", "")) != "":
+				return "moon"
+			return "planet"
+	for st in _stars:
+		if st.name == name:
+			return "star"
+	return ""
 
 
 func _ready() -> void:
@@ -321,7 +366,8 @@ func refresh(ship_pos: Vector3, delta: float) -> void:
 		var zone: float = rad * (STAR_ZONE_MULT if b.star else PLANET_ZONE_MULT)
 		if dist < zone:
 			var zt := dist / zone
-			speed_limit = minf(speed_limit, lerpf(_slow_min(float(b.mass)), ZONE_EDGE_SPEED, zt))
+			var edge: float = STAR_EDGE_SPEED if b.star else ZONE_EDGE_SPEED
+			speed_limit = minf(speed_limit, lerpf(_slow_min(float(b.mass)), edge, zt))
 
 		b.dot.position = rel
 		b.label.position = rel + Vector3(0.0, rad * 1.5 + 0.5, 0.0)
@@ -388,7 +434,7 @@ func refresh(ship_pos: Vector3, delta: float) -> void:
 		var sdist := srel.length()
 		_rel[st.name] = srel
 		# A star's gravity well — strong up close, so a near pass bends your trajectory.
-		if GRAVITY_ENABLED and sdist > 0.001 and sdist < STAR_GRAVITY_RANGE:
+		if STAR_GRAVITY_ENABLED and sdist > 0.001 and sdist < STAR_GRAVITY_RANGE:
 			var sa := minf(STAR_GRAVITY_K / (sdist * sdist), STAR_GRAVITY_MAX)
 			gravity += (srel / sdist) * sa
 		if sdist < nearest_dist:
@@ -399,7 +445,7 @@ func refresh(ship_pos: Vector3, delta: float) -> void:
 		# of warp as you arrive, scaled by the star's mass.
 		var szone := STAR_RADIUS * STAR_ZONE_MULT
 		if sdist < szone:
-			speed_limit = minf(speed_limit, lerpf(_slow_min(float(st.mass)), ZONE_EDGE_SPEED, sdist / szone))
+			speed_limit = minf(speed_limit, lerpf(_slow_min(float(st.mass)), STAR_EDGE_SPEED, sdist / szone))
 		var sdir: Vector3 = srel.normalized()
 		if sdist < STAR_NEAR:
 			st.sphere.visible = true

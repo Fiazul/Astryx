@@ -22,13 +22,26 @@ var combat: Combat
 var audio: GameAudio
 var settings: SettingsMenu
 var map: StarMap
+var platform_tp: PlatformTeleport   # isolated platform fast-travel console (not the star map)
+var tutor: Tutor                    # new-game onboarding tip notifications
+var reward_card: RewardCard         # capture celebration card (auto-reward + fade-out)
+var _fresh_game := false            # true when there was no save → start the tutorial
 var quest_log: QuestLog
 var planet_data: PlanetData
 var planet_info: PlanetInfo
 var navigator: Navigator
 var minimap: MiniMap
 var codex: Codex
-var _nav_target := ""         # Tab aim-help target (basic guidance; lowest priority)
+var _nav_target := ""         # Tab target: the object the aim ray passes nearest to
+var _tab_index := -1          # which of the 4 ray-closest targets is selected (Tab cycles)
+var _tab_aim := Vector3.ZERO  # nose dir at the last Tab — moving the cursor restarts the cycle
+var _nav_wormhole := ""       # when the Tab target is a wormhole, which portal (dest id) it is
+var _locked_wh := ""          # which portal a LOCKED wormhole points to (snapshot at lock time)
+var _aim_wh_dest := ""        # dest of the portal the ray is nearest to (set in _aim_ranked)
+var _x_hold := 0.0            # seconds X has been held — ≥1s LOCKS the Tab target (orange)
+var _x_fired := false
+var _rmb_hold := 0.0          # seconds right-click held — ≥1s swaps Raptor's Combat/Warp form
+var _rmb_fired := false
 var _nav_locked := ""         # LOCKED map waypoint (orange) — persists until cancelled
 var coins := 0                # player currency; persisted to the profile
 var _claimed := {}            # body name -> true once its capture reward is claimed
@@ -95,16 +108,20 @@ var current_system := SystemDB.SOL
 # Travel between stars is always flown through wormholes; teleport is the rare, theatrical
 # exception: ship held still, camera eases back, a hue-cycling RGB ring circles you, then
 # you arrive. ~TELEPORT_TIME seconds. (Wormholes are NOT teleport.)
-const TELEPORT_TIME := 12.0
-const TELEPORT_PLATFORM_TIME := 7.0   # platform-network jump: snappier (user wants 5–8s)
-const TELEPORT_ZOOM := 2.2     # camera pull-back during the ritual
+const TELEPORT_TIME := 8.0            # long, dramatic ritual: whoosh fades in, holds, fades out
+const TELEPORT_PLATFORM_TIME := 8.0   # platform-network jump
+const TELEPORT_SFX_DB := -5.0   # peak volume of the whoosh at the middle of its fade bell
+const TELEPORT_ZOOM := 3.0      # pull the camera BACK so it views the light-ball from OUTSIDE
+const TP_ORB_BASE := 1.6        # base radius of the light-ball wrapping the ship (must stay
+                                # well under the camera distance ≈ 1.05 × TELEPORT_ZOOM, or the
+                                # camera ends up inside the additive shell and the screen goes white)
 var _tp_active := false
 var _tp_t := 0.0
 var _tp_dur := TELEPORT_TIME
 var _tp_dest := ""
 var _tp_label := ""
-var _tp_ring: MeshInstance3D          # RGB containment cylinder around the ship
-var _tp_ring_mat: StandardMaterial3D  # scrolling striped material → "pulling" motion
+var _tp_ring: MeshInstance3D          # shiny light-ball that wraps the ship
+var _tp_ring_mat: StandardMaterial3D  # additive glowing-orb material (pulses in a light wave)
 var _music: AudioStreamPlayer
 var _music_default: AudioStream   # the shared bgm every hull flies to
 var _music_hani: AudioStream      # HaniNebula's dedicated theme (null if missing)
@@ -242,6 +259,7 @@ func _ready() -> void:
 	settings.ship = ship
 	settings.env = _env
 	settings.hud = hud           # for the "Edit HUD Layout" button
+	settings.main = self         # for the "Reset Progress" button
 	add_child(settings)
 
 	# Waypoint navigator (Tab) + corner radar.
@@ -258,6 +276,15 @@ func _ready() -> void:
 	map = StarMap.new()
 	map.main = self
 	add_child(map)
+	platform_tp = PlatformTeleport.new()
+	platform_tp.main = self
+	add_child(platform_tp)
+	tutor = Tutor.new()
+	tutor.audio = audio
+	tutor.main = self
+	add_child(tutor)
+	reward_card = RewardCard.new()
+	add_child(reward_card)
 	hud.map_button.pressed.connect(map.toggle)
 
 	# Mission log (J): every body is a mission — browse the story + navigate to it.
@@ -297,6 +324,9 @@ func _ready() -> void:
 
 	_restore_location()   # resume where you left off (system + position + hull)
 
+	if _fresh_game and tutor != null:
+		tutor.start()     # brand-new game → drip-feed the onboarding tips
+
 
 # Resume the last session's location: rebuild the saved system if it isn't the Sol start,
 # then drop the ship at the exact saved position with the saved hull, at FULL HP (resuming
@@ -324,6 +354,7 @@ func _notification(what: int) -> void:
 
 
 func _process(delta: float) -> void:
+	_update_holds(delta)
 	ship.fly(delta)
 	planets.refresh(ship.true_pos, delta)
 	ship.speed_limit = planets.speed_limit   # eases the ship down near a body
@@ -519,10 +550,12 @@ func _update_scan(delta: float) -> void:
 		_scan = minf(_scan + delta / SCAN_SECONDS, 1.0)
 		if _scan >= 1.0:
 			if codex.discover(name):
-				# Mission complete: this body's per-mission bounty (see MissionDB), claimed via G.
-				hud.toast = "✦  MISSION — %s surveyed   ·   press G to claim %d coins" \
-					% [name, MissionDB.reward(name)]
-				hud.toast_t = 4.0
+				# Capture complete: AUTO-grant the bounty and pop the celebration card.
+				var bounty := claim_reward(name)
+				if reward_card != null:
+					reward_card.celebrate(name, MissionDB.title_for(name), bounty)
+				if audio != null:
+					audio.play_reward()
 				if name == _active_quest:
 					_advance_quest()    # tracked quest done → guide the next unsurveyed body here
 				if combat.guard_body == name:
@@ -601,6 +634,18 @@ func buy_navigator() -> bool:
 	return true
 
 
+# Wipe ALL saved progress — visited systems, codex captures, coins, ship customization, and
+# HUD layout — then restart fresh from Earth. Called by the Settings "Reset Progress" button.
+func reset_progress() -> void:
+	var d := DirAccess.open("user://")
+	if d != null:
+		for f in ["profile.cfg", "codex.json", "hud_layout.cfg"]:
+			if d.file_exists(f):
+				d.remove(f)
+	get_tree().paused = false
+	get_tree().reload_current_scene()   # re-runs _ready with no save → clean slate at Earth
+
+
 # --- Player profile (persisted to disk; will hold more than coins later) ---
 func _load_profile() -> void:
 	var cfg := ConfigFile.new()
@@ -630,6 +675,8 @@ func _load_profile() -> void:
 		_has_saved_pos = cfg.has_section_key("player", "pos")
 		_saved_pos = cfg.get_value("player", "pos", Vector3.ZERO)
 		_saved_ship_index = int(cfg.get_value("player", "ship_index", -1))
+	else:
+		_fresh_game = true   # no save on disk → a brand-new game (drives the tutorial)
 	# Home (Sol) is always known — you start there, so it's instant-travel from frame one.
 	_visited[SystemDB.SOL] = true
 
@@ -779,41 +826,77 @@ func _rank_title() -> String:
 	return "Cadet"
 
 
-# --- Navigation waypoint (Tab cycles: off -> each body -> wormhole -> off) ---
-# Tab targeting, prioritised by AIM: the first press locks onto whatever you're
-# pointing at (the targetable most aligned with your view); each further press steps
-# to the next-most-aligned; past the last returns to the auto Survey guide.
+# --- Navigation waypoint (Tab) ---
+# Tab steps through the up-to-4 objects the aim ray passes nearest to (1st = absolute closest
+# to the line, then 2nd, 3rd, 4th, then loops). It is ALWAYS the ray's targets — never the
+# ship's nearest body. Move the cursor and the ranking changes; Tab restarts from the closest.
 func _cycle_nav_target() -> void:
-	var cands := _aim_sorted_targets()
-	if cands.is_empty():
+	var ranked := _aim_ranked()
+	if ranked.is_empty():
 		_nav_target = ""
+		_tab_index = -1
 		return
-	var idx: int = cands.find(_nav_target)
-	if idx < 0:
-		_nav_target = cands[0]                 # → what you're aiming at
-	elif idx + 1 < cands.size():
-		_nav_target = cands[idx + 1]           # → next-most-aligned
+	var aim: Vector3 = (-ship.transform.basis.z).normalized()
+	# Moved the aim noticeably (or starting fresh)? Restart at the closest-to-the-line target.
+	if _tab_index < 0 or _tab_aim.dot(aim) < 0.997:   # ~4.4° of cursor movement restarts
+		_tab_index = 0
 	else:
-		_nav_target = ""                       # cycled through all → back to auto guide
+		_tab_index = (_tab_index + 1) % ranked.size()
+	_tab_aim = aim
+	_nav_target = ranked[_tab_index]
+	if _nav_target == "Wormhole":
+		_nav_wormhole = _aim_wh_dest   # remember WHICH portal the ray picked
 
-# Targetable names sorted by how closely they sit to the centre of your view.
-func _aim_sorted_targets() -> Array:
-	var fwd: Vector3 = -ship.camera.global_transform.basis.z
-	var list := []
-	for bname in planets.targetables():
-		var rel: Vector3 = planets.rel_of(bname)
-		if rel.length() > 0.001:
-			list.append({ "name": bname, "align": fwd.dot(rel.normalized()) })
-	list.sort_custom(func(a, b): return a.align > b.align)
-	var names := []
-	for it in list:
-		names.append(it.name)
-	# Wormholes are the priority Tab target: if this system has a known link, it's the FIRST
-	# pick (the first Tab press locks the way out), ahead of any body.
-	var wrel: Vector3 = wormhole.portal_rel(ship.true_pos)
-	if wrel.length() > 0.001:
-		names.push_front("Wormhole")
-	return names
+# Up to the 4 targets the AIM RAY passes nearest to, closest-to-the-line FIRST. The ray is a
+# narrow, long beam out of the nose (through the crosshair): an object qualifies only if it's
+# IN FRONT, within reach, and within TAB_MAX_ANGLE of the line — so a near planet sitting off
+# to the side is NOT picked. Sorted by angular offset; Tab cycles through these (see below).
+const TAB_MAX_ANGLE := deg_to_rad(7.0)    # NARROW beam for bodies — must hug the line
+const TAB_WH_ANGLE := deg_to_rad(28.0)    # WIDER for wormholes — key nav targets, easy to grab
+func _aim_ranked() -> Array:
+	var aim: Vector3 = (-ship.transform.basis.z).normalized()   # nose / crosshair direction
+	var hits := []
+	for c in planets.target_candidates():
+		var rel: Vector3 = c.rel
+		var t: float = rel.dot(aim)                 # distance ALONG the ray (>0 = in front)
+		if t <= 0.0:
+			continue
+		if t > _tab_pick_range(String(c.kind), float(c.radius)):
+			continue                                # beyond this object's reach
+		var ang: float = atan2((rel - aim * t).length(), t)   # angular offset from the ray line
+		if ang <= TAB_MAX_ANGLE:
+			hits.append({ "name": c.name, "ang": ang })
+	# Wormholes compete on the same footing — check EVERY active portal (not just the nearest)
+	# so you can target whichever one the ray points at. The closest-to-line portal is the pick.
+	_aim_wh_dest = ""
+	var wh_ang := TAB_WH_ANGLE
+	for p in wormhole.portals_rel(ship.true_pos):
+		var wrel: Vector3 = p.rel
+		var t2: float = wrel.dot(aim)
+		if t2 <= 0.0:
+			continue
+		var a2: float = atan2((wrel - aim * t2).length(), t2)
+		if a2 < wh_ang:
+			wh_ang = a2
+			_aim_wh_dest = String(p.dest)
+	if _aim_wh_dest != "":
+		hits.append({ "name": "Wormhole", "ang": wh_ang })   # ranked by its real angle off the ray
+	hits.sort_custom(func(a, b): return a.ang < b.ang)   # closest to the line first
+	var out := []
+	for i in mini(4, hits.size()):                       # only the 4 closest are cyclable
+		out.append(hits[i].name)
+	return out
+
+# How far the (long) ray reaches to pick a given object, by kind/size (in scene units).
+func _tab_pick_range(kind: String, radius: float) -> float:
+	var ly := 1.0
+	match kind:
+		"star":   ly = 30.0                                       # large, bright — long reach
+		"planet": ly = clampf(lerpf(0.3, 2.0, radius / 18.0), 0.3, 2.0)  # by size
+		"moon":   ly = 0.6
+		"craft":  ly = 0.3                                        # probes — closer
+		_:        ly = 1.0
+	return ly * Ephemeris.UNITS_PER_LY
 
 # NAV button: stop / resume the Survey guide and waypoint marker (the orientation
 # gizmo always stays). Also clears any manual Tab target when stopping.
@@ -828,6 +911,65 @@ func toggle_nav() -> void:
 
 
 # Cancel a locked (paid) map waypoint + any autopilot + a tracked quest (the Cancel Nav button).
+# True once every body in the home (Sol) system has been scanned/discovered. While false, the
+# player is still a beginner, so the tutorial helper pops tips more often (see tutor.gd).
+func _sol_fully_unlocked() -> bool:
+	if codex == null:
+		return true
+	for b in MissionDB.bodies_in(SystemDB.SOL):
+		if not codex.is_discovered(b):
+			return false
+	return true
+
+
+# Hold-to-act inputs (checked each frame): HOLD X ≥1s locks the current Tab target as an
+# orange waypoint; HOLD right-click ≥1s swaps Raptor's Combat/Warp form (moved off the X tap).
+func _update_holds(delta: float) -> void:
+	if ship.frozen or ship.transiting:
+		_x_hold = 0.0; _x_fired = false
+		_rmb_hold = 0.0; _rmb_fired = false
+		return
+	if Input.is_physical_key_pressed(KEY_X):
+		_x_hold += delta
+		if _x_hold >= 1.0 and not _x_fired:
+			_x_fired = true
+			lock_nav_target()
+	else:
+		_x_hold = 0.0; _x_fired = false
+	# Feed the crosshair lock ring — only fills when there's actually a Tab target to lock.
+	if hud != null:
+		hud.set_lock_progress(clampf(_x_hold, 0.0, 1.0) if _nav_target != "" else 0.0)
+	if Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT):
+		_rmb_hold += delta
+		if _rmb_hold >= 1.0 and not _rmb_fired:
+			_rmb_fired = true
+			var mode := ship.toggle_warp_mode()   # only Raptor responds; "" otherwise
+			if mode != "":
+				hud.toast = "RAPTOR  ·  %s MODE" % mode
+				hud.toast_t = 2.5
+	else:
+		_rmb_hold = 0.0; _rmb_fired = false
+
+
+# Promote the current Tab target to a LOCKED orange waypoint (free). Persists through aim
+# changes and Tab presses — only the ✖ CANCEL NAV button clears it (cancel_locked_nav).
+func lock_nav_target() -> void:
+	if _nav_target == "":
+		hud.toast = "Aim at something and press Tab first, then hold X to lock it."
+		hud.toast_t = 2.0
+		return
+	_active_quest = ""
+	_nav_goal = ""
+	_nav_off = false
+	_nav_locked = _nav_target
+	_locked_wh = _nav_wormhole   # snapshot which portal, so later Tabs don't move the lock
+	if hud != null:
+		hud.set_nav_stopped(false)
+		hud.toast = "◆  NAV LOCKED  ·  %s" % _tab_display_name(_nav_locked)
+		hud.toast_t = 2.2
+	_update_navigator()
+
+
 func cancel_locked_nav() -> void:
 	_nav_locked = ""
 	_nav_goal = ""            # also clear a map "Navigate" guide
@@ -884,6 +1026,20 @@ func _route_to(sys: String) -> Dictionary:
 	return { "ok": true, "hop": hop, "rel": wormhole.portal_rel_for(hop, ship.true_pos) }
 
 
+# Label for a Tab target — its real name once scanned, else "Unknown <kind>" so the player
+# has to fly over and scan (V) to reveal what it is.
+func _tab_display_name(name: String) -> String:
+	if name == "" or name == "Wormhole":
+		return name
+	if codex != null and codex.is_discovered(name):
+		return name
+	match planets.kind_of(name):
+		"star":  return "Unknown Star"
+		"moon":  return "Unknown Moon"
+		"craft": return "Unknown Craft"
+		_:       return "Unknown Planet"
+
+
 func _update_navigator() -> void:
 	if navigator == null:
 		return
@@ -938,10 +1094,13 @@ func _update_navigator() -> void:
 		hud.set_objective("◆  NAVIGATE  %s%s   %s" % [gname, via, gd])
 		return
 	elif _nav_locked != "":
-		# LOCKED (paid) map waypoint — orange, top priority, ignores the N toggle,
-		# stays until the Cancel Nav button is clicked.
-		tname = _nav_locked
-		rel = wormhole.portal_rel(ship.true_pos) if tname == "Wormhole" else planets.rel_of(tname)
+		# LOCKED waypoint — orange, top priority, ignores the N toggle and aim/Tab changes,
+		# stays until the ✖ CANCEL NAV button is clicked. Name hidden until scanned.
+		if _nav_locked == "Wormhole":
+			rel = wormhole.portal_rel_for(_locked_wh, ship.true_pos) if _locked_wh != "" else wormhole.portal_rel(ship.true_pos)
+		else:
+			rel = planets.rel_of(_nav_locked)
+		tname = _tab_display_name(_nav_locked)
 		var ld := _fmt_nav_dist(rel.length())
 		navigator.update_nav(ship.camera, true, rel, tname, ld, true)
 		hud.set_objective("◆  LOCKED  %s   %s" % [tname, ld])
@@ -951,9 +1110,13 @@ func _update_navigator() -> void:
 		hud.set_objective("")
 		return
 	elif _nav_target != "":
-		# Tab aim-help target (basic guidance), picked by aim.
-		tname = _nav_target
-		rel = wormhole.portal_rel(ship.true_pos) if tname == "Wormhole" else planets.rel_of(tname)
+		# Tab target (picked by the aim ray). Its real name is hidden until SCANNED — an
+		# undiscovered body reads as "Unknown Planet"/"Unknown Star" so you scan to learn it.
+		if _nav_target == "Wormhole":
+			rel = wormhole.portal_rel_for(_nav_wormhole, ship.true_pos) if _nav_wormhole != "" else wormhole.portal_rel(ship.true_pos)
+		else:
+			rel = planets.rel_of(_nav_target)
+		tname = _tab_display_name(_nav_target)
 	else:
 		# Default: the Survey guide always points at the nearest unclaimed star, so
 		# the player is never lost. Tab overrides it; cycling past the end returns here.
@@ -1115,16 +1278,13 @@ func is_teleport_unlocked(id: String) -> bool:
 		and SystemDB.has_station(id) and _visited.has(id)
 
 
-# Dock → "TELEPORT NETWORK" button: open the star map in teleport mode (only unlocked
-# platforms are jump targets). The map's confirm button calls teleport_to_platform().
+# Dock → "TELEPORT NETWORK" button: open the ISOLATED platform console (its own screen, not
+# the star map). Bright tiles = reached platforms you can jump to; pick one, confirm, and the
+# teleport ritual carries you there. Always opens (so you can see locked platforms too).
 func _on_open_teleport_map() -> void:
 	if _tp_active or ship.transiting:
 		return
-	if _unlocked_platforms().is_empty():
-		hud.toast = "No platforms unlocked yet — visit a station to add it to the network."
-		hud.toast_t = 3.0
-		return
-	map.open_teleport()
+	platform_tp.open()
 
 
 # Dock → pick a platform from the teleport map: undock, then run the (shorter) teleport
@@ -1157,6 +1317,8 @@ func start_teleport(dest: String, label: String, dur := TELEPORT_TIME) -> void:
 	hud.tp_cancel_button.visible = true   # let the player abort the ritual
 	if audio != null:
 		audio.play_click()
+		audio.play_teleport()          # whoosh runs the whole ritual; its volume bells in/out
+		audio.set_teleport_db(-60.0)   # start silent — _update_teleport fades it in
 
 
 # Abort an in-progress teleport: stop the countdown, drop the cylinder, hand control back.
@@ -1175,6 +1337,7 @@ func cancel_teleport() -> void:
 	hud.toast = "Teleport cancelled."
 	hud.toast_t = 2.0
 	if audio != null:
+		audio.stop_teleport()
 		audio.play_click()
 
 
@@ -1182,18 +1345,31 @@ func _update_teleport(delta: float) -> void:
 	if not _tp_active:
 		return
 	_tp_t += delta
-	# Hue-cycling RGB cylinder enclosing the ship; bright bands stream UP the tube and
-	# accelerate → the ship reads as being "pulled" up the beam.
-	var hue: float = fmod(_tp_t * 0.4, 1.0)
-	var col := Color.from_hsv(hue, 0.8, 1.0)
+	# A shiny ball of light wraps the ship, then SHRINKS down to a point over the ritual —
+	# the ship is squeezed into a bead of light and, when the bubble hits 0, it jumps. A slight
+	# light-wave shimmer + faster spin as it tightens; the glow concentrates as it collapses.
+	var prog: float = clampf(_tp_t / _tp_dur, 0.0, 1.0)
+	var shimmer: float = 1.0 + 0.06 * sin(_tp_t * 7.0)        # subtle wobble on the shell
+	var shrink: float = 1.0 - prog                            # 1 -> 0 across the ritual
+	_tp_ring.scale = Vector3.ONE * maxf(TP_ORB_BASE * shrink * shimmer, 0.02)
+	_tp_ring.rotate_y((0.6 + 2.4 * prog) * delta)             # spins faster as it tightens
+	# Cool energy colour that whitens as it collapses to a bead of light.
+	var col: Color = Color(0.45, 0.82, 1.0).lerp(Color(1.0, 1.0, 1.0), prog)
 	_tp_ring_mat.emission = col
-	_tp_ring_mat.albedo_color = col
-	var pull: float = 1.2 + _tp_t * 0.7                       # bands speed up over time
-	_tp_ring_mat.uv1_offset = Vector3(0.0, -_tp_t * pull, 0.0)
-	_tp_ring_mat.emission_energy_multiplier = 2.6 + 1.4 * absf(sin(_tp_t * 6.0))
-	_tp_ring.rotate_y(0.9 * delta)
-	var s: float = 1.0 + 0.05 * sin(_tp_t * 5.0)
-	_tp_ring.scale = Vector3(s, 1.0, s)
+	_tp_ring_mat.albedo_color = Color(col.r, col.g, col.b, 0.18 + 0.45 * prog)
+	# Glow concentrates as the shell shrinks — a tight bright bead by the time it hits 0.
+	_tp_ring_mat.emission_energy_multiplier = 0.9 + prog * 2.6
+	# Whoosh volume envelope across the whole teleport: a long fade IN, then HOLD stable at
+	# full, then fade OUT — a trapezoid (not a quick peak), so it swells, sustains, settles.
+	if audio != null:
+		var amp: float
+		if prog < 0.4:
+			amp = smoothstep(0.0, 0.4, prog)            # long fade in (first 40%)
+		elif prog > 0.7:
+			amp = 1.0 - smoothstep(0.7, 1.0, prog)      # fade out (last 30%)
+		else:
+			amp = 1.0                                    # stable hold (middle 30%)
+		audio.set_teleport_db(TELEPORT_SFX_DB + linear_to_db(clampf(amp, 0.001, 1.0)))
 	# Countdown overlay (reuses the centered menu label).
 	var rem: int = int(ceil(maxf(_tp_dur - _tp_t, 0.0)))
 	hud.set_menu("◇  TELEPORT  ◇\n\n%s\n\nLocking coordinates…\n\nArriving in  %d" % [_tp_label, rem])
@@ -1204,56 +1380,36 @@ func _update_teleport(delta: float) -> void:
 		hud.set_menu("")
 		ship.set_frozen(false)
 		ship._cam_zoom = 1.0
+		if audio != null:
+			audio.stop_teleport()
 		_arrive(_tp_dest)
 		ship._set_capture(true)
 
 
-# An RGB "containment cylinder" that encloses the ship during a teleport. The side is a
-# tiled stripe texture; scrolling its UV upward (in _update_teleport) makes glowing bands
-# stream up the tube → the ship looks like it's being pulled up a transporter beam.
+# A small shiny ball of light that wraps the ship during a teleport. A translucent
+# additive sphere (visible from inside, so the ship shows through) that pulses in a gentle
+# light-wave and flares as the jump completes — driven by _update_teleport.
 func _build_teleport_vfx() -> void:
-	var cyl := CylinderMesh.new()
-	cyl.top_radius = 2.1
-	cyl.bottom_radius = 2.1
-	cyl.height = 13.0
-	cyl.radial_segments = 48
-	cyl.rings = 1
-	cyl.cap_top = false
-	cyl.cap_bottom = false
+	var sph := SphereMesh.new()
+	sph.radius = 1.0
+	sph.height = 2.0
+	sph.radial_segments = 32
+	sph.rings = 16
 	_tp_ring = MeshInstance3D.new()
-	_tp_ring.mesh = cyl
+	_tp_ring.mesh = sph
 	_tp_ring_mat = StandardMaterial3D.new()
 	_tp_ring_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_tp_ring_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	_tp_ring_mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
-	_tp_ring_mat.cull_mode = BaseMaterial3D.CULL_DISABLED       # visible from inside the tube too
+	_tp_ring_mat.cull_mode = BaseMaterial3D.CULL_DISABLED       # glow shell visible from inside too
 	_tp_ring_mat.emission_enabled = true
-	_tp_ring_mat.emission = Color(1, 0, 0)
-	_tp_ring_mat.albedo_color = Color(1, 0, 0)
-	_tp_ring_mat.emission_energy_multiplier = 2.8
-	var stripes := _tp_stripe_texture()
-	_tp_ring_mat.albedo_texture = stripes
-	_tp_ring_mat.emission_texture = stripes
-	_tp_ring_mat.uv1_scale = Vector3(6.0, 10.0, 1.0)           # bands around + many up the tube
+	_tp_ring_mat.emission = Color(0.45, 0.82, 1.0)             # cool energy glow
+	_tp_ring_mat.albedo_color = Color(0.45, 0.82, 1.0, 0.18)
+	_tp_ring_mat.emission_energy_multiplier = 0.9
 	_tp_ring.material_override = _tp_ring_mat
+	_tp_ring.scale = Vector3.ONE * TP_ORB_BASE
 	_tp_ring.visible = false
 	ship.add_child(_tp_ring)
-
-
-# Soft horizontal band that tiles seamlessly up the cylinder (transparent → bright → transparent).
-func _tp_stripe_texture() -> GradientTexture2D:
-	var g := Gradient.new()
-	g.set_color(0, Color(1, 1, 1, 0.0))
-	g.add_point(0.5, Color(1, 1, 1, 1.0))
-	g.set_color(1, Color(1, 1, 1, 0.0))
-	var t := GradientTexture2D.new()
-	t.gradient = g
-	t.fill = GradientTexture2D.FILL_LINEAR
-	t.fill_from = Vector2(0, 0)
-	t.fill_to = Vector2(0, 1)
-	t.width = 4
-	t.height = 64
-	return t
 
 
 # Emerge from a wormhole in a new system: swap bodies, hard-reset the ship to a
@@ -1330,12 +1486,6 @@ func _input(event: InputEvent) -> void:
 		hud.toast_t = 2.0
 	elif key == KEY_N:
 		toggle_nav()          # keyboard shortcut for the ⊘ NAV stop/resume button
-	elif key == KEY_X:
-		# Raptor only: toggle Combat <-> Warp mode.
-		var mode := ship.toggle_warp_mode()
-		if mode != "":
-			hud.toast = "RAPTOR  ·  %s MODE" % mode
-			hud.toast_t = 2.5
 	elif key == KEY_ESCAPE and not ship.transiting and not ship.frozen:
 		# Esc = release the mouse; press again to re-capture (back to flight).
 		ship._set_capture(Input.get_mouse_mode() != Input.MOUSE_MODE_CAPTURED)

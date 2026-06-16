@@ -1,6 +1,92 @@
+# Astryx — Session Handoff (v0.11.0)
+
+> Pick-up doc for the next session. Project: `/home/zed/Desktop/Astryx`
+> Godot 4.6.2 / GDScript · repo `https://github.com/Iriajul/Astryx.git` (main).
+> The game is **all code-spawned** — `Main.tscn` is a one-node stub; `main.gd` builds the
+> world, ship, camera, lights, and UI at runtime.
+> ⚠️ **NOT yet committed/pushed** as of this handoff — the v0.11.0 changes below are in the
+> working tree only (user paused the push). Everything in v0.10.0 and earlier is committed.
+
+## What changed in v0.11.0 (this session)
+
+### Camera / controls
+- **Free-look is HOLD again** (`ship.gd`): hold **T** (or RMB) to orbit the camera; full **360°**
+  (yaw clamp removed); wider zoom (`ZOOM_MIN 0.2 … ZOOM_MAX 6.0`).
+- **Crosshair pinned to the nose** (`hud.gd _draw`/`set_lock_progress`): the reticle is projected
+  from the ship's forward ray each frame, so it sits exactly on the shot line through camera sway.
+- **Muzzle moved to the nose tip** (`ship.gd muzzle = box.size.z * 0.42`).
+
+### Weapons → hitscan "ray bullets"
+- Player fire is now an **instant hitscan ray** (`combat.gd _fire_ray` / `_show_shot_beam`), not a
+  projectile: no float-precision blob, no drift, no bloom-bar. A bright tracer **pulse** flashes per
+  shot (`SHOT_*` consts). Aliens still fire dodgeable projectiles.
+- New laser-zap **fire SFX** (`tools/gen_fire_audio.py` → `sfx_fire.wav`); bolt bloom tamed
+  (`_bolt_material` emission 20→4, HaniStar 36→8). The `Smg Bullet.glb` projectile path is retired.
+
+### Tab targeting — ray raycast (see `TAB_TARGETING.md` / `.png`)
+- `main._aim_ranked()` returns the **up-to-4 objects the aim ray passes nearest to** (smallest
+  ANGLE off the line); `_cycle_nav_target()` steps 1st→2nd→3rd→4th→loop; moving the cursor
+  re-ranks. **Narrow ~7° beam** for bodies, **wide 28° for wormholes** (key nav targets); per-kind
+  long reach (`_tab_pick_range`: star 30 ly, planet 0.3–2, moon 0.6, probe 0.3). NOT nearest-to-ship.
+- Wormholes check **every** active portal (`portals_rel`), track which (`_nav_wormhole` / `_locked_wh`).
+- **Undiscovered targets read "Unknown Planet/Star/…"** until scanned (`_tab_display_name`).
+- **Hold X ≥1s** → locks the Tab target as an **orange** waypoint (`lock_nav_target`); a radial
+  **lock ring** fills around the crosshair (`hud._draw_lock_ring`). Orange persists through aim/Tab
+  changes — only the **✖ CANCEL NAV** button clears it. **Raptor form swap moved off X → hold RMB ≥1s**
+  (`main._update_holds`).
+
+### Gravity & slow-zones (`planet_system.gd`)
+- **Star gravity ON** (`STAR_GRAVITY_ENABLED`) — stars pull the ship (planets/bolts stay off). It
+  **fades as you thrust away** so it never traps you (`ship.gd` gravity block). Sol unaffected.
+- **Stars slow you slightly more on entry**: `STAR_ZONE_MULT 90→120`, new `STAR_EDGE_SPEED 64`.
+
+### Teleport (`main.gd`) + audio
+- Teleport is a **small light-ball that shrinks to 0 → you jump** (`TELEPORT_TIME 8s`, `TP_ORB_BASE`);
+  camera pulled back so it frames from outside. The **"voooouuu" whoosh fades in → holds → fades out**
+  across the ritual (`tools/gen_teleport_audio.py` → 11s `teleport.wav`, volume bell in `_update_teleport`).
+- Crisp **click** SFX (`gen_ui_click.py`). ⚠️ audio assets must be re-imported into the real tree
+  (`godot --headless --import`) — running the game does NOT re-import changed WAVs.
+
+### Wormhole network (multi-hub) — see `WORMHOLE_NETWORK.md` / `.png`
+- `SystemDB._ensure_graph()` rebuilt: **5 spread hubs**, each linked to Earth + to each other; every
+  other system spokes off its nearest hub (capped/balanced). **Earth→anywhere ≤2 hops, any→any ≤3.**
+  Verified by `tools/test_wh_network.gd`. Diagram via `export_wh_graph.gd` + `draw_wh_network.py`.
+
+### Platforms, teleport console, UI
+- **Platforms everywhere promised**: `props.gd` spawns a single reusable **generic dockable platform**
+  in every `has_station` system without a hand-placed station (fixes "teleported, no station"). Lazy
+  (one node, re-homed per system).
+- **Isolated platform-teleport console** (`platform_teleport.gd`): own screen (NOT the star map);
+  unlocked platforms bright, locked dark grey; click → confirm → teleport ritual.
+- **Quest log (J)** closes on outside-click.
+- **New-game tutorial notifications** (`tutor.gd`): small left-of-middle tip boxes, ting-tong chime
+  (`gen_notify_audio.py` → `notify.wav`), click-for-detail, drag-off to dismiss; **pops faster while
+  Sol isn't fully scanned** (`main._sol_fully_unlocked`).
+- **Capture celebration** (`reward_card.gd`): semi-transparent top-centre card, **auto-grants** the
+  reward (no more "press G"), happy fanfare (`gen_reward_audio.py` → `reward.wav`), fades out in ~5s.
+- **Reset Progress** button in Settings (two-tap confirm) → `main.reset_progress()` wipes the save +
+  reloads. (Save lives in `user://`, not the repo.)
+
+## ⭐ NEXT PLAN (carried into next session)
+1. **Rudder finder** (the user's term — a heading/rudder indicator/finder; clarify exact intent).
+2. **"New item found" → notification** — surfacing discoveries as notifications.
+3. **A Notification TAB** — a panel/log collecting notifications (tie into `tutor.gd`'s box system).
+4. **Wormhole STYLE** — redo the wormhole *transit visual* (task #3): ship holds stable facing the
+   portal, slight shake, dark + dramatic. (Style, NOT the network — that's done.) See `ship.gd fly()`
+   `transiting` branch + `wormhole.gd` tunnel + `ship._update_camera` transit shake.
+
+## Tooling notes (this session)
+- All SFX are **pure-Python `wave` generators** in `tools/gen_*.py` (no deps). Regenerate then
+  **re-import the real tree** so the running game picks them up.
+- Parse-check on a COPY: `cp -r . /tmp/c && rm -rf /tmp/c/.godot && godot --headless --path /tmp/c --import`.
+- Run: `DISPLAY=:1 <godot-bin> --path /home/zed/Desktop/Astryx`. Godot binary lives at
+  `/home/zed/Desktop/Godot_v4.6.2-stable_linux.x86_64`.
+
+---
+
 # Astryx — Session Handoff (v0.10.0)
 
-> Pick-up doc for the next session. Project: `/home/fiazul/Desktop/Astryx`
+> Project: `/home/fiazul/Desktop/Astryx`
 > Godot 4.6.2 / GDScript · repo `git@github.com:Fiazul/Astryx.git` (main). Everything
 > below is committed + pushed. The game is **all code-spawned** — `Main.tscn` is a
 > one-node stub; `main.gd` builds the world, ship, camera, lights, and UI at runtime.

@@ -4,8 +4,9 @@ importer="texture"
 type="CompressedTexture2D"
 uid="uid://b2pbff7fvl2xp"
 path.s3tc="res://.godot/imported/Space probe_SpaceProbe_BaseColor.png-c168d3c93f06e5680d236c2ce5e13812.s3tc.ctex"
+path.etc2="res://.godot/imported/Space probe_SpaceProbe_BaseColor.png-c168d3c93f06e5680d236c2ce5e13812.etc2.ctex"
 metadata={
-"imported_formats": ["s3tc_bptc"],
+"imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
 }
 generator_parameters={
@@ -15,7 +16,7 @@ generator_parameters={
 [deps]
 
 source_file="res://assets/Space probe_SpaceProbe_BaseColor.png"
-dest_files=["res://.godot/imported/Space probe_SpaceProbe_BaseColor.png-c168d3c93f06e5680d236c2ce5e13812.s3tc.ctex"]
+dest_files=["res://.godot/imported/Space probe_SpaceProbe_BaseColor.png-c168d3c93f06e5680d236c2ce5e13812.s3tc.ctex", "res://.godot/imported/Space probe_SpaceProbe_BaseColor.png-c168d3c93f06e5680d236c2ce5e13812.etc2.ctex"]
 
 [params]
 

@@ -22,6 +22,9 @@ const QUALITY := ["Ultra", "High", "Balanced", "Performance"]
 var ship: Ship
 var env: Environment
 var hud: HUD                 # set by main, for the "Edit HUD Layout" button
+var main                     # set by main, for the "Reset Progress" button
+var _reset_btn: Button       # two-tap confirm guard for the wipe
+var _reset_armed := false
 
 var _root: Control          # dim + panel; visibility is the open/closed state
 var _open := false
@@ -61,6 +64,9 @@ func _open_menu() -> void:
 	_open = true
 	_root.visible = true
 	get_tree().paused = true
+	if _reset_btn != null:            # disarm the wipe each time the menu opens
+		_reset_armed = false
+		_reset_btn.text = "Reset Progress…"
 	if ship != null:
 		ship._set_capture(false)
 
@@ -105,7 +111,7 @@ func _build() -> void:
 	var quality := OptionButton.new()
 	for q in QUALITY:
 		quality.add_item(q)
-	quality.selected = 0   # default the dropdown to Ultra (the rows reflect live state)
+	quality.selected = 1   # default the dropdown to High (the rows reflect live state)
 	quality.item_selected.connect(_on_quality)
 	col.add_child(_row("Graphics Quality", quality))
 
@@ -152,11 +158,29 @@ func _build() -> void:
 	edit_hud.pressed.connect(_on_edit_hud)
 	col.add_child(edit_hud)
 
+	# --- Reset Progress: wipe the save (visited systems, codex, coins, HUD layout) and restart
+	# fresh from Earth. Two-tap confirm so it can't be hit by accident.
+	_reset_btn = Button.new()
+	_reset_btn.text = "Reset Progress…"
+	_reset_btn.focus_mode = Control.FOCUS_NONE
+	_reset_btn.add_theme_color_override("font_color", Color(1.0, 0.55, 0.5))
+	_reset_btn.pressed.connect(_on_reset)
+	col.add_child(_reset_btn)
+
 	var resume := Button.new()
 	resume.text = "Resume   (Esc)"
 	resume.focus_mode = Control.FOCUS_NONE
 	resume.pressed.connect(_close)
 	col.add_child(resume)
+
+
+func _on_reset() -> void:
+	if not _reset_armed:
+		_reset_armed = true
+		_reset_btn.text = "⚠  TAP AGAIN TO WIPE ALL PROGRESS"
+		return
+	if main != null:
+		main.reset_progress()
 
 
 func _on_edit_hud() -> void:

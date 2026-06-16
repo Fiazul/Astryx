@@ -10,6 +10,7 @@ const EXPLOSION_DB := -3.0
 const LASER_DB := -14.0         # continuous beam hum — present but not harsh
 const CLICK_DB := -12.0         # soft UI click
 const PICKUP_DB := -17.0        # energy-cell grab — short, low, unobtrusive
+const TELEPORT_DB := -6.0       # teleport "voooouuu" whoosh — prominent
 
 # --- Engine voice ---
 # Mix intent: the engine is present and has weight, but the music still leads.
@@ -52,6 +53,9 @@ var _explosion: AudioStreamPlayer
 var _laser_loop: AudioStreamPlayer
 var _laser_on := false
 var _click: AudioStreamPlayer
+var _teleport: AudioStreamPlayer  # teleport "voooouuu" whoosh
+var _notify: AudioStreamPlayer    # tutorial notification "ting-tong"
+var _reward: AudioStreamPlayer    # capture-reward "happy" fanfare
 var _pickup: AudioStreamPlayer   # short low blip for grabbing an energy cell
 
 # Per-ship loop streams (distinct timbre per hull, see tools/gen_engine_audio.py);
@@ -115,6 +119,24 @@ func _ready() -> void:
 	_click.stream = load("res://assets/ui_click.wav") as AudioStream
 	_click.volume_db = CLICK_DB
 	add_child(_click)
+
+	# Teleport whoosh ("voooouuu") — played when the teleport ritual begins.
+	_teleport = AudioStreamPlayer.new()
+	_teleport.stream = load("res://assets/teleport.wav") as AudioStream
+	_teleport.volume_db = TELEPORT_DB
+	add_child(_teleport)
+
+	# Tutorial notification chime ("ting-tong").
+	_notify = AudioStreamPlayer.new()
+	_notify.stream = load("res://assets/notify.wav") as AudioStream
+	_notify.volume_db = CLICK_DB
+	add_child(_notify)
+
+	# Capture-reward fanfare ("happy" rising arpeggio).
+	_reward = AudioStreamPlayer.new()
+	_reward.stream = load("res://assets/reward.wav") as AudioStream
+	_reward.volume_db = -4.0
+	add_child(_reward)
 
 	# Energy-cell grab: a tiny synthesized blip (low, short) — no asset needed.
 	_pickup = AudioStreamPlayer.new()
@@ -252,6 +274,35 @@ func play_click() -> void:
 	if _click != null:
 		_click.pitch_scale = randf_range(0.96, 1.06)
 		_click.play()
+
+
+# Teleport "voooouuu" whoosh — played at the start of the ritual; main fades its volume
+# in then out across the teleport with set_teleport_db(), and stops it on arrival/cancel.
+func play_teleport() -> void:
+	if _teleport != null:
+		_teleport.play()
+
+
+func set_teleport_db(db: float) -> void:
+	if _teleport != null:
+		_teleport.volume_db = db
+
+
+func stop_teleport() -> void:
+	if _teleport != null:
+		_teleport.stop()
+
+
+# Soft "ting-tong" chime when a tutorial notification appears.
+func play_notify() -> void:
+	if _notify != null:
+		_notify.play()
+
+
+# Happy rising fanfare when you capture a body.
+func play_reward() -> void:
+	if _reward != null:
+		_reward.play()
 
 
 # Short, low "blip" for grabbing an energy cell — quieter and deeper than the UI click.

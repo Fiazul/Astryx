@@ -23,6 +23,14 @@ const LASER_LEN := 5000.0
 const LASER_RADIUS := 22.0        # hit radius around the beam line
 const LASER_TICK := 0.08          # seconds between damage ticks
 const LASER_TICK_DMG := 2         # HP per tick (~25 dps)
+# "Ray bullets": each player shot is an instant HITSCAN ray (like the laser, but one
+# discrete pulse per trigger) shown as a brief bright tracer beam. No travelling
+# projectile -> no float-precision blob, no drift, no fat bloom-bar.
+const SHOT_RANGE := 4000.0        # how far each ray reaches
+const SHOT_HIT_RADIUS := 3.0      # aim forgiveness around the ray line for a hit
+const SHOT_FLASH_TIME := 0.06     # how long each ray pulse stays visible
+const SHOT_BEAM_RADIUS := 0.06    # tracer beam thickness
+const SHOT_TRACER_MISS_LEN := 800.0   # visible tracer length on a miss (gameplay reach stays SHOT_RANGE)
 const ALIEN_HP := 3
 const ALIEN_SPEED := 14.0
 const ALIEN_KEEP_DIST := 30.0     # they hover around this range and strafe
@@ -129,7 +137,13 @@ var _cool := 0.0
 var _laser: MeshInstance3D        # the beam mesh (child of the ship, points out the nose)
 var _laser_ring: MeshInstance3D   # glowing emitter "belt" the beam fires through
 var _laser_tick := 0.0
+var _shot_beam: MeshInstance3D    # brief tracer beam for each hitscan "ray bullet"
+var _shot_beam_mat: StandardMaterial3D
+var _shot_beam_t := 0.0           # >0 while the current ray pulse is fading out
 var _combat_t := 0.0              # >0 while in combat (counts down from COMBAT_HOLD)
+var _smg_mesh: Mesh = null            # real bullet GLB mesh (player standard shots only)
+var _smg_scale := 1.0                 # auto-computed in _ready so the bullet is SMG_BULLET_LEN long
+const SMG_BULLET_LEN := 1.3          # target world length of the bullet (tune the on-screen size here)
 var _bolt_mesh: CapsuleMesh
 var _laser_bolt_mesh: CapsuleMesh
 var _strong_bolt_mesh: CapsuleMesh   # compact, round, "filled" bullet (HaniStar)
@@ -141,6 +155,7 @@ var _laser_trail_mat: StandardMaterial3D
 var _strong_trail_mat: StandardMaterial3D   # pink tail for HaniStar's strong bolts
 var _bolt_mat: StandardMaterial3D
 var _bolt_mat_strong: StandardMaterial3D   # extra-bright bolts (HaniStar)
+var _smg_mat: StandardMaterial3D           # super-bright glow for the trail-less SMG bullet
 var _abolt_mat: StandardMaterial3D
 var _laser_bolt_mat: StandardMaterial3D   # Lyra's red laser bolts
 var _glow_tex: Texture2D
@@ -174,10 +189,16 @@ func _ready() -> void:
 	_strong_bolt_mesh.radial_segments = 20
 	_strong_bolt_mesh.rings = 8
 	_bolt_mat = _bolt_material(Color(0.5, 0.9, 1.0))     # your bolts: cyan
+	# Super-bright glow for the SMG player bullet (no trail) — a white-hot core that reads as
+	# a brilliant tracer against the dark. High emission, but it's tiny + trail-less so it
+	# blooms as a tight halo, not a fat bar.
+	_smg_mat = _bolt_material(Color(0.7, 0.95, 1.0))
+	_smg_mat.emission_energy_multiplier = 16.0
+	_smg_mat.albedo_color = Color(1.0, 1.0, 1.0)
 	# HaniStar's bolts: hot PINK to match her hull, much brighter + whiter-hot core so they
 	# read as strong as she is.
 	_bolt_mat_strong = _bolt_material(HANI_PINK)
-	_bolt_mat_strong.emission_energy_multiplier = 36.0
+	_bolt_mat_strong.emission_energy_multiplier = 8.0   # brighter than standard, still bloom-safe (was 36)
 	_bolt_mat_strong.albedo_color = HANI_PINK.lerp(Color.WHITE, 0.7)
 	_abolt_mat = _bolt_material(Color(1.0, 0.4, 0.3))    # alien bolts: red
 	_laser_bolt_mat = _bolt_material(Color(1.0, 0.12, 0.08))   # Lyra: red laser bolts
@@ -197,6 +218,18 @@ func _ready() -> void:
 	_trail_mesh.rings = 1
 	_trail_mesh.cap_top = false
 	_trail_mesh.cap_bottom = false
+	# Load the real bullet mesh for player standard shots. Extracted once, reused per shot.
+	# The GLB carries its real size in the source node's scale; taking the bare mesh drops
+	# that, so we normalize by the mesh's own AABB to a fixed world length (SMG_BULLET_LEN).
+	var smg_packed = load("res://assets/smg_bullet.glb")
+	if smg_packed:
+		var tmp: Node = smg_packed.instantiate()
+		_smg_mesh = _find_mesh(tmp)
+		if _smg_mesh != null:
+			var sz: Vector3 = _smg_mesh.get_aabb().size
+			var longest: float = maxf(sz.x, maxf(sz.y, sz.z))
+			_smg_scale = (SMG_BULLET_LEN / longest) if longest > 0.0001 else 1.0
+		tmp.queue_free()
 	# No enemies spawn until main calls reset(true) for a hostile system.
 
 
@@ -212,11 +245,13 @@ func reset(active := false, with_boss := false, count := SWARM_COUNT) -> void:
 	_aliens.clear()
 	for b in _bolts:
 		b.node.queue_free()
-		b.trail.queue_free()
+		if b.trail != null:
+			b.trail.queue_free()
 	_bolts.clear()
 	for b in _abolts:
 		b.node.queue_free()
-		b.trail.queue_free()
+		if b.trail != null:
+			b.trail.queue_free()
 	_abolts.clear()
 	for p in _pickups:
 		p.node.queue_free()
@@ -263,22 +298,21 @@ func update(ship: Node3D, pressed: bool, delta: float, laser := false) -> void:
 	player_max = ship.max_hp if ship.has_method("is_hypersonic") else PLAYER_MAX_HP
 	player_hp = mini(player_hp, player_max)
 
-	# --- player firing: pure straight shots, no aim assist (utility hulls can't fire) ---
+	# --- player firing: instant HITSCAN "ray bullets", one bright pulse per trigger ---
 	_cool = maxf(_cool - delta, 0.0)
 	var bolt_cost: float = BOLT_ENERGY * ship.energy_use
 	if pressed and slow_enough and _cool <= 0.0 and ship.can_fire and energy >= bolt_cost:
 		_cool = ship.fire_cooldown if ship.has_method("is_hypersonic") else BOLT_COOLDOWN
 		energy -= bolt_cost
-		var bmat: StandardMaterial3D = _laser_bolt_mat if ship.bolt_laser else (_bolt_mat_strong if ship.bolt_strong else _bolt_mat)
-		# Inherit the ship's OWN velocity so bolts never fall behind — even past warp speed the
-		# bullet leaves the nose forward (relative to the ship it always travels fwd * bolt_speed).
-		# Aim the tracer + trail down `fwd` (where you pointed), not the combined world vector.
-		var bolt_vel: Vector3 = ship.velocity + fwd * ship.bolt_speed
-		_spawn_bolt(_bolts, muzzle_now, bolt_vel, bmat, ship.bolt_scale, ship.bolt_damage, ship.bolt_laser, fwd, ship.bolt_speed)
+		# Tracer colour follows the hull's bolt identity (Lyra red / HaniStar pink / cyan).
+		var col: Color = Color(1.0, 0.18, 0.10) if ship.bolt_laser else \
+			(HANI_PINK if ship.bolt_strong else Color(0.7, 0.95, 1.0))
+		_fire_ray(ship, muzzle_now, fwd, col, int(ship.bolt_damage))
 		if _any_alien_alive():
 			_combat_t = COMBAT_HOLD            # attacking while enemies are present = in combat
 		if audio != null:
 			audio.play_fire()
+	_step_shot_beam(delta)
 
 	_step_bolts(_bolts, sp, delta, true, muzzle_now)
 	_step_bolts(_abolts, sp, delta, false)
@@ -384,6 +418,77 @@ func _build_laser(ship: Node3D) -> void:
 	_laser_ring.visible = false
 
 
+# Fire one instant "ray bullet": a hitscan ray from the muzzle down `fwd`. Damages the
+# NEAREST alien the ray line crosses (within SHOT_HIT_RADIUS), then shows a bright tracer
+# beam from the muzzle to the impact (or full range on a miss).
+func _fire_ray(ship: Node3D, origin: Vector3, fwd: Vector3, col: Color, dmg: int) -> void:
+	var best_t := SHOT_RANGE
+	var best_alien = null
+	for a in _aliens:
+		if not a.alive:
+			continue
+		var to: Vector3 = a.pos - origin
+		var t := to.dot(fwd)
+		if t < 0.0 or t > SHOT_RANGE:
+			continue
+		if (to - fwd * t).length() < a.size * 0.5 + SHOT_HIT_RADIUS and t < best_t:
+			best_t = t
+			best_alien = a
+	var beam_len := best_t            # on a hit, the tracer connects exactly to the target
+	if best_alien != null:
+		_damage_alien(best_alien, ship.true_pos, dmg)
+		_hit_flash(best_alien.pos - ship.true_pos)
+		_enemy_flash(best_alien.pos - ship.true_pos, best_alien.size)
+		hitmarker = 0.18
+	else:
+		beam_len = SHOT_TRACER_MISS_LEN   # a miss streaks a bullet-length tracer, not a full beam
+	_show_shot_beam(ship, col, beam_len)
+
+
+# Show (and re-arm the fade of) the tracer beam for one ray pulse, length = `dist`.
+func _show_shot_beam(ship: Node3D, col: Color, dist: float) -> void:
+	if _shot_beam == null:
+		var cyl := CylinderMesh.new()
+		cyl.top_radius = SHOT_BEAM_RADIUS
+		cyl.bottom_radius = SHOT_BEAM_RADIUS
+		cyl.height = 1.0                       # scaled to `dist` per shot
+		cyl.radial_segments = 10
+		cyl.rings = 0
+		_shot_beam = MeshInstance3D.new()
+		_shot_beam.mesh = cyl
+		_shot_beam_mat = StandardMaterial3D.new()
+		_shot_beam_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		_shot_beam_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		_shot_beam_mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+		_shot_beam.material_override = _shot_beam_mat
+		_shot_beam.rotation = Vector3(deg_to_rad(-90.0), 0.0, 0.0)   # cylinder +Y -> -Z (forward)
+	# Parent to the ship so it stays glued to the nose and never drifts into far coords.
+	if _shot_beam.get_parent() != ship:
+		if _shot_beam.get_parent() != null:
+			_shot_beam.get_parent().remove_child(_shot_beam)
+		ship.add_child(_shot_beam)
+	var muz: float = ship.muzzle
+	var drop: float = ship.muzzle_drop
+	_shot_beam.scale = Vector3(1.0, dist, 1.0)
+	_shot_beam.position = Vector3(0.0, -drop, -muz - dist * 0.5)   # span muzzle -> muzzle-dist (forward)
+	_shot_beam_mat.albedo_color = Color(col.r, col.g, col.b, 1.0)
+	_shot_beam.visible = true
+	_shot_beam_t = SHOT_FLASH_TIME
+
+
+# Fade the current ray pulse out over SHOT_FLASH_TIME, then hide it.
+func _step_shot_beam(delta: float) -> void:
+	if _shot_beam == null or not _shot_beam.visible:
+		return
+	_shot_beam_t -= delta
+	if _shot_beam_t <= 0.0:
+		_shot_beam.visible = false
+		return
+	var a := _shot_beam_t / SHOT_FLASH_TIME
+	var c := _shot_beam_mat.albedo_color
+	_shot_beam_mat.albedo_color = Color(c.r, c.g, c.b, a)   # additive -> brightness fades with alpha
+
+
 # ---------------------------------------------------------------------------
 func _step_aliens(ship: Node3D, sp: Vector3, delta: float) -> void:
 	for a in _aliens:
@@ -434,7 +539,8 @@ func _step_bolts(list: Array, sp: Vector3, delta: float, player: bool, muzzle :=
 		# the current nose to the head — no drift when you strafe/bank after firing.
 		if player:
 			b.origin = muzzle
-		_update_trail(b, sp)
+		if b.trail != null:
+			_update_trail(b, sp)
 		var hit := false
 		if player:
 			# Swept test: the bolt moves far each frame, so check the whole
@@ -454,7 +560,8 @@ func _step_bolts(list: Array, sp: Vector3, delta: float, player: bool, muzzle :=
 				hit = true
 		if hit or b.life <= 0.0:
 			b.node.queue_free()
-			b.trail.queue_free()
+			if b.trail != null:
+				b.trail.queue_free()
 			list.remove_at(i)
 		i -= 1
 
@@ -862,6 +969,16 @@ func _load_alien_model(size := ALIEN_SIZE) -> Node3D:
 	return mi
 
 
+func _find_mesh(node: Node) -> Mesh:
+	if node is MeshInstance3D:
+		return node.mesh
+	for child in node.get_children():
+		var m = _find_mesh(child)
+		if m:
+			return m
+	return null
+
+
 func _spawn_bolt(list: Array, pos: Vector3, vel: Vector3, mat: StandardMaterial3D, scale := 1.0, dmg := 1, laser := false, aim := Vector3.ZERO, reach_speed := -1.0) -> void:
 	# Every gun fires a slim TRACER aligned to its travel — small in world space so
 	# perspective (not a screen clamp) does the work: modest near the nose, shrinking
@@ -869,30 +986,44 @@ func _spawn_bolt(list: Array, pos: Vector3, vel: Vector3, mat: StandardMaterial3
 	# `aim` overrides the visual forward (the firing direction) for bolts that inherit the
 	# ship's velocity, so the tracer points down the nose instead of along the world vector.
 	var look_dir: Vector3 = aim if aim.length() > 0.001 else vel
+	# Player standard bolts use the real SMG bullet mesh; everything else keeps the capsule.
+	var use_smg := _smg_mesh != null and not laser and mat == _bolt_mat
 	var mi := MeshInstance3D.new()
-	mi.material_override = mat
-	mi.mesh = _laser_bolt_mesh if laser else (_strong_bolt_mesh if mat == _bolt_mat_strong else _bolt_mesh)
+	# SMG bullet: a super-bright self-lit tracer (no trail). Everything else: its glow mat.
+	mi.material_override = _smg_mat if use_smg else mat
+	mi.mesh = _laser_bolt_mesh if laser else (_strong_bolt_mesh if mat == _bolt_mat_strong else (_smg_mesh if use_smg else _bolt_mesh))
 	add_child(mi)
 	mi.global_position = pos
 	if look_dir.length() > 0.001:
 		var d := look_dir.normalized()
 		var up := Vector3.UP if absf(d.dot(Vector3.UP)) < 0.99 else Vector3.RIGHT
-		mi.look_at(pos + look_dir, up)                         # -Z faces travel...
-		mi.rotate_object_local(Vector3.RIGHT, deg_to_rad(90.0)) # ...capsule's long Y -> travel
-	mi.scale = Vector3.ONE * scale
-	# Trailing "shadow" streak: anchored at the firing point (the nose), it stretches to
-	# the bolt so shots visibly leave the ship, then trails the head as it flies.
-	var trail := MeshInstance3D.new()
-	trail.mesh = _trail_mesh
-	if mat == _laser_bolt_mat:
-		trail.material_override = _laser_trail_mat
-	elif mat == _abolt_mat:
-		trail.material_override = _abolt_trail_mat
-	elif mat == _bolt_mat_strong:
-		trail.material_override = _strong_trail_mat
-	else:
-		trail.material_override = _bolt_trail_mat
-	add_child(trail)
+		# Build the basis directly from the travel direction (-Z faces travel). Doing this
+		# instead of look_at(pos + look_dir) is precision-safe: far from the system origin
+		# `pos` grows large and float32 makes pos+look_dir collapse back onto pos, so look_at
+		# fails and the bolt renders unoriented (a fat sideways blob). This never collapses.
+		var zaxis := -d
+		var xaxis := up.cross(zaxis).normalized()
+		var yaxis := zaxis.cross(xaxis)
+		mi.basis = Basis(xaxis, yaxis, zaxis)
+		if not use_smg:
+			mi.rotate_object_local(Vector3.RIGHT, deg_to_rad(90.0)) # capsule: align long Y to travel
+	mi.scale = Vector3.ONE * (_smg_scale if use_smg else scale)
+	# Trailing "shadow" streak: anchored at the firing point (the nose), it stretches to the
+	# bolt so shots visibly leave the ship, then trails the head. The SMG bullet skips it —
+	# just a clean, super-bright tracer, no shadow tail (and no fat bloom-bar near the cam).
+	var trail: MeshInstance3D = null
+	if not use_smg:
+		trail = MeshInstance3D.new()
+		trail.mesh = _trail_mesh
+		if mat == _laser_bolt_mat:
+			trail.material_override = _laser_trail_mat
+		elif mat == _abolt_mat:
+			trail.material_override = _abolt_trail_mat
+		elif mat == _bolt_mat_strong:
+			trail.material_override = _strong_trail_mat
+		else:
+			trail.material_override = _bolt_trail_mat
+		add_child(trail)
 	# HITBOX is decoupled from the (now small) visual: stays generous so guns still land.
 	# Streak length tracks the RELATIVE tracer speed (reach_speed), not the warp-inflated
 	# world speed — so the shadow stays a short tail instead of stretching across the sky.
@@ -989,7 +1120,9 @@ func _bolt_material(c: Color) -> StandardMaterial3D:
 	m.emission_enabled = true
 	m.emission = c
 	m.albedo_color = c.lerp(Color.WHITE, 0.6)    # white-hot core reads brighter
-	m.emission_energy_multiplier = 20.0          # bullet glow strength (HDR bloom)
+	# Kept LOW (was 20) so the HDR bloom can't balloon a bolt into a fat blob near the close
+	# chase-cam — the same bounded-brightness trick that keeps Raptor 2's laser clean.
+	m.emission_energy_multiplier = 4.0
 	return m
 
 
