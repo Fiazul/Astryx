@@ -75,13 +75,7 @@ jobs:
       - name: Export debug APK
         run: |
           mkdir -p build
-          echo "::group::Diagnostics"
-          echo "--- export templates dir ---"
-          ls -la "$HOME/.local/share/godot/export_templates/${TEMPLATE_DIR}/" || echo "(templates dir missing!)"
-          echo "--- editor settings ---"
-          cat "$HOME/.config/godot/editor_settings-4.6.tres" || echo "(editor settings missing!)"
-          echo "::endgroup::"
-          godot --headless --verbose --export-debug "Android" build/Astryx.apk
+          godot --headless --export-debug "Android" build/Astryx.apk
           ls -lh build/Astryx.apk
 
       - name: Upload APK artifact
