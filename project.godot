@@ -15,7 +15,7 @@ compatibility/default_parent_skeleton_in_mesh_instance_3d=true
 [application]
 
 config/name="Cold Light"
-config/version="0.9.0"
+config/version="0.10.0"
 run/main_scene="res://scenes/Main.tscn"
 config/features=PackedStringArray("4.6", "Forward Plus")
 config/icon="res://icon.svg"
@@ -34,3 +34,4 @@ window/handheld/orientation=4
 scaling_3d/scale=2.0
 environment/defaults/default_clear_color=Color(0.01, 0.01, 0.03, 1)
 scaling_3d/scale.mobile=0.75
+textures/vram_compression/import_etc2_astc=true
