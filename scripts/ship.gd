@@ -378,6 +378,11 @@ func _input(event: InputEvent) -> void:
 			_set_capture(true)
 	# (Esc is owned by the Settings menu — opens/closes it and frees the cursor.)
 
+# Touch look: the on-screen drag region feeds steering here (same pipeline as mouse-look,
+# but with no mouse capture, which phones don't have). Called by TouchControls.
+func add_touch_look(v: Vector2) -> void:
+	_mouse_delta += v
+
 
 # Called every frame by main.gd, before the world is rebuilt around the ship.
 func fly(delta: float) -> void:

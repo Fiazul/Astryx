@@ -18,6 +18,7 @@ config/name="Cold Light"
 config/version="0.9.0"
 run/main_scene="res://scenes/Main.tscn"
 config/features=PackedStringArray("4.6", "Forward Plus")
+config/icon="res://icon.svg"
 
 [display]
 
@@ -26,8 +27,10 @@ window/size/viewport_height=720
 window/size/mode=3
 window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
+window/handheld/orientation=4
 
 [rendering]
 
 scaling_3d/scale=2.0
 environment/defaults/default_clear_color=Color(0.01, 0.01, 0.03, 1)
+scaling_3d/scale.mobile=0.75

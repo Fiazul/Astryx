@@ -64,6 +64,8 @@ var _quest_progress := 0
 var _last_kills := 0          # session-local: detect new kills as a delta of combat.kills
 var _nav_off := false         # NAV button: stop the Survey guide + waypoint marker entirely
 var _was_boost_blocked := false   # edge-trigger for the "boost unavailable" toast
+var _touch := false               # touch/mobile input mode (no mouse capture) — set in _ready
+var touch_controls: Node          # on-screen controls overlay (mobile only)
 var _perf_on := false             # F3 perf/leak readout
 var _perf_t := 0.0                # throttle for the perf text update
 # Restored on boot: where you left off (system + position + active hull). See _restore_location.
@@ -279,6 +281,15 @@ func _ready() -> void:
 		{ "id": "q_survey3", "title": "Surveyor General — survey 12 bodies","type": "capture", "target": 12, "reward": 950 },
 	]
 
+	# Touch / mobile controls overlay (on a phone, or force on desktop with --touch to test).
+	# Desktop keyboard+mouse play is completely unaffected when this is off.
+	_touch = OS.has_feature("mobile") or OS.get_cmdline_user_args().has("--touch")
+	if _touch:
+		touch_controls = load("res://scripts/touch.gd").new()
+		touch_controls.ship = ship
+		touch_controls.main = self
+		add_child(touch_controls)
+
 	_restore_location()   # resume where you left off (system + position + hull)
 
 
@@ -326,7 +337,7 @@ func _process(delta: float) -> void:
 	var want_fire := false
 	var want_laser := false
 	if not ship.transiting and not docked and not _tp_active:
-		var captured := Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED
+		var captured := _touch or Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED
 		want_fire = captured and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
 		# Right-click fires the nose laser beam (laser-equipped hulls only, e.g. Raptor II).
 		want_laser = captured and ship.has_laser and Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)
@@ -479,7 +490,7 @@ func _update_scan(delta: float) -> void:
 	var cap_range := planets.nearest_radius + SCAN_RANGE
 	var in_range := not docked and not ship.transiting and name != "" \
 		and planets.nearest_dist < cap_range \
-		and Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED
+		and (_touch or Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED)
 	var fresh := in_range and not captured and clear
 
 	# Raptor 2 Neo auto-captures any clear body in range — no key needed.
