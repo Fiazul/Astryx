@@ -101,7 +101,7 @@ func _populate(name: String, f: Dictionary) -> void:
 	if main != null and main.has_method("can_claim") and main.can_claim(name):
 		_body.add_child(HSeparator.new())
 		var claim := Button.new()
-		claim.text = "◈  CLAIM  100 coins"
+		claim.text = "◈  CLAIM  %d coins" % MissionDB.reward(name)
 		claim.focus_mode = Control.FOCUS_NONE
 		claim.add_theme_font_size_override("font_size", 22)
 		claim.add_theme_color_override("font_color", Color(1.0, 0.9, 0.5))

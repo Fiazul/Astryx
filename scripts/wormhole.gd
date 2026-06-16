@@ -130,6 +130,16 @@ func in_range(ship_pos: Vector3) -> bool:
 	return false
 
 
+# Every active portal as { rel, dest } in render space (for the minimap — all wormholes,
+# live). Empty inside a system with no known links.
+func portals_rel(ship_pos: Vector3) -> Array:
+	var out := []
+	for p in _portals:
+		if p.active:
+			out.append({ "rel": p.pos - ship_pos, "dest": p.dest_id })
+	return out
+
+
 # Render-space position of the nearest portal (for the navigator marker).
 func portal_rel(ship_pos: Vector3) -> Vector3:
 	var best := INF

@@ -86,11 +86,13 @@ var _controls: PanelContainer   # the controls cheat-sheet menu (toggled by ?)
 var teleport_button: Button   # connected by main -> teleport_home()
 var details_button: Button    # connected by main -> PlanetInfo.open_for_nearest()
 var map_button: Button        # -> StarMap.toggle()
+var log_button: Button        # -> QuestLog.toggle()
 var codex_button: Button      # -> CodexPanel.toggle()
 var settings_button: Button   # -> SettingsMenu.toggle()
 var controls_button: Button   # toggles the controls cheat-sheet
 var nav_button: Button        # -> main.toggle_nav() (stop/resume the Survey guide)
 var cancel_nav_button: Button # -> cancels a locked (paid) map waypoint; shown only then
+var _cancel_nav_was_visible := false   # remembers its real state while the editor force-shows it
 var _detail_range := 600.0    # show the Details button within this of a body (×10 spread)
 
 # --- HUD layout editor -------------------------------------------------------
@@ -104,10 +106,11 @@ const DEFAULT_LAYOUT := {
 	"nav": Vector2(16, 14), "combat": Vector2(11.33, 620), "hull": Vector2(15.33, 98.67),
 	"teleport": Vector2(1088, 674), "buttons": Vector2(10.67, 676.67),
 	"details": Vector2(1088, 636), "radar": Vector2(1129.33, 11.33),
+	"cancel_nav": Vector2(12, 602),
 }
 const DEFAULT_SCALE := {
 	"nav": 0.76, "combat": 0.76, "hull": 0.94, "teleport": 1.0,
-	"buttons": 0.76, "details": 1.0, "radar": 0.76,
+	"buttons": 0.76, "details": 1.0, "radar": 0.76, "cancel_nav": 0.7,
 }
 var ship_ref: Ship                 # set by main, used to free/recapture the cursor in edit mode
 var _movable: Array = []           # [{ id, node, def }]
@@ -139,17 +142,23 @@ func _ready() -> void:
 	_objective_label = _add_line(nav.body, 11, C_ACCENT)   # Survey guide: next unclaimed star
 
 	# Scan prompt/progress (center, below the crosshair) + discovery toast (center).
-	_scan_label = _make_label(Vector2(0, 416), 12, C_GREEN)
-	_scan_label.size = Vector2(1280, 24)
-	_scan_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_toast_label = _make_label(Vector2(0, 256), 17, C_GREEN)
-	_toast_label.size = Vector2(1280, 32)
-	_toast_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	# Declutter: feedback moves OFF the centre to the free right side (x ≈ 980), left-aligned,
+	# so the play area around the crosshair stays clean. (A proper right-side rail/box is next.)
+	var rx := SCREEN.x - 300.0
+	_scan_label = _make_label(Vector2(rx, 214), 12, C_GREEN)
+	_scan_label.size = Vector2(288, 22)
+	_scan_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	_toast_label = _make_label(Vector2(rx, 150), 14, C_GREEN)
+	_toast_label.size = Vector2(288, 60)
+	_toast_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	_toast_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_toast_label.modulate.a = 0.0
 
-	_prompt = _make_label(Vector2(0, 608), 13, C_TEXT)
-	_prompt.size = Vector2(1280, 24)
-	_prompt.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	# Contextual prompt ("Press F to …") — right side, under the toast, left-aligned.
+	_prompt = _make_label(Vector2(rx, 244), 13, C_TEXT)
+	_prompt.size = Vector2(288, 44)
+	_prompt.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	_prompt.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 
 	# Centered overlay text — used for the wormhole-transit countdown.
 	_menu = _make_label(Vector2(0, 210), 15, C_TEXT)
@@ -221,7 +230,7 @@ func _ready() -> void:
 	_build_teleport_button(_canvas)
 	_build_button_bar(_canvas)
 	_build_controls_menu(_canvas)
-	_build_guide(_canvas)
+	# Bottom help line removed in the declutter pass (verbs live in the ? controls panel).
 
 	# "Details" button — appears (bottom-right, above Teleport) when you're near a planet,
 	# so it never blocks the centre of the view.
@@ -352,9 +361,10 @@ func _build_button_bar(canvas: CanvasLayer) -> void:
 	var gap := 6.0
 	var w_nav := 64.0
 	var w_map := 66.0
+	var w_log := 28.0          # quest log: a small ✦ icon button (tooltip explains it)
 	var w_codex := 74.0
 	var w_icon := 28.0
-	var bar_w := w_nav + gap + w_map + gap + w_codex + gap + w_icon + gap + w_icon
+	var bar_w := w_nav + gap + w_map + gap + w_log + gap + w_codex + gap + w_icon + gap + w_icon
 	_btn_bar = Control.new()
 	_btn_bar.position = Vector2(RIGHT_EDGE - bar_w, 80.0)
 	_btn_bar.size = Vector2(bar_w, 26)
@@ -362,11 +372,14 @@ func _build_button_bar(canvas: CanvasLayer) -> void:
 
 	var x_nav := 0.0
 	var x_map := x_nav + w_nav + gap
-	var x_codex := x_map + w_map + gap
+	var x_log := x_map + w_map + gap
+	var x_codex := x_log + w_log + gap
 	var x_controls := x_codex + w_codex + gap
 	var x_settings := x_controls + w_icon + gap
 	nav_button = _icon_button(_btn_bar, "⊘ NAV", Vector2(x_nav, 0), w_nav, C_WARN)
 	map_button = _icon_button(_btn_bar, "◎ MAP", Vector2(x_map, 0), w_map, C_ACCENT)
+	log_button = _icon_button(_btn_bar, "✦", Vector2(x_log, 0), w_log, Color(1.0, 0.78, 0.35))
+	log_button.tooltip_text = "Mission Log (J)"
 	codex_button = _icon_button(_btn_bar, "▤ CODEX", Vector2(x_codex, 0), w_codex, C_GREEN)
 	controls_button = _icon_button(_btn_bar, "?", Vector2(x_controls, 0), w_icon, Color(0.8, 0.85, 1.0))
 	settings_button = _icon_button(_btn_bar, "⚙", Vector2(x_settings, 0), w_icon, Color(0.8, 0.85, 1.0))
@@ -376,7 +389,8 @@ func _build_button_bar(canvas: CanvasLayer) -> void:
 	# Cancel-Nav button: only shown while a LOCKED (paid) map waypoint is active.
 	cancel_nav_button = Button.new()
 	cancel_nav_button.text = "✖ CANCEL NAV"
-	cancel_nav_button.position = Vector2(SCREEN.x * 0.5 - 80.0, 96.0)
+	cancel_nav_button.position = Vector2(12, 602)   # default placement (also in DEFAULT_LAYOUT/SCALE; editor-movable)
+	cancel_nav_button.scale = Vector2(0.7, 0.7)
 	cancel_nav_button.size = Vector2(160, 26)
 	cancel_nav_button.focus_mode = Control.FOCUS_NONE
 	cancel_nav_button.add_theme_font_size_override("font_size", 12)
@@ -386,6 +400,8 @@ func _build_button_bar(canvas: CanvasLayer) -> void:
 	cancel_nav_button.add_theme_stylebox_override("pressed", _metal_box(Color(1.0, 0.8, 0.4), 1.0))
 	cancel_nav_button.visible = false
 	canvas.add_child(cancel_nav_button)
+	# Make it a drag-placeable HUD widget: position persists in the layout editor.
+	register_movable("cancel_nav", cancel_nav_button)
 
 
 # Reflect nav on/off in the button label so it's clear what tapping it does.
@@ -526,6 +542,10 @@ func enter_edit() -> void:
 		return
 	_edit = true
 	_edit_ui.visible = true
+	# Force-show the Cancel-Nav button so it can be grabbed even when no waypoint is active.
+	if cancel_nav_button != null:
+		_cancel_nav_was_visible = cancel_nav_button.visible
+		cancel_nav_button.visible = true
 	get_tree().paused = true
 	if ship_ref != null:
 		ship_ref._set_capture(false)
@@ -541,6 +561,9 @@ func _exit_edit(save: bool) -> void:
 			item.node.scale = Vector2(s, s)
 	_edit = false
 	_edit_ui.visible = false
+	# Restore the Cancel-Nav button's real visibility (only shown with a live waypoint).
+	if cancel_nav_button != null:
+		cancel_nav_button.visible = _cancel_nav_was_visible
 	get_tree().paused = false
 	if ship_ref != null and not ship_ref.frozen:
 		ship_ref._set_capture(true)
@@ -598,19 +621,20 @@ func _metal_box(edge: Color, glow: float) -> StyleBoxFlat:
 	return sb
 
 
-func set_objective(text: String) -> void:
-	if _objective_label != null:
-		_objective_label.text = text
+# Declutter pass: the centered Survey-guide line is gone — guidance is the nav arrow now
+# (a side notification/rail is coming). Kept as a no-op so callers don't need touching.
+func set_objective(_text: String) -> void:
+	if _objective_label != null and _objective_label.text != "":
+		_objective_label.text = ""
 
-# Active-quest tracker line. "" hides it. (Cheap: skip relayout when unchanged.)
-func set_quest(text: String) -> void:
-	if _quest_label == null or _quest_label.text == text:
-		return
-	_quest_label.text = text
-	_quest_label.visible = text != ""
+# Top-center quest tracker removed — quests live in the J log (a right-side quest box is next).
+func set_quest(_text: String) -> void:
+	if _quest_label != null and _quest_label.visible:
+		_quest_label.visible = false
 
 func set_prompt(text: String) -> void:
 	_prompt.text = text
+	_prompt.visible = text != ""
 
 func set_menu(text: String) -> void:
 	_menu.text = text
@@ -626,17 +650,10 @@ func set_debug(text: String) -> void:
 # First-run onboarding tip line (warm-white, near the top). "" hides it. Called every
 # frame, so skip the work when the text hasn't changed (reassigning Label.text re-lays
 # out the text server even for an identical string). A new tip fades + drifts up gently.
-func set_tip(text: String) -> void:
-	if _tip == null or _tip.text == text:
-		return
-	_tip.text = text
-	_tip.visible = text != ""
-	if text != "":
-		_tip.modulate.a = 0.0
-		_tip.position.y = 118.0
-		var tw := create_tween().set_parallel(true)
-		tw.tween_property(_tip, "modulate:a", 1.0, 0.45)
-		tw.tween_property(_tip, "position:y", 110.0, 0.45).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+func set_tip(_text: String) -> void:
+	# Centered onboarding tip removed in the declutter pass (will return as a side notification).
+	if _tip != null and _tip.visible:
+		_tip.visible = false
 
 
 # Pop the arrival lore card up for a few seconds (fades out in refresh()). Called by
@@ -1101,7 +1118,7 @@ func refresh() -> void:
 		_boss_bar.visible = bs.alive
 		if bs.alive:
 			var br: float = clampf(float(bs.hp) / maxf(float(bs.max), 1.0), 0.0, 1.0)
-			_boss_label.text = "◼  VORTEX   %d%%" % int(round(100.0 * br))
+			_boss_label.text = "◼  %s   %d%%" % [String(bs.get("name", "VORTEX")).to_upper(), int(round(100.0 * br))]
 			_boss_fill.size.x = _boss_bar_w * br
 		else:
 			_boss_label.text = ""

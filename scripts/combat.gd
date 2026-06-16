@@ -221,6 +221,11 @@ func reset(active := false, with_boss := false, count := SWARM_COUNT) -> void:
 	for p in _pickups:
 		p.node.queue_free()
 	_pickups.clear()
+	# Wipe any leftover guardian-fight state so a stale guard_body from the previous system
+	# can't block a fresh spawn (or make planets.rel_of() meaningless) here.
+	guard_body = ""
+	zone_kills = 0
+	_combat_t = 0.0
 	player_hp = PLAYER_MAX_HP
 	if active:
 		for i in count:
@@ -510,8 +515,9 @@ func _revive(a: Dictionary, sp: Vector3) -> void:
 func boss_state() -> Dictionary:
 	for a in _aliens:
 		if a.is_boss or a.get("guardian_boss", false):
-			return { "alive": a.alive, "hp": a.hp, "max": a.max_hp }
-	return { "alive": false, "hp": 0, "max": 1 }
+			return { "alive": a.alive, "hp": a.hp, "max": a.max_hp,
+				"name": String(a.get("boss_name", "Vortex")) }
+	return { "alive": false, "hp": 0, "max": 1, "name": "Vortex" }
 
 
 # Monster data for a probe scan: how many hostiles are loose, total swarm size,
@@ -540,13 +546,33 @@ var e_max := ENERGY_MAX        # current per-ship cap for BOTH bars (set each fr
 var _pickups := []             # { pos, node, life } — interstellar energy pickups
 var _pickup_cd := PICKUP_EVERY
 
+# Boss names — one gets stuck to each guarded body (deterministic by name, so a body always
+# faces the same warlord). Crude/savage tone to match the mission log.
+const BOSS_NAMES := [
+	"Gut-Render", "Skullfister", "Lord Ballsack", "The Anal Vortex", "Cunthammer",
+	"Pisslord Vex", "Maggot-King", "Shitslinger", "The Choad Reaver", "Arsemaw",
+	"Bonegrinder", "Twatcrusher", "Rotgut the Foul", "Spunkbubble", "The Festering Hole",
+	"Knobrot", "Dr. Fuckwidget", "Smegmar the Vile", "Cock-Mortis", "Bumghoul",
+]
+
+func _boss_name_for(body: String) -> String:
+	return BOSS_NAMES[(hash(body) % BOSS_NAMES.size() + BOSS_NAMES.size()) % BOSS_NAMES.size()]
+
 # `power` ~ the body's size; bigger stars get a tougher, bigger boss + bigger waves.
 func set_guardians(center: Vector3, body: String, power := 1.0) -> void:
 	clear_guardians()
 	guard_body = body
 	_zone_power = clampf(power, 1.0, 3.0)
 	zone_kills = 0
-	_aliens.append(_make_guardian_boss(center, _zone_power))
+	var boss := _make_guardian_boss(center, _zone_power)
+	boss["boss_name"] = _boss_name_for(body)
+	_aliens.append(boss)
+
+# Abandon the current guardian fight AND end the combat lock immediately (warp frees the same
+# frame) — main calls this on the "leash" when you've left the guarded body far behind.
+func abandon_combat() -> void:
+	clear_guardians()
+	_combat_t = 0.0
 
 # One identity boss (a random monster GLB, big, raw colours) that defends a body and
 # summons small vortex minions. Reuses the alien-model loader at boss scale.
@@ -753,11 +779,13 @@ func _make_alien() -> Dictionary:
 # VORTEX — the boss. Vortex's own hull, scaled up huge with a red-hot menace tint.
 func _make_boss() -> Dictionary:
 	var node := _load_boss_model()
-	return _make_enemy(node, {
+	var b := _make_enemy(node, {
 		"size": BOSS_SIZE, "hp": BOSS_HP, "speed": BOSS_SPEED, "keep": BOSS_KEEP_DIST,
 		"fire_every": BOSS_FIRE_EVERY, "respawn_after": BOSS_RESPAWN_AFTER,
 		"spawn_dist": BOSS_SPAWN_DIST, "is_boss": true,
 	})
+	b["boss_name"] = "Vortex"
+	return b
 
 
 func _load_boss_model(size := BOSS_SIZE) -> Node3D:

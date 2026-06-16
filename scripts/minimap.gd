@@ -58,7 +58,8 @@ func _draw() -> void:
 				draw_arc(p, 6.0, 0, TAU, 14, Color(0.5, 1.0, 1.0), 2.0)
 				draw_string(font, p + Vector2(8, 4), blip.name, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.6, 1.0, 1.0))
 			WORMHOLE:
-				draw_circle(p, 4.5, Color(1.0, 0.55, 0.15))
+				draw_arc(p, 5.5, 0, TAU, 14, Color(0.75, 0.55, 1.0, 0.9), 1.5)   # swirl ring
+				draw_circle(p, 2.6, Color(0.9, 0.7, 1.0))                          # core
 			CAPTURED:
 				draw_circle(p, 3.5, Color(1.0, 0.84, 0.3))                 # gold beacon
 				draw_arc(p, 5.5, 0, TAU, 12, Color(1.0, 0.84, 0.3, 0.7), 1.5)

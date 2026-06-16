@@ -22,6 +22,7 @@ var combat: Combat
 var audio: GameAudio
 var settings: SettingsMenu
 var map: StarMap
+var quest_log: QuestLog
 var planet_data: PlanetData
 var planet_info: PlanetInfo
 var navigator: Navigator
@@ -55,13 +56,17 @@ const WORMHOLE_RADAR := 750.0 # hub range at which your radar finds an undiscove
 # apart (insert/reorder freely). Built once in _ready (predicates read live state at
 # call time). Persisted as _onboarding_step so the guide runs once, in order, forever.
 var _onboard: Array = []
-# Quest LINE — one active at a time, complete it for coins, then the next unlocks. Progress
-# is its own persisted counter (incremented by capture/kill/visit events), not derived from
-# cumulative stats (combat.kills resets each launch). See _quest_event / _update_quests.
-var _quests: Array = []
-var _quest_idx := 0
-var _quest_progress := 0
-var _last_kills := 0          # session-local: detect new kills as a delta of combat.kills
+# Missions are per-body now (MissionDB + QuestLog, key J): every star/planet/moon is a
+# mission you complete by surveying it. The top-center tracker shows the nearest unsurveyed
+# body in the current system; the full board is the J log. _log_seen latches when first opened
+# (drives the last onboarding step, like _map_seen).
+var _log_seen := false
+# The TRACKED quest: a body name you chose to chase from the Mission Log (J). It's the single
+# source of truth for quest guidance — the nav arrow routes to it (cross-system via wormholes,
+# then to the body in-system) until you survey it, then it auto-advances to the next unsurveyed
+# body in the system (or clears when the system's done). Persisted. Mutually exclusive with the
+# map's _nav_goal / paid _nav_locked (each setter clears the others).
+var _active_quest := ""
 var _nav_off := false         # NAV button: stop the Survey guide + waypoint marker entirely
 var _was_boost_blocked := false   # edge-trigger for the "boost unavailable" toast
 var _touch := false               # touch/mobile input mode (no mouse capture) — set in _ready
@@ -250,6 +255,13 @@ func _ready() -> void:
 	map.main = self
 	add_child(map)
 	hud.map_button.pressed.connect(map.toggle)
+
+	# Mission log (J): every body is a mission — browse the story + navigate to it.
+	quest_log = QuestLog.new()
+	quest_log.main = self
+	quest_log.codex = codex
+	add_child(quest_log)
+	hud.log_button.pressed.connect(quest_log.toggle)
 	hud.settings_button.pressed.connect(settings.toggle)
 	hud.nav_button.pressed.connect(toggle_nav)
 	hud.cancel_nav_button.pressed.connect(cancel_locked_nav)
@@ -266,19 +278,8 @@ func _ready() -> void:
 			"done": func(): return _map_seen },
 		{ "tip": "Fly to a glowing  wormhole  and press  F  — it links to a neighbouring star",
 			"done": func(): return _visited.size() > 1 },
-		{ "tip": "Tab targets the wormhole · H is emergency return home · check your QUEST up top",
-			"done": func(): return _quest_idx > 0 },
-	]
-
-	# The quest line: capture bodies, kill hostiles, reach systems — escalating, for coins.
-	_quests = [
-		{ "id": "q_survey1", "title": "First Light — survey 1 body",        "type": "capture", "target": 1,  "reward": 120 },
-		{ "id": "q_kill1",   "title": "Trigger — destroy 6 hostiles",       "type": "kill",    "target": 6,  "reward": 200 },
-		{ "id": "q_visit1",  "title": "Wanderer — reach 2 new systems",     "type": "visit",   "target": 2,  "reward": 260 },
-		{ "id": "q_survey2", "title": "Cartographer — survey 5 bodies",     "type": "capture", "target": 5,  "reward": 380 },
-		{ "id": "q_kill2",   "title": "Ace — destroy 20 hostiles",          "type": "kill",    "target": 20, "reward": 520 },
-		{ "id": "q_visit2",  "title": "Pathfinder — reach 4 new systems",   "type": "visit",   "target": 4,  "reward": 700 },
-		{ "id": "q_survey3", "title": "Surveyor General — survey 12 bodies","type": "capture", "target": 12, "reward": 950 },
+		{ "tip": "Press  J  for the MISSION LOG — every star, planet & moon is a mission with a bounty",
+			"done": func(): return _log_seen },
 	]
 
 	# Touch / mobile controls overlay (on a phone, or force on desktop with --touch to test).
@@ -350,7 +351,7 @@ func _process(delta: float) -> void:
 	ship.firing = (want_fire and ship.can_fire) or (want_laser and ship.has_laser)
 	hud.firing = want_fire                       # blooms the dynamic crosshair
 	hud.coins = coins
-	hud.set_cancel_nav_visible(_nav_locked != "" or _nav_goal != "")
+	hud.set_cancel_nav_visible(_nav_locked != "" or _nav_goal != "" or _active_quest != "")
 	# Tell the player (once) when they try to boost in a slow-zone where it does nothing.
 	if ship.boost_blocked and not _was_boost_blocked:
 		hud.toast = "⚠  Boost unavailable here — clear the slow-zone first"
@@ -445,8 +446,11 @@ func _update_minimap() -> void:
 		elif bname == planets.nearest_name:
 			role = MiniMap.NEAREST
 		blips.append({ "local": binv * rel, "dist": rel.length(), "role": role, "name": bname })
-	var wrel: Vector3 = wormhole.portal_rel(ship.true_pos)
-	blips.append({ "local": binv * wrel, "dist": wrel.length(), "role": MiniMap.WORMHOLE, "name": "Wormhole" })
+	# All known wormholes, live (not just the nearest) — each its own gold blip on the radar.
+	for wp in wormhole.portals_rel(ship.true_pos):
+		var wrel: Vector3 = wp.rel
+		blips.append({ "local": binv * wrel, "dist": wrel.length(), "role": MiniMap.WORMHOLE,
+			"name": "→ %s" % SystemDB.display_name(wp.dest) })
 	minimap.set_blips(blips)
 
 
@@ -456,6 +460,14 @@ func _update_scan(delta: float) -> void:
 	hud.toast_t = maxf(hud.toast_t - delta, 0.0)
 	if _tp_active:
 		return                       # no scanning/capturing mid-teleport
+	# Guardian LEASH: if an active guardian fight's body is now far behind us, abandon it.
+	# A parked, unreachable boss otherwise keeps summoning/firing (no distance gate in
+	# _step_boss) → in_combat() stays true → warp bleeds to sublight → you're stranded.
+	# Runs independent of the capturable check below so it fires even out in empty space.
+	if combat.guard_body != "":
+		var grel: Vector3 = planets.rel_of(combat.guard_body)
+		if grel != Vector3.ZERO and grel.length() > GUARD_RANGE * 2.5:
+			combat.abandon_combat()
 	var name := planets.nearest_name
 	# Hub gate-suns (✦) and the Interstellar hub are travel markers — never captured or
 	# guarded. Skip the whole flow there (no monsters in the hub, no fake captures).
@@ -501,9 +513,12 @@ func _update_scan(delta: float) -> void:
 		_scan = minf(_scan + delta / SCAN_SECONDS, 1.0)
 		if _scan >= 1.0:
 			if codex.discover(name):
-				hud.toast = "✦  CAPTURED  %s   ·   press G and Claim %d coins" % [name, CAPTURE_REWARD]
+				# Mission complete: this body's per-mission bounty (see MissionDB), claimed via G.
+				hud.toast = "✦  MISSION — %s surveyed   ·   press G to claim %d coins" \
+					% [name, MissionDB.reward(name)]
 				hud.toast_t = 4.0
-				_quest_event("capture")              # quest line: bodies surveyed
+				if name == _active_quest:
+					_advance_quest()    # tracked quest done → guide the next unsurveyed body here
 				if combat.guard_body == name:
 					combat.clear_guardians()
 			_scan = 0.0
@@ -536,6 +551,7 @@ func set_nav_target(body_name: String) -> void:
 	if not buy_navigator():
 		return
 	_nav_off = false
+	_active_quest = ""        # a manual waypoint supersedes quest tracking
 	_nav_locked = body_name
 	if hud != null:
 		hud.set_nav_stopped(false)
@@ -546,6 +562,7 @@ func start_autopilot(body_name: String) -> void:
 	if not buy_navigator():
 		return
 	_nav_off = false
+	_active_quest = ""        # autopilot supersedes quest tracking
 	_nav_locked = body_name
 	if hud != null:
 		hud.set_nav_stopped(false)
@@ -561,10 +578,11 @@ func can_claim(body_name: String) -> bool:
 func claim_reward(body_name: String) -> int:
 	if not can_claim(body_name):
 		return 0
-	coins += CAPTURE_REWARD
+	var bounty := MissionDB.reward(body_name)   # per-mission bounty (see MissionDB)
+	coins += bounty
 	_claimed[body_name] = true
 	_save_profile()
-	return CAPTURE_REWARD
+	return bounty
 
 # Map Navigate / Auto-pilot is a PAID navigator service. Returns true if it could pay.
 func buy_navigator() -> bool:
@@ -599,14 +617,13 @@ func _load_profile() -> void:
 		for s in cfg.get_value("player", "wormholes_found", []):
 			_wormholes_found[s] = true
 		_onboarding_step = int(cfg.get_value("player", "onboarding_step", 0))
+		_active_quest = str(cfg.get_value("player", "active_quest", ""))
 		# Where you left off last session (restored after the world is built — see
 		# _restore_location). Position is only ever saved from a STABLE state.
 		_saved_system = str(cfg.get_value("player", "system", ""))
 		_has_saved_pos = cfg.has_section_key("player", "pos")
 		_saved_pos = cfg.get_value("player", "pos", Vector3.ZERO)
 		_saved_ship_index = int(cfg.get_value("player", "ship_index", -1))
-		_quest_idx = int(cfg.get_value("player", "quest_idx", 0))
-		_quest_progress = int(cfg.get_value("player", "quest_progress", 0))
 	# Home (Sol) is always known — you start there, so it's instant-travel from frame one.
 	_visited[SystemDB.SOL] = true
 
@@ -619,8 +636,7 @@ func _save_profile() -> void:
 	cfg.set_value("player", "nav_unlocked", _nav_unlocked.keys())
 	cfg.set_value("player", "wormholes_found", _wormholes_found.keys())
 	cfg.set_value("player", "onboarding_step", _onboarding_step)
-	cfg.set_value("player", "quest_idx", _quest_idx)
-	cfg.set_value("player", "quest_progress", _quest_progress)
+	cfg.set_value("player", "active_quest", _active_quest)
 	if ship != null:
 		cfg.set_value("player", "customization", ship.customization_state())
 		# Persist your location + active hull — but ONLY from a stable state. Mid-wormhole
@@ -687,10 +703,18 @@ func is_edge_known(a: String, b: String) -> bool:
 	return _visited.has(a) or _visited.has(b) or _nav_unlocked.has(a) or _nav_unlocked.has(b)
 
 # This system's portals filtered to the links the player knows (what set_portals shows).
+# Star systems: arriving in a system reveals all its exit wormholes (is_edge_known is true
+# via the system you're standing in). The Interstellar HUB is the exception — it's a junction,
+# not a place you "discover onward from", so it shows ONLY wormholes whose DESTINATION the
+# player has actually unlocked (visited or charted). Otherwise visiting the hub would leak the
+# whole network, since the hub itself counts as visited.
 func _known_portals(id: String) -> Array:
 	var out := []
+	var hub := id == SystemDB.INTERSTELLAR
 	for p in SystemDB.portals(id):
-		if is_edge_known(id, p.dest):
+		var known: bool = (_visited.has(p.dest) or _nav_unlocked.has(p.dest)) if hub \
+			else is_edge_known(id, p.dest)
+		if known:
 			out.append(p)
 	return out
 
@@ -712,6 +736,7 @@ func navigate_to(id: String) -> void:
 	if id == "" or id == current_system:
 		return
 	_nav_goal = id
+	_active_quest = ""        # a map-navigate goal supersedes quest tracking
 	_nav_locked = ""          # the goal-guide supersedes any old fixed waypoint
 	_nav_off = false
 	if hud != null:
@@ -796,13 +821,61 @@ func toggle_nav() -> void:
 	_update_navigator()
 
 
-# Cancel a locked (paid) map waypoint + any autopilot (the on-screen Cancel Nav button).
+# Cancel a locked (paid) map waypoint + any autopilot + a tracked quest (the Cancel Nav button).
 func cancel_locked_nav() -> void:
 	_nav_locked = ""
 	_nav_goal = ""            # also clear a map "Navigate" guide
+	_active_quest = ""        # and stop tracking a quest
 	ship.autopilot = false
 	hud.set_nav_stopped(false)
+	_save_profile()
 	_update_navigator()
+
+
+func active_quest() -> String:
+	return _active_quest
+
+# Track a quest (free) — the nav arrow + tracker will guide you to this body until you survey
+# it, routing through wormholes if it's in another system. Supersedes the map's other guides.
+func track_quest(body_name: String) -> void:
+	_active_quest = body_name
+	_nav_goal = ""
+	_nav_locked = ""
+	_nav_off = false
+	ship.autopilot = false
+	if hud != null:
+		hud.set_nav_stopped(false)
+	_save_profile()
+	_update_navigator()
+
+# Nearest UN-surveyed mission body in the current system ("" if the system's fully surveyed).
+func _nearest_unsurveyed_body() -> String:
+	if codex == null:
+		return ""
+	var best := ""
+	var nd := INF
+	for body in MissionDB.bodies_in(current_system):
+		if codex.is_discovered(body):
+			continue
+		var d: float = planets.rel_of(body).length()
+		if d < nd:
+			nd = d
+			best = body
+	return best
+
+# After surveying the tracked quest, advance to the next unsurveyed body here; clear if none.
+func _advance_quest() -> void:
+	_active_quest = _nearest_unsurveyed_body()
+	_save_profile()
+
+# ONE router for cross-system guidance (shared by the quest guide + the map's Navigate): the
+# render-space offset of THIS system's wormhole leading toward `sys`, over the KNOWN links.
+# { ok=false } when no known route exists yet.
+func _route_to(sys: String) -> Dictionary:
+	var hop := SystemDB.next_hop(current_system, sys, Callable(self, "is_edge_known"))
+	if hop == "":
+		return { "ok": false }
+	return { "ok": true, "hop": hop, "rel": wormhole.portal_rel_for(hop, ship.true_pos) }
 
 
 func _update_navigator() -> void:
@@ -814,21 +887,48 @@ func _update_navigator() -> void:
 		navigator.update_nav(ship.camera, false, Vector3.ZERO, "", "")   # gizmo only
 		hud.set_objective("")
 		return
+	elif _active_quest != "" and not _nav_off:
+		# TRACKED QUEST guide (free, top priority): route to the body's system via wormholes,
+		# then point straight at the body once you're in its system. Completion normally clears
+		# it in the capture path; this backstop advances if it's already surveyed.
+		if codex != null and codex.is_discovered(_active_quest):
+			_advance_quest()
+		if _active_quest == "":
+			navigator.update_nav(ship.camera, false, Vector3.ZERO, "", "")
+			hud.set_objective("")
+			return
+		var qbody := _active_quest
+		var qsys := MissionDB.system_of(qbody)
+		var qtitle := MissionDB.title_for(qbody)
+		if qsys == current_system:
+			rel = planets.rel_of(qbody)
+			navigator.update_nav(ship.camera, true, rel, "QUEST: %s" % qbody, _fmt_nav_dist(rel.length()), true)
+			hud.set_objective("✦  QUEST  %s  —  survey %s   %s" % [qtitle, qbody, _fmt_nav_dist(rel.length())])
+		else:
+			var rt := _route_to(qsys)
+			if not rt.ok:
+				navigator.update_nav(ship.camera, false, Vector3.ZERO, "", "")
+				hud.set_objective("✦  QUEST  %s  —  no known route yet, explore on" % qtitle)
+				return
+			var hopname := SystemDB.display_name(rt.hop)
+			navigator.update_nav(ship.camera, true, rt.rel, "QUEST → %s" % hopname, _fmt_nav_dist(rt.rel.length()), true)
+			hud.set_objective("✦  QUEST  %s  —  %s via %s   %s" % [qtitle, SystemDB.display_name(qsys), hopname, _fmt_nav_dist(rt.rel.length())])
+		return
 	elif _nav_goal != "":
 		# Map "Navigate" guide (orange): route over KNOWN links and point at THIS system's
 		# wormhole leading to the next hop ("go to Proxima first, then Alpha").
 		var gname := SystemDB.display_name(_nav_goal)
-		var hop := SystemDB.next_hop(current_system, _nav_goal, Callable(self, "is_edge_known"))
-		if hop == "":
+		var rg := _route_to(_nav_goal)
+		if not rg.ok:
 			navigator.update_nav(ship.camera, false, Vector3.ZERO, "", "")   # gizmo only
 			hud.set_objective("◆  NAVIGATE  %s  —  no known route yet, explore on" % gname)
 			return
-		rel = wormhole.portal_rel_for(hop, ship.true_pos)
-		var hopname := SystemDB.display_name(hop)
-		tname = ("WORMHOLE → %s" % hopname) if hop == _nav_goal else ("→ %s  via %s" % [gname, hopname])
+		rel = rg.rel
+		var hopname := SystemDB.display_name(rg.hop)
+		tname = ("WORMHOLE → %s" % hopname) if rg.hop == _nav_goal else ("→ %s  via %s" % [gname, hopname])
 		var gd := _fmt_nav_dist(rel.length())
 		navigator.update_nav(ship.camera, true, rel, tname, gd, true)
-		var via := "" if hop == _nav_goal else "   (next: %s)" % hopname
+		var via := "" if rg.hop == _nav_goal else "   (next: %s)" % hopname
 		hud.set_objective("◆  NAVIGATE  %s%s   %s" % [gname, via, gd])
 		return
 	elif _nav_locked != "":
@@ -873,27 +973,22 @@ func _current_objective() -> Dictionary:
 	# can't miss where to go.
 	if not _onboard.is_empty() and _onboarding_step == _onboard.size() - 1:
 		return _nearest_gate_objective()
-	# CONTINUOUS cursor targeting: suggest whatever the CROSSHAIR is over — the body
-	# whose on-screen position is nearest screen-centre (not the camera axis, which is
-	# offset by the chase cam). Aim the cursor at things to read them; no Tab babysitting.
+	# The hub has no bodies — guide to the nearest gate to dive into.
 	if current_system == SystemDB.INTERSTELLAR:
 		return _nearest_gate_objective()
-	var cam := ship.camera
-	if cam == null:
-		return _nearest_gate_objective()
-	var center: Vector2 = cam.get_viewport().get_visible_rect().size * 0.5
+	# QUEST FIRST: with nothing explicitly tracked, the arrow points at the nearest UNSURVEYED
+	# body — the next mission to finish right here. Once the system is fully surveyed it falls
+	# back to the nearest wormhole (the way onward), so the arrow's never dead.
 	var best := ""
-	var best_px := 240.0              # body must be within this many px of the crosshair
+	var best_d := INF
 	var best_rel := Vector3.ZERO
 	for bname in planets.targetables():
-		if not _capturable(bname):
+		if not _capturable(bname) or codex.is_discovered(bname):
 			continue
 		var rel: Vector3 = planets.rel_of(bname)
-		if rel.length() < 0.001 or cam.is_position_behind(rel):
-			continue
-		var px: float = cam.unproject_position(rel).distance_to(center)
-		if px < best_px:
-			best_px = px
+		var d := rel.length()
+		if d > 0.001 and d < best_d:
+			best_d = d
 			best = bname
 			best_rel = rel
 	if best != "":
@@ -925,6 +1020,11 @@ func _fmt_nav_dist(u: float) -> String:
 func notify_map_opened() -> void:
 	_map_seen = true
 
+# Latched by QuestLog the first time the mission log is opened (drives the final onboarding
+# tip — the log pauses the tree, so _process can't observe its open flag directly).
+func notify_log_opened() -> void:
+	_log_seen = true
+
 
 func _update_onboarding() -> void:
 	if _onboarding_step >= _onboard.size() or docked or ship.transiting:
@@ -942,35 +1042,46 @@ func _update_onboarding() -> void:
 	hud.set_tip(_onboard[_onboarding_step].tip)
 
 
-# Quest line: detect kills as a per-frame delta of combat.kills (monotonic within a session),
-# then refresh the top-center tracker. Capture/visit events are pushed from their own hooks.
+# The top-center quest tracker. A TRACKED quest (chosen in the J log) takes priority and shows
+# where it's guiding you; otherwise it points at the nearest UNSURVEYED body in the system
+# you're in, so there's always a "next thing to scan". When the system's fully surveyed it
+# shows overall progress and nudges you to the J log. The full board lives in QuestLog (J).
 func _update_quests() -> void:
-	if combat != null:
-		var dk: int = combat.kills - _last_kills
-		if dk > 0:
-			_last_kills = combat.kills
-			_quest_event("kill", dk)
-	if _quest_idx >= _quests.size():
-		hud.set_quest("✦  ALL QUESTS COMPLETE — pilot of the Survey")
+	if codex == null:
 		return
-	var q = _quests[_quest_idx]
-	hud.set_quest("✦  QUEST · %s   (%d/%d)" % [q.title, mini(_quest_progress, int(q.target)), int(q.target)])
-
-# Advance the active quest when an event of its type fires. n = how many (kills can batch).
-func _quest_event(kind: String, n := 1) -> void:
-	if _quest_idx >= _quests.size():
+	# A tracked quest drives the tracker (self-heal if it was already surveyed).
+	if _active_quest != "" and codex.is_discovered(_active_quest):
+		_advance_quest()
+	if _active_quest != "":
+		var qsys := MissionDB.system_of(_active_quest)
+		var where: String = "here — survey it" if qsys == current_system else "→ %s" % SystemDB.display_name(qsys)
+		hud.set_quest("✦  TRACKING · %s   (%s · %d coins)"
+			% [MissionDB.title_for(_active_quest), where, MissionDB.reward(_active_quest)])
 		return
-	var q = _quests[_quest_idx]
-	if q.type != kind:
-		return
-	_quest_progress += n
-	if _quest_progress >= int(q.target):
-		coins += int(q.reward)
-		hud.toast = "✦  QUEST COMPLETE — %s   ·   +%d coins" % [q.title, int(q.reward)]
-		hud.toast_t = 5.0
-		_quest_idx += 1
-		_quest_progress = 0      # don't carry overflow across (next quest is a different type)
-	_save_profile()
+	var next_body := ""
+	var nd := INF
+	for body in MissionDB.bodies_in(current_system):
+		if codex.is_discovered(body):
+			continue
+		var d: float = planets.rel_of(body).length()
+		if d < nd:
+			nd = d
+			next_body = body
+	if next_body != "":
+		hud.set_quest("✦  MISSION · %s   —  survey %s  (%d coins)"
+			% [MissionDB.title_for(next_body), next_body, MissionDB.reward(next_body)])
+	else:
+		var total := 0
+		var done := 0
+		for m in MissionDB.all_missions():
+			total += 1
+			if codex.is_discovered(m.body):
+				done += 1
+		if done >= total:
+			hud.set_quest("✦  EVERY BODY SURVEYED — pilot of the Survey")
+		else:
+			hud.set_quest("✦  %s fully surveyed   ·   %d/%d catalogue  ·  press J for the next mission"
+				% [SystemDB.display_name(current_system), done, total])
 
 
 # Emergency return to Sol — the panic button. Always available; runs the full ritual.
@@ -1085,7 +1196,6 @@ func _arrive(system_id: String) -> void:
 		var lore: String = SystemDB.lore(system_id)
 		if lore != "":
 			hud.show_lore("%s\n\n%s" % [SystemDB.display_name(system_id), lore])
-		_quest_event("visit")                      # quest line: new systems reached
 	_save_profile()                                # persist visited set + any reward
 	print("[wormhole] arrived at %s — ship.true_pos.length()=%.2f (must be small)"
 		% [SystemDB.display_name(system_id), ship.true_pos.length()])
@@ -1230,7 +1340,7 @@ func _probe_readout() -> String:
 	out += "Hostiles: %d / %d active\n" % [t.alive, t.total]
 	var boss: Dictionary = t.boss
 	if boss.alive:
-		out += "⚠ VORTEX present — %d/%d HP\n" % [boss.hp, boss.max]
+		out += "⚠ %s present — %d/%d HP\n" % [String(boss.get("name", "VORTEX")).to_upper(), boss.hp, boss.max]
 	return out + "Confirmed kills: %d" % t.kills
 
 

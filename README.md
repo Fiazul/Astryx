@@ -1,4 +1,4 @@
-# Astryx · v0.9.0
+# Astryx · v0.10.0
 
 A potato-friendly **third-person space explorer** in Godot 4 / GDScript. Launch
 from Earth, fly the **real** solar system, wormhole to a real exoplanet, dogfight
@@ -11,24 +11,34 @@ detailed assets, just emissive bodies, glow, and a few low-poly meshes.
 - **Seven ships** — Lyra, Stella, Raptor, **Vela** (FTL), **HaniStar**,
   **Raptor 2 Neo** (laser mother-ship), **HaniNebula**. Dock with **F**, swap with
   **1–7**. Each hull has its own stats, boosters, and engine voice.
-- **In-hangar customizer** — pick **body / wing colours** (9-colour palette), toggle
-  the **engine bell**, and switch **metallic / glassy** finish. Choices are saved
+- **In-hangar customizer** — on HaniStar, HaniNebula & Raptor 2 Neo, pick **body /
+  wing colours** (10-colour palette incl. **Champagne Gold** metallic), toggle the
+  **engine bell**, and switch **metallic / glassy** finish. Choices are saved
   per-ship to your profile and persist across sessions.
+- **Editable HUD** — drag-place and scale HUD widgets in a layout editor; placement
+  persists to your profile (defaults are the shipped layout).
 - **Flight feel** — sublight "space drift" that carries momentum through turns,
   weighted strafe, eased mouse-steer, and living animated booster flames.
 - **Wormhole travel** — fly to a portal, press **F**, transit the tunnel, emerge at
   a real exoplanet system.
 - **Combat** — left-click bolts (aim by flying), right-click nose laser on Raptor 2;
-  alien ships hunt and fire back; capture bodies for **coins**.
-- **Navigation & discovery** — star **map** (M), paid **waypoint navigator** (Tab),
-  corner radar, **scan** (V) → persistent **Codex** (C) with real NASA facts (G).
+  alien ships hunt and fire back. Guarded bodies are defended by a **named boss** +
+  its summoned fleet — beat the boss to capture the body for **coins**.
+- **Navigation & discovery** — a real zoomable/pannable star **map** (M): star/wormhole/
+  planet icons on toggleable layers, a live player cursor, hover read-outs, wormhole lanes,
+  out to ~150 ly. Wormholes show live on the **corner radar** and the always-on nav arrow
+  points you to the nearest wormhole first. Paid **waypoint navigator** (Tab), **scan** (V) →
+  persistent **Codex** (C) with real NASA facts (G).
+- **Mission log** (J) — every star, planet & moon is its own mission with a crude,
+  (mostly) true story and a coin bounty. Browse the board, click a mission to read it,
+  and **Navigate** straight to it. Survey the body to complete it and claim the bounty.
 - **Audio** — per-ship engine voice + looping music; HaniNebula has her own track.
 
 ## Controls
 `WASD` thrust · `Space/Ctrl` up·down · `Q/E` roll · `Shift` boost · `mouse` aim ·
 **`L-click` fire** · **`R-click` laser** (Raptor 2) · `R` Vela air-brake ·
 `Num Lock` auto-cruise · **`Tab`** waypoint · **`V`** scan · **`C`** codex ·
-**`G`** details · **`M`** map · **`F`** dock / wormhole · **`H`** teleport to Earth ·
+**`J`** mission log · **`G`** details · **`M`** map · **`F`** dock / wormhole · **`H`** teleport to Earth ·
 wheel zoom · **`1–7`** swap ship (docked) · `Esc` free cursor / back
 
 ## Run

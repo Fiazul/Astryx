@@ -364,6 +364,10 @@ static func recolor(model: Node3D, tint: Color, glow: float, chrome := false, ra
 				elif role == "burgundy":
 					m.albedo_color = Color(0.48, 0.08, 0.17); m.metallic = 0.55; m.metallic_specular = 0.8; m.roughness = 0.27
 					m.emission_enabled = true; m.emission = Color(0.48, 0.08, 0.17); m.emission_energy_multiplier = 0.5
+				elif role == "champagne":
+					# Polished champagne-gold metal — high metallic, low roughness for a real gold sheen.
+					m.albedo_color = Color(0.83, 0.69, 0.42); m.metallic = 0.85; m.metallic_specular = 0.9; m.roughness = 0.16
+					m.emission_enabled = true; m.emission = Color(0.83, 0.69, 0.42); m.emission_energy_multiplier = 0.4
 				else:
 					# Light pink crystal body with a feminine rim aura.
 					m.diffuse_mode = BaseMaterial3D.DIFFUSE_TOON   # clean gradients on low-poly faces
