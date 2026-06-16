@@ -96,13 +96,15 @@ var current_system := SystemDB.SOL
 # exception: ship held still, camera eases back, a hue-cycling RGB ring circles you, then
 # you arrive. ~TELEPORT_TIME seconds. (Wormholes are NOT teleport.)
 const TELEPORT_TIME := 12.0
+const TELEPORT_PLATFORM_TIME := 7.0   # platform-network jump: snappier (user wants 5–8s)
 const TELEPORT_ZOOM := 2.2     # camera pull-back during the ritual
 var _tp_active := false
 var _tp_t := 0.0
+var _tp_dur := TELEPORT_TIME
 var _tp_dest := ""
 var _tp_label := ""
-var _tp_ring: MeshInstance3D
-var _tp_ring_mat: StandardMaterial3D
+var _tp_ring: MeshInstance3D          # RGB containment cylinder around the ship
+var _tp_ring_mat: StandardMaterial3D  # scrolling striped material → "pulling" motion
 var _music: AudioStreamPlayer
 var _music_default: AudioStream   # the shared bgm every hull flies to
 var _music_hani: AudioStream      # HaniNebula's dedicated theme (null if missing)
@@ -205,10 +207,12 @@ func _ready() -> void:
 	hud.planets = planets
 	hud.combat = combat
 	hud.teleport_button.pressed.connect(teleport_home)
+	hud.tp_cancel_button.pressed.connect(cancel_teleport)   # abort an in-progress teleport
 	hud.ship_selected.connect(_on_hangar_pick)   # click a hangar row to swap ship
 	hud.ship_color_selected.connect(_on_ship_color_pick)   # click a swatch to recolour the hull
 	hud.ship_bell_toggled.connect(_on_ship_bell_toggle)    # add/remove the booster engine bell
 	hud.ship_finish_selected.connect(_on_ship_finish_pick)  # metallic / glassy surface finish
+	hud.open_teleport_map.connect(_on_open_teleport_map)    # dock → open the teleport-network map
 
 	# Discovery progress (persisted) + real planet facts + the Details panel.
 	codex = Codex.new()
@@ -1091,21 +1095,85 @@ func teleport_home() -> void:
 	start_teleport(SystemDB.SOL, "EMERGENCY RETURN — HOME")
 
 
+# The platform network you can fast-travel between: every system with a dockable platform
+# that you've already REACHED (visited), minus the one you're docked at right now.
+func _unlocked_platforms() -> Array:
+	var out := []
+	for id in SystemDB.all():
+		if id == current_system or id == SystemDB.INTERSTELLAR:
+			continue
+		if SystemDB.has_station(id) and _visited.has(id):
+			out.append({ "id": id, "name": SystemDB.display_name(id) })
+	out.sort_custom(func(a, b): return String(a.name) < String(b.name))
+	return out
+
+
+# True if `id` is a valid teleport destination: has a station, you've reached it, and it's
+# not where you are now. Used by the teleport-mode map to decide whether to offer "confirm".
+func is_teleport_unlocked(id: String) -> bool:
+	return id != current_system and id != SystemDB.INTERSTELLAR \
+		and SystemDB.has_station(id) and _visited.has(id)
+
+
+# Dock → "TELEPORT NETWORK" button: open the star map in teleport mode (only unlocked
+# platforms are jump targets). The map's confirm button calls teleport_to_platform().
+func _on_open_teleport_map() -> void:
+	if _tp_active or ship.transiting:
+		return
+	if _unlocked_platforms().is_empty():
+		hud.toast = "No platforms unlocked yet — visit a station to add it to the network."
+		hud.toast_t = 3.0
+		return
+	map.open_teleport()
+
+
+# Dock → pick a platform from the teleport map: undock, then run the (shorter) teleport
+# ritual to that system (the ritual's countdown doubles as the load delay; _arrive swaps
+# systems at the end). Called by StarMap's teleport-mode confirm button.
+func teleport_to_platform(id: String) -> void:
+	if _tp_active or ship.transiting:
+		return
+	_set_docked(false)
+	start_teleport(id, "PLATFORM JUMP → %s" % SystemDB.display_name(id), TELEPORT_PLATFORM_TIME)
+
+
 # Begin the teleport ritual to `dest`. Freezes the ship, eases the camera back, and spins
 # up the RGB ring; _update_teleport drives the countdown and does the actual _arrive at the
-# end. No-op if already teleporting or mid-wormhole.
-func start_teleport(dest: String, label: String) -> void:
+# end. `dur` is the ritual length. No-op if already teleporting or mid-wormhole.
+func start_teleport(dest: String, label: String, dur := TELEPORT_TIME) -> void:
 	if _tp_active or ship.transiting:
 		return
 	_tp_active = true
 	_tp_t = 0.0
+	_tp_dur = dur
 	_tp_dest = dest
 	_tp_label = label
 	ship.set_frozen(true)            # hold still + slow turntable (see ship.fly frozen branch)
+	ship._set_capture(false)         # free the cursor so the Cancel button is clickable
 	ship._cam_zoom = TELEPORT_ZOOM   # camera eases back (smoothed in ship._update_camera)
 	if _tp_ring == null:
 		_build_teleport_vfx()
 	_tp_ring.visible = true
+	hud.tp_cancel_button.visible = true   # let the player abort the ritual
+	if audio != null:
+		audio.play_click()
+
+
+# Abort an in-progress teleport: stop the countdown, drop the cylinder, hand control back.
+# The ship stays in the current system (it was already undocked when the ritual began).
+func cancel_teleport() -> void:
+	if not _tp_active:
+		return
+	_tp_active = false
+	if _tp_ring != null:
+		_tp_ring.visible = false
+	hud.tp_cancel_button.visible = false
+	hud.set_menu("")
+	ship.set_frozen(false)
+	ship._cam_zoom = 1.0
+	ship._set_capture(true)
+	hud.toast = "Teleport cancelled."
+	hud.toast_t = 2.0
 	if audio != null:
 		audio.play_click()
 
@@ -1114,22 +1182,25 @@ func _update_teleport(delta: float) -> void:
 	if not _tp_active:
 		return
 	_tp_t += delta
-	# Hue-cycling RGB ring, spinning on two axes + a soft breathe → a "containment field".
-	var hue: float = fmod(_tp_t * 0.5, 1.0)
-	var col := Color.from_hsv(hue, 0.85, 1.0)
+	# Hue-cycling RGB cylinder enclosing the ship; bright bands stream UP the tube and
+	# accelerate → the ship reads as being "pulled" up the beam.
+	var hue: float = fmod(_tp_t * 0.4, 1.0)
+	var col := Color.from_hsv(hue, 0.8, 1.0)
 	_tp_ring_mat.emission = col
 	_tp_ring_mat.albedo_color = col
-	_tp_ring_mat.emission_energy_multiplier = 2.8
-	_tp_ring.rotate_y(3.2 * delta)
-	_tp_ring.rotate_x(1.9 * delta)
-	var s: float = 1.0 + 0.12 * sin(_tp_t * 4.0)
-	_tp_ring.scale = Vector3(s, s, s)
+	var pull: float = 1.2 + _tp_t * 0.7                       # bands speed up over time
+	_tp_ring_mat.uv1_offset = Vector3(0.0, -_tp_t * pull, 0.0)
+	_tp_ring_mat.emission_energy_multiplier = 2.6 + 1.4 * absf(sin(_tp_t * 6.0))
+	_tp_ring.rotate_y(0.9 * delta)
+	var s: float = 1.0 + 0.05 * sin(_tp_t * 5.0)
+	_tp_ring.scale = Vector3(s, 1.0, s)
 	# Countdown overlay (reuses the centered menu label).
-	var rem: int = int(ceil(maxf(TELEPORT_TIME - _tp_t, 0.0)))
+	var rem: int = int(ceil(maxf(_tp_dur - _tp_t, 0.0)))
 	hud.set_menu("◇  TELEPORT  ◇\n\n%s\n\nLocking coordinates…\n\nArriving in  %d" % [_tp_label, rem])
-	if _tp_t >= TELEPORT_TIME:
+	if _tp_t >= _tp_dur:
 		_tp_active = false
 		_tp_ring.visible = false
+		hud.tp_cancel_button.visible = false
 		hud.set_menu("")
 		ship.set_frozen(false)
 		ship._cam_zoom = 1.0
@@ -1137,24 +1208,52 @@ func _update_teleport(delta: float) -> void:
 		ship._set_capture(true)
 
 
-# A torus "containment ring" that lives on the ship and circles it during a teleport.
+# An RGB "containment cylinder" that encloses the ship during a teleport. The side is a
+# tiled stripe texture; scrolling its UV upward (in _update_teleport) makes glowing bands
+# stream up the tube → the ship looks like it's being pulled up a transporter beam.
 func _build_teleport_vfx() -> void:
-	var torus := TorusMesh.new()
-	torus.inner_radius = 1.15
-	torus.outer_radius = 1.5
-	torus.rings = 32
-	torus.ring_segments = 12
+	var cyl := CylinderMesh.new()
+	cyl.top_radius = 2.1
+	cyl.bottom_radius = 2.1
+	cyl.height = 13.0
+	cyl.radial_segments = 48
+	cyl.rings = 1
+	cyl.cap_top = false
+	cyl.cap_bottom = false
 	_tp_ring = MeshInstance3D.new()
-	_tp_ring.mesh = torus
+	_tp_ring.mesh = cyl
 	_tp_ring_mat = StandardMaterial3D.new()
 	_tp_ring_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_tp_ring_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_tp_ring_mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	_tp_ring_mat.cull_mode = BaseMaterial3D.CULL_DISABLED       # visible from inside the tube too
 	_tp_ring_mat.emission_enabled = true
 	_tp_ring_mat.emission = Color(1, 0, 0)
 	_tp_ring_mat.albedo_color = Color(1, 0, 0)
 	_tp_ring_mat.emission_energy_multiplier = 2.8
+	var stripes := _tp_stripe_texture()
+	_tp_ring_mat.albedo_texture = stripes
+	_tp_ring_mat.emission_texture = stripes
+	_tp_ring_mat.uv1_scale = Vector3(6.0, 10.0, 1.0)           # bands around + many up the tube
 	_tp_ring.material_override = _tp_ring_mat
 	_tp_ring.visible = false
 	ship.add_child(_tp_ring)
+
+
+# Soft horizontal band that tiles seamlessly up the cylinder (transparent → bright → transparent).
+func _tp_stripe_texture() -> GradientTexture2D:
+	var g := Gradient.new()
+	g.set_color(0, Color(1, 1, 1, 0.0))
+	g.add_point(0.5, Color(1, 1, 1, 1.0))
+	g.set_color(1, Color(1, 1, 1, 0.0))
+	var t := GradientTexture2D.new()
+	t.gradient = g
+	t.fill = GradientTexture2D.FILL_LINEAR
+	t.fill_from = Vector2(0, 0)
+	t.fill_to = Vector2(0, 1)
+	t.width = 4
+	t.height = 64
+	return t
 
 
 # Emerge from a wormhole in a new system: swap bodies, hard-reset the ship to a
@@ -1318,7 +1417,7 @@ func _update_dock_ui() -> void:
 		if dock_dist < INF else 0.0
 	if docked:
 		hud.set_prompt("")
-		hud.set_hangar(true, _ship_names(), ship.current_index(), dock_name)
+		hud.set_hangar(true, _ship_names(), ship.current_index(), dock_name, _unlocked_platforms())
 	else:
 		hud.set_hangar(false, PackedStringArray(), 0, "")
 		if _dock_in_range:

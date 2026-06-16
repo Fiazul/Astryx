@@ -24,7 +24,7 @@ const PLANET_RING := 17.0           # px radius of the planet ring around a sele
 
 var main: Node
 var view_system := ""               # which system is selected (its planets + label show)
-var filters := { "stars": true, "wormholes": true, "planets": true, "lanes": true }
+var filters := { "stars": true, "wormholes": true, "planets": true, "lanes": true, "platforms": true }
 
 var _zoom := 16.0                   # px per light-year
 var _zoom_min := 1.5
@@ -84,6 +84,14 @@ func _draw() -> void:
 	if filters.stars:
 		for id in ids:
 			_draw_star(font, id)
+
+	# Platforms — a ⬡ badge on every system that carries a dockable space platform
+	# (bright once you've reached it, dim otherwise). These are the station→station
+	# teleport network, so seeing them on the map lets you plan jumps.
+	if filters.platforms:
+		for id in ids:
+			if SystemDB.has_station(id):
+				_draw_platform(id)
 
 	# Player cursor — always on top, animated.
 	_draw_player(font)
@@ -157,6 +165,23 @@ func _draw_planets(id: String) -> void:
 		var pp := p + Vector2(cos(a), sin(a)) * PLANET_RING
 		var col: Color = worlds[i].get("color", Color(0.7, 0.8, 0.9))
 		draw_circle(pp, 2.6, col)
+
+
+# A ⬡ platform badge, set just above-right of the star. Teal, bright if the system is
+# known (reachable platform), dim if still locked.
+func _draw_platform(id: String) -> void:
+	var p := _project(SystemDB.galaxy_pos(id))
+	if p.x < -HIT_R or p.x > size.x + HIT_R or p.y < -HIT_R or p.y > size.y + HIT_R:
+		return
+	var known: bool = main.star_state(id) != "locked"
+	var col := Color(0.35, 1.0, 0.85, 0.95) if known else Color(0.35, 0.8, 0.7, 0.4)
+	var c := p + Vector2(STAR_R + 7.0, -(STAR_R + 6.0))
+	var pts := PackedVector2Array()
+	for k in 7:                                   # 6 sides + close
+		var a := PI / 6.0 + TAU * float(k % 6) / 6.0
+		pts.append(c + Vector2(cos(a), sin(a)) * 4.2)
+	draw_polyline(pts, col, 1.4, true)
+	draw_circle(c, 1.2, col)                       # tiny core dot
 
 
 # The player marker: a mouse-cursor arrow at the current system, with a live pulse halo.

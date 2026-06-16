@@ -109,8 +109,8 @@ const TRAIL_MAX := 14.0            # MIN tail reach behind the head (world units
 # Fast hulls (Stella/Neo at 1700 u/s) cover ~27 units in a single frame, outrunning a fixed
 # 14-unit tail so the streak detaches and reads as a "line in the distance." Scale the reach
 # with bolt speed (≈ this many seconds of travel) so the tail always stays pinned to the nose.
-const TRAIL_REACH_SECONDS := 0.03
-const TRAIL_WIDTH := 0.04          # thin wisp, like a booster plume — not a fat bar
+const TRAIL_REACH_SECONDS := 0.07
+const TRAIL_WIDTH := 0.03          # thin wisp, like a booster plume — not a fat bar
 const HANI_PINK := Color(1.0, 0.32, 0.72)   # HaniStar's signature bullet pink (matches her hull)
 const PLAYER_MAX_HP := 100
 
@@ -177,7 +177,7 @@ func _ready() -> void:
 	# HaniStar's bolts: hot PINK to match her hull, much brighter + whiter-hot core so they
 	# read as strong as she is.
 	_bolt_mat_strong = _bolt_material(HANI_PINK)
-	_bolt_mat_strong.emission_energy_multiplier = 18.0
+	_bolt_mat_strong.emission_energy_multiplier = 36.0
 	_bolt_mat_strong.albedo_color = HANI_PINK.lerp(Color.WHITE, 0.7)
 	_abolt_mat = _bolt_material(Color(1.0, 0.4, 0.3))    # alien bolts: red
 	_laser_bolt_mat = _bolt_material(Color(1.0, 0.12, 0.08))   # Lyra: red laser bolts
@@ -989,7 +989,7 @@ func _bolt_material(c: Color) -> StandardMaterial3D:
 	m.emission_enabled = true
 	m.emission = c
 	m.albedo_color = c.lerp(Color.WHITE, 0.6)    # white-hot core reads brighter
-	m.emission_energy_multiplier = 10.0          # well above the glow HDR threshold (1.0) so they bloom hard
+	m.emission_energy_multiplier = 20.0          # bullet glow strength (HDR bloom)
 	return m
 
 

@@ -253,12 +253,22 @@ func transit_remaining() -> float:
 func update(ship_pos: Vector3, delta: float) -> bool:
 	if transiting:
 		_t += delta
-		_tunnel_mat.uv1_offset += Vector3(0.0, -2.5 * delta, 0.0)  # rush the rings past
-		var pulse := 0.7 + 0.3 * sin(_t * 8.0)
-		_tunnel_mat.emission_energy_multiplier = 2.0 * pulse
+		# Rings rush past hard and accelerate over the dive; the whole tube swirls and the
+		# colour storms through a cold→violet→white-hot band for a hypersonic, stormy feel.
+		var rush: float = 9.0 + 6.0 * sin(_t * 1.3)             # surging, not constant
+		_tunnel_mat.uv1_offset += Vector3(0.0, -rush * delta, 0.0)
+		_tunnel.rotate_object_local(Vector3.UP, 1.4 * delta)   # swirl around the tube axis
+		var storm: float = 0.6 + 0.4 * sin(_t * 9.0) + 0.2 * sin(_t * 23.0)
+		_tunnel_mat.emission_energy_multiplier = 3.2 * storm
+		var hue: float = fmod(0.62 + _t * 0.15, 1.0)           # drift cold-blue → violet
+		var col := Color.from_hsv(hue, 0.55, 1.0)
+		_tunnel_mat.emission = col
+		var s: float = 1.0 + 0.08 * sin(_t * 11.0)             # tube breathes/buffets
+		_tunnel.scale = Vector3(s, 1.0, s)
 		if _t >= _duration:
 			transiting = false
 			_tunnel.visible = false
+			_tunnel.scale = Vector3.ONE
 			return true
 		return false
 

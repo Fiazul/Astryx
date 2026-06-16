@@ -403,6 +403,12 @@ func fly(delta: float) -> void:
 		_lift = 0.0
 		_look_yaw = 0.0
 		_look_pitch = 0.0
+		# Face the nose INTO the tunnel (the tunnel renders ahead at local -Z). Flip 180°
+		# so the ship dives forward instead of riding through tail-first. A subtle roll +
+		# wobble keeps it alive under the camera shake. (Reset to 0 on the normal path.)
+		var wob := Time.get_ticks_msec() * 0.001
+		_mesh_root.rotation = Vector3(
+			sin(wob * 2.3) * 0.06, PI + sin(wob * 1.7) * 0.05, sin(wob * 3.1) * 0.10)
 		_update_boosters(1.0, delta)
 		_update_streaks(MAX_SPEED)   # full streaks during wormhole transit
 		_update_camera(delta)
@@ -607,7 +613,7 @@ func fly(delta: float) -> void:
 		var sway := (sin(st * 0.9 * rate) + 0.4 * sin(st * 0.37 * rate + 1.1)) / 1.4
 		target_bank = clampf(target_bank + sway * amp * sway_ramp, -BANK_ANGLE, BANK_ANGLE)
 	_bank = lerpf(_bank, target_bank, clampf(BANK_SMOOTH * delta, 0.0, 1.0))
-	_mesh_root.rotation.z = _bank
+	_mesh_root.rotation = Vector3(0.0, 0.0, _bank)   # clear any transit flip/wobble
 
 	# --- Engine / booster intensity ---
 	var throttle := 1.0 if (Input.is_physical_key_pressed(KEY_W) or auto_cruise) else 0.18
@@ -688,6 +694,18 @@ func _update_camera(delta: float) -> void:
 	_look_pitch_s = lerpf(_look_pitch_s, _look_pitch, lk)
 	var basis := _cam_basis * (Basis(Vector3.UP, _look_yaw_s) * Basis(Vector3.RIGHT, _look_pitch_s))
 	var cam_pos := basis * (CAM_OFFSET * _cam_zoom_smooth)  # ship at origin -> global
+	# Wormhole transit: violent hand-held shake (position jitter + camera roll/pitch buffeting)
+	# and a wide FOV punch → the tunnel feels hypersonic and stormy, not static.
+	if transiting:
+		var t := Time.get_ticks_msec() * 0.001
+		var pj := 0.22
+		cam_pos += basis * Vector3(sin(t * 53.0) * pj, cos(t * 61.0) * pj, sin(t * 71.0) * pj * 0.5)
+		var jr := 0.016
+		basis = basis * Basis.from_euler(Vector3(
+			sin(t * 47.0) * jr, cos(t * 41.0) * jr, sin(t * 67.0) * jr * 2.2))
+		camera.global_transform = Transform3D(basis, cam_pos)
+		camera.fov = lerpf(camera.fov, FOV_BASE + FOV_KICK * 1.7, clampf(6.0 * delta, 0.0, 1.0))
+		return
 	camera.global_transform = Transform3D(basis, cam_pos)
 	# Clamp the fraction so warp speeds don't blow the FOV out into a fisheye.
 	var speed_frac := clampf(velocity.length() / MAX_SPEED, 0.0, 1.0)

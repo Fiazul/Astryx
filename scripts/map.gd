@@ -25,6 +25,8 @@ var _body_menu: PopupMenu
 var _menu_body := ""
 var _view_system := ""
 var _open := false
+var _tp_mode := false   # opened from a dock's TELEPORT NETWORK button: the right column
+						#   offers "confirm teleport" for unlocked platforms instead of nav.
 
 
 func _ready() -> void:
@@ -55,7 +57,20 @@ func toggle() -> void:
 	if _open:
 		_close()
 	else:
+		_tp_mode = false   # M / map button = normal chart, never teleport mode
 		_open_map()
+
+
+# Open the chart in teleport mode (from a dock). Same chart, but the right column lets you
+# confirm a jump to any unlocked platform. The platforms layer is forced on so targets show.
+func open_teleport() -> void:
+	if _open:
+		_close()
+	_tp_mode = true
+	_open_map()
+	if _chart != null:
+		_chart.filters["platforms"] = true
+		_chart.queue_redraw()
 
 
 func _open_map() -> void:
@@ -76,6 +91,7 @@ func _open_map() -> void:
 
 func _close() -> void:
 	_open = false
+	_tp_mode = false
 	_root.visible = false
 	get_tree().paused = false
 	if main != null and main.ship != null and not main.ship.frozen:
@@ -146,6 +162,7 @@ func _build() -> void:
 	fx = _chip("◌ Wormholes", "wormholes", fx, fy, Color(0.7, 0.6, 1.0))
 	fx = _chip("🪐 Planets", "planets", fx, fy, Color(0.6, 0.85, 1.0))
 	fx = _chip("⧓ Lanes", "lanes", fx, fy, Color(0.45, 0.85, 1.0))
+	fx = _chip("⬡ Platforms", "platforms", fx, fy, Color(0.35, 1.0, 0.85))
 
 	# The chart canvas.
 	_chart = MapChart.new()
@@ -243,7 +260,10 @@ func _refresh_system_list() -> void:
 	var sys: String = _view_system
 	var here: bool = sys == main.current_system
 	if _title != null:
-		_title.text = "STAR  MAP   ·   %s%s" % [SystemDB.display_name(sys), "  (you are here)" if here else ""]
+		if _tp_mode:
+			_title.text = "⌖  TELEPORT NETWORK   ·   %s" % SystemDB.display_name(sys)
+		else:
+			_title.text = "STAR  MAP   ·   %s%s" % [SystemDB.display_name(sys), "  (you are here)" if here else ""]
 	_add_travel_action(sys, here)
 	var rows := []
 	for spec in SystemDB.bodies(sys):
@@ -284,6 +304,10 @@ func _add_travel_action(sys: String, here: bool) -> void:
 	info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	info.custom_minimum_size = Vector2(PANEL.x - RIGHT_X - 24, 0)
 	info.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.7))
+	# Teleport mode: the only action is "confirm jump" to an unlocked platform.
+	if _tp_mode:
+		_add_teleport_action(sys, here, info)
+		return
 	if here:
 		info.text = "◉  You are here."
 		info.add_theme_color_override("font_color", Color(0.55, 1.0, 0.6))
@@ -327,6 +351,43 @@ func _add_travel_action(sys: String, here: bool) -> void:
 			if main.unlock_nav(sys):
 				_refresh())
 		_sys_list.add_child(pay)
+	_sys_list.add_child(_spacer())
+
+
+# Teleport-mode right column: confirm a jump to the selected system if it's an unlocked
+# platform; otherwise explain why it can't be a destination.
+func _add_teleport_action(sys: String, here: bool, info: Label) -> void:
+	if here:
+		info.text = "◉  You are docked here.\n\nPick another ⬡ platform on the chart to jump to it."
+		info.add_theme_color_override("font_color", Color(0.55, 1.0, 0.6))
+		_sys_list.add_child(info)
+		_sys_list.add_child(_spacer())
+		return
+	if main.is_teleport_unlocked(sys):
+		info.text = "⬡  %s\n\nA teleport platform you've reached. Jump straight there — the ritual takes a few seconds." % SystemDB.display_name(sys)
+		info.add_theme_color_override("font_color", Color(0.4, 1.0, 0.85))
+		_sys_list.add_child(info)
+		var go := Button.new()
+		go.text = "⌖   CONFIRM TELEPORT"
+		go.focus_mode = Control.FOCUS_NONE
+		go.add_theme_font_size_override("font_size", 14)
+		go.add_theme_color_override("font_color", Color(0.5, 1.0, 0.9))
+		go.add_theme_stylebox_override("normal", _chip_box(Color(0.4, 1.0, 0.85), 0.12))
+		go.add_theme_stylebox_override("hover", _chip_box(Color(0.5, 1.0, 0.9), 0.28))
+		go.add_theme_stylebox_override("pressed", _chip_box(Color(0.7, 1.0, 1.0), 0.40))
+		go.pressed.connect(func():
+			_click_fx(go)
+			_close()                      # unpause the tree BEFORE the ritual starts ticking
+			main.teleport_to_platform(sys))
+		_sys_list.add_child(go)
+	elif SystemDB.has_station(sys):
+		info.text = "🔒  %s has a platform, but you haven't reached it yet. Fly there once to add it to the network." % SystemDB.display_name(sys)
+		info.add_theme_color_override("font_color", Color(0.7, 0.78, 0.9))
+		_sys_list.add_child(info)
+	else:
+		info.text = "✦  %s has no teleport platform.\n\nPick a ⬡ system to jump to it." % SystemDB.display_name(sys)
+		info.add_theme_color_override("font_color", Color(0.7, 0.78, 0.9))
+		_sys_list.add_child(info)
 	_sys_list.add_child(_spacer())
 
 

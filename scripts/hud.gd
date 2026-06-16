@@ -30,6 +30,7 @@ signal ship_selected(index: int)   # emitted when a hangar row is clicked
 signal ship_color_selected(part: String, key: String)   # part = "body" | "wing", key = palette
 signal ship_bell_toggled(on: bool)   # add/remove the booster engine bell
 signal ship_finish_selected(key: String)   # "metallic" | "glassy"
+signal open_teleport_map()   # clicked the dock's "TELEPORT NETWORK" button -> open the map
 
 var ship: Ship
 var planets: PlanetSystem
@@ -84,6 +85,7 @@ var _scan_label: Label  # scan prompt / progress (center-lower)
 var _toast_label: Label # "✓ X discovered" pop
 var _controls: PanelContainer   # the controls cheat-sheet menu (toggled by ?)
 var teleport_button: Button   # connected by main -> teleport_home()
+var tp_cancel_button: Button  # shown only during a teleport ritual -> main.cancel_teleport()
 var details_button: Button    # connected by main -> PlanetInfo.open_for_nearest()
 var map_button: Button        # -> StarMap.toggle()
 var log_button: Button        # -> QuestLog.toggle()
@@ -103,13 +105,13 @@ const LAYOUT_PATH := "user://hud_layout.cfg"
 # widget's built-in position/scale, so fresh installs and Reset land here. A saved
 # user layout still overrides it.
 const DEFAULT_LAYOUT := {
-	"nav": Vector2(16, 14), "combat": Vector2(11.33, 620), "hull": Vector2(15.33, 98.67),
-	"teleport": Vector2(1088, 674), "buttons": Vector2(10.67, 676.67),
+	"nav": Vector2(16, 14), "combat": Vector2(10.66, 628.67), "hull": Vector2(15.33, 98.67),
+	"teleport": Vector2(1088, 674), "buttons": Vector2(8.67, 680.0),
 	"details": Vector2(1088, 636), "radar": Vector2(1129.33, 11.33),
 	"cancel_nav": Vector2(12, 602),
 }
 const DEFAULT_SCALE := {
-	"nav": 0.76, "combat": 0.76, "hull": 0.94, "teleport": 1.0,
+	"nav": 0.76, "combat": 0.7, "hull": 0.94, "teleport": 1.0,
 	"buttons": 0.76, "details": 1.0, "radar": 0.76, "cancel_nav": 0.7,
 }
 var ship_ref: Ship                 # set by main, used to free/recapture the cursor in edit mode
@@ -165,6 +167,21 @@ func _ready() -> void:
 	_menu.size = Vector2(1280, 300)
 	_menu.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_menu.visible = false
+
+	# Cancel button shown only during a teleport ritual (main toggles + connects it).
+	tp_cancel_button = Button.new()
+	tp_cancel_button.text = "✕  CANCEL TELEPORT"
+	tp_cancel_button.size = Vector2(200, 36)
+	tp_cancel_button.position = Vector2((1280 - 200) * 0.5, 470)
+	tp_cancel_button.focus_mode = Control.FOCUS_NONE
+	tp_cancel_button.add_theme_font_size_override("font_size", 14)
+	tp_cancel_button.add_theme_color_override("font_color", Color(1.0, 0.7, 0.7))
+	tp_cancel_button.add_theme_color_override("font_hover_color", Color(1, 1, 1))
+	tp_cancel_button.add_theme_stylebox_override("normal", _metal_box(Color(1.0, 0.45, 0.45), 0.5))
+	tp_cancel_button.add_theme_stylebox_override("hover", _metal_box(Color(1.0, 0.55, 0.55), 0.9))
+	tp_cancel_button.add_theme_stylebox_override("pressed", _metal_box(Color(1.0, 0.7, 0.7), 1.0))
+	tp_cancel_button.visible = false
+	_canvas.add_child(tp_cancel_button)
 
 	# First-run onboarding tip — small, crisp warm-white, centered near the top (clear of
 	# the crosshair cluster at y≈416 and the bottom _prompt). Kept deliberately compact:
@@ -908,7 +925,7 @@ func _linear_gradient(top: Color, bottom: Color) -> GradientTexture2D:
 
 # Show/refresh the ship-pickup table. Rebuilds rows only when the contents change
 # (ship set, current selection, or station name), so it's cheap to call per frame.
-func set_hangar(open: bool, names: PackedStringArray, current: int, station: String) -> void:
+func set_hangar(open: bool, names: PackedStringArray, current: int, station: String, teleports := []) -> void:
 	# Body-colour swatches show for hulls that allow it (HaniNebula). Track the chosen key in
 	# the signature so the table rebuilds (and re-highlights) when the colour changes.
 	var has_color: bool = open and ship != null and ship.current_has_color_pick()
@@ -917,7 +934,10 @@ func set_hangar(open: bool, names: PackedStringArray, current: int, station: Str
 	var has_wing: bool = has_color and ship.current_has_wing_pick()
 	var bell: bool = has_color and ship.current_bell()
 	var finish: String = ship.current_finish() if has_color else ""
-	var sig := ("%d|%s|%s|%s|%s|%s|%s" % [current, station, ",".join(names), body_key, wing_key, str(bell), finish]) if open else ""
+	var tp_sig := ""
+	for t in teleports:
+		tp_sig += String(t.id) + ","
+	var sig := ("%d|%s|%s|%s|%s|%s|%s|%s" % [current, station, ",".join(names), body_key, wing_key, str(bell), finish, tp_sig]) if open else ""
 	if sig == _hangar_sig:
 		return
 	_hangar_sig = sig
@@ -939,6 +959,8 @@ func set_hangar(open: bool, names: PackedStringArray, current: int, station: Str
 		_hangar_rows.add_child(_make_choice_row("FINISH",
 			[{"key": "metallic", "label": "METALLIC"}, {"key": "glassy", "label": "GLASSY"}],
 			finish, _on_finish_choice))
+	# Teleport network: one button → opens the star map in teleport mode (pick + confirm).
+	_hangar_rows.add_child(_make_teleport_button(teleports.size()))
 
 
 # One bordered table row: ◈ icon · ship name · number key. Current ship is lit up.
@@ -984,6 +1006,50 @@ func _on_hangar_row_input(event: InputEvent, idx: int) -> void:
 	if event is InputEventMouseButton and event.pressed \
 			and event.button_index == MOUSE_BUTTON_LEFT:
 		ship_selected.emit(idx)
+
+
+# The dock's "TELEPORT NETWORK" button → emits open_teleport_map (main opens the chart in
+# teleport mode). Disabled with a hint when no platforms are unlocked yet.
+func _make_teleport_button(count: int) -> PanelContainer:
+	var row := PanelContainer.new()
+	var box := StyleBoxFlat.new()
+	box.set_corner_radius_all(4)
+	box.set_content_margin_all(8)
+	var active := count > 0
+	box.bg_color = Color(0.10, 0.22, 0.20, 0.45) if active else Color(0.12, 0.13, 0.16, 0.30)
+	box.border_color = Color(0.4, 1.0, 0.85, 0.75) if active else Color(0.4, 0.45, 0.5, 0.4)
+	box.set_border_width_all(1)
+	row.add_theme_stylebox_override("panel", box)
+	if active:
+		row.mouse_filter = Control.MOUSE_FILTER_STOP
+		row.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+		row.gui_input.connect(_on_teleport_button_input)
+	else:
+		row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var h := HBoxContainer.new()
+	h.add_theme_constant_override("separation", 10)
+	h.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(h)
+	var col := Color(0.4, 1.0, 0.85) if active else Color(0.55, 0.6, 0.65)
+	var icon := _new_label(14, col)
+	icon.text = "⌖"
+	h.add_child(icon)
+	var nm := _new_label(13, Color(1, 1, 1) if active else Color(0.6, 0.65, 0.7))
+	nm.text = "TELEPORT NETWORK  ·  %d station%s" % [count, "" if count == 1 else "s"] if active \
+		else "TELEPORT NETWORK  ·  none unlocked yet"
+	nm.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	h.add_child(nm)
+	if active:
+		var go := _new_label(11, col)
+		go.text = "▸ open map"
+		h.add_child(go)
+	return row
+
+
+func _on_teleport_button_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.pressed \
+			and event.button_index == MOUSE_BUTTON_LEFT:
+		open_teleport_map.emit()
 
 
 # A "BODY COLOUR" label + a row of clickable colour swatches. The current colour is ringed
