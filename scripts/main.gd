@@ -410,11 +410,13 @@ func _update_music(delta: float) -> void:
 		_music.stream_paused = true   # fully faded out — pause to idle
 
 
-# Which bgm the equipped hull should fly to: HaniNebula has a dedicated theme; every
-# other ship shares the default bgm. Falls back to default if her track failed to load.
+# Which bgm the equipped hull should fly to: the T2 hulls (HaniNebula + Raptor 2 Neo)
+# share the dedicated theme; every other ship shares the default bgm. Falls back to
+# default if the track failed to load.
+const T2_HULLS := ["HaniNebula", "Raptor 2 Neo"]
 func _desired_music_track() -> String:
 	if _music_hani != null and ship != null \
-		and ship.ship_name_at(ship.current_index()) == "HaniNebula":
+		and ship.ship_name_at(ship.current_index()) in T2_HULLS:
 		return "hani"
 	return "default"
 
