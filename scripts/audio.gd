@@ -9,6 +9,7 @@ const FIRE_DB := -19.0          # bullet fire — gentle/soft
 const EXPLOSION_DB := -3.0
 const LASER_DB := -14.0         # continuous beam hum — present but not harsh
 const CLICK_DB := -12.0         # soft UI click
+const PICKUP_DB := -17.0        # energy-cell grab — short, low, unobtrusive
 
 # --- Engine voice ---
 # Mix intent: the engine is present and has weight, but the music still leads.
@@ -51,6 +52,7 @@ var _explosion: AudioStreamPlayer
 var _laser_loop: AudioStreamPlayer
 var _laser_on := false
 var _click: AudioStreamPlayer
+var _pickup: AudioStreamPlayer   # short low blip for grabbing an energy cell
 
 # Per-ship loop streams (distinct timbre per hull, see tools/gen_engine_audio.py);
 # falls back to the shared engine_loop.ogg for any hull without a dedicated file.
@@ -113,6 +115,12 @@ func _ready() -> void:
 	_click.stream = load("res://assets/ui_click.wav") as AudioStream
 	_click.volume_db = CLICK_DB
 	add_child(_click)
+
+	# Energy-cell grab: a tiny synthesized blip (low, short) — no asset needed.
+	_pickup = AudioStreamPlayer.new()
+	_pickup.stream = _make_blip()
+	_pickup.volume_db = PICKUP_DB
+	add_child(_pickup)
 
 	# Laser beam: a seamless looping hum, played only while the beam is firing.
 	_laser_loop = AudioStreamPlayer.new()
@@ -244,6 +252,35 @@ func play_click() -> void:
 	if _click != null:
 		_click.pitch_scale = randf_range(0.96, 1.06)
 		_click.play()
+
+
+# Short, low "blip" for grabbing an energy cell — quieter and deeper than the UI click.
+func play_pickup() -> void:
+	if _pickup != null:
+		_pickup.pitch_scale = randf_range(0.94, 1.02)
+		_pickup.play()
+
+
+# Build a ~70 ms low sine blip with a fast decay (no external asset). A slight downward
+# pitch sweep gives it a soft "boop" that reads as "absorbed" rather than a sharp click.
+func _make_blip() -> AudioStreamWAV:
+	var rate := 22050
+	var dur := 0.07
+	var n := int(rate * dur)
+	var data := PackedByteArray()
+	data.resize(n * 2)
+	for i in n:
+		var t := float(i) / float(rate)
+		var env := exp(-t * 40.0)                 # fast decay → short
+		var freq := 200.0 - 70.0 * (t / dur)      # gentle downward sweep → low + soft
+		var s := sin(TAU * freq * t) * env * 0.6
+		data.encode_s16(i * 2, int(clampf(s, -1.0, 1.0) * 32767.0))
+	var wav := AudioStreamWAV.new()
+	wav.format = AudioStreamWAV.FORMAT_16_BITS
+	wav.mix_rate = rate
+	wav.stereo = false
+	wav.data = data
+	return wav
 
 
 # Laser beam on/off — start/stop the seamless looping hum (called each frame by combat).

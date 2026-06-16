@@ -32,27 +32,27 @@ const SHIP_MODELS := [
 	# Lyra: clean multi-part OBJ (cockpitglass, fighter, engine, guns, enginecanopy).
 	# Per-surface roles give glass canopy + silver body + gold accents; neutral dim
 	# light rig so the metal reads without glowing. One engine -> one booster.
-	{ "name": "Lyra",   "path": "res://assets/lyra.obj",   "tint": Color(1.0, 1.0, 1.0),    "length": 0.7, "yaw": 180.0, "pitch": 0.0, "glow": 0.0, "engine_pitch": 1.0,  "hp": 280, "bolt_scale": 1.8, "bolt_speed": 820.0,  "fire_cd": 0.22, "dmg": 3, "bolt_laser": true, "energy_max": 130.0, "energy_use": 0.85, "warp": 10.7, "pbr": true,
+	{ "name": "Lyra",   "path": "res://assets/lyra.obj",   "tint": Color(1.0, 1.0, 1.0),    "length": 0.7, "yaw": 180.0, "pitch": 0.0, "glow": 0.0, "engine_pitch": 1.0,  "hp": 280, "bolt_scale": 1.8, "bolt_speed": 820.0,  "fire_cd": 0.22, "dmg": 3, "bolt_laser": true, "energy_max": 130.0, "energy_use": 0.85, "warp": 15.81, "pbr": true,
 		"surf_roles": ["glass", "red", "red", "goldtrim", "goldtrim"],
 		"light_accent": Color(1.0, 0.86, 0.84), "light_energy": 0.85 },
-	{ "name": "Stella", "path": "res://assets/Spaceship.glb",     "tint": Color(0.70, 0.62, 0.95), "length": 0.55, "yaw": 180.0, "pitch": 0.0, "glow": 0.0, "engine_pitch": 0.92, "hp": 80, "bolt_scale": 1.1, "bolt_speed": 1700.0, "fire_cd": 0.04, "dmg": 1, "energy_max": 80.0, "energy_use": 1.6, "warp": 10.0 },
-	{ "name": "Raptor", "path": "res://assets/Spaceship (2).glb", "tint": Color(0.70, 0.90, 0.95), "length": 0.55, "yaw": 180.0, "pitch": 0.0, "glow": 0.0, "engine_pitch": 0.82, "hp": 170, "bolt_scale": 1.15, "bolt_speed": 1050.0, "fire_cd": 0.10, "dual": true, "dmg": 2, "energy_max": 170.0, "energy_use": 0.55, "warp": 7.3 },
+	{ "name": "Stella", "path": "res://assets/Spaceship.glb",     "tint": Color(0.70, 0.62, 0.95), "length": 0.55, "yaw": 180.0, "pitch": 0.0, "glow": 0.0, "engine_pitch": 0.92, "hp": 80, "bolt_scale": 1.1, "bolt_speed": 1700.0, "fire_cd": 0.04, "dmg": 1, "energy_max": 80.0, "energy_use": 1.6, "warp": 15.81 },
+	{ "name": "Raptor", "path": "res://assets/Spaceship (2).glb", "tint": Color(0.70, 0.90, 0.95), "length": 0.55, "yaw": 180.0, "pitch": 0.0, "glow": 0.0, "engine_pitch": 0.82, "hp": 170, "bolt_scale": 1.15, "bolt_speed": 1050.0, "fire_cd": 0.10, "dual": true, "dmg": 2, "energy_max": 170.0, "energy_use": 0.55, "warp": 27.50 },
 	# Vela: the FTL ship. warp 4312 -> max cruise ≈ 1.5 ly/s at full charge
 	# (THRUST·warp/DAMPING, 1 ly = 632,411 units). Her drive spools up over time
 	# (see WARP_CHARGE_*), so she eases into warp rather than snapping to it.
 	# "brake": her ultimate — hold R to ease to a full stop (she's so fast that stopping
 	# at a star is otherwise brutal; the air-brake makes her usable). Squishy hull.
-	{ "name": "Vela",   "path": "res://assets/Spaceship (3).glb", "tint": Color(0.55, 0.80, 1.0),  "length": 0.55, "yaw": 180.0, "pitch": 0.0, "glow": 0.0, "energy_max": 100.0, "energy_use": 1.2, "warp": 14.0, "engine_pitch": 1.14, "brake": true, "hp": 90, "bolt_scale": 1.1, "bolt_speed": 1050.0, "fire_cd": 0.06, "dmg": 2, "raw": true },
+	{ "name": "Vela",   "path": "res://assets/Spaceship (3).glb", "tint": Color(0.55, 0.80, 1.0),  "length": 0.55, "yaw": 180.0, "pitch": 0.0, "glow": 0.0, "energy_max": 100.0, "energy_use": 1.2, "warp": 21.81, "engine_pitch": 1.14, "brake": true, "hp": 90, "bolt_scale": 1.1, "bolt_speed": 1050.0, "fire_cd": 0.06, "dmg": 2, "raw": true },
 	# HaniStar — a slow, pretty support hull that CAN fight: fires a touch faster than
 	# Lyra, hits a bit harder than Stella, 125 HP. Three light-blue boosters.
 	# surf_roles indexes the GLB's 9 surfaces: gold = shiny rose-gold (7 = wings), glass =
 	# top-front canopy (3), orb = soft neon-pink accents, hull = pink crystal body.
 	# (4 = the two upright tail fins, kept pink hull.)
-	{ "name": "HaniStar",   "path": "res://assets/utility_ship.glb",  "tint": Color(1.0, 0.412, 0.706), "length": 0.6,  "yaw": 90.0, "pitch": 0.0, "glow": 0.06, "energy_max": 120.0, "energy_use": 0.95, "warp": 8.3, "engine_pitch": 0.7, "light_energy": 0.45, "hp": 200, "fire_cd": 0.14, "dmg": 3, "bolt_scale": 0.95, "bolt_speed": 1500.0, "bolt_strong": true, "pbr": true,
+	{ "name": "HaniStar",   "path": "res://assets/utility_ship.glb",  "tint": Color(1.0, 0.412, 0.706), "length": 0.6,  "yaw": 90.0, "pitch": 0.0, "glow": 0.06, "energy_max": 120.0, "energy_use": 0.95, "warp": 15.81, "engine_pitch": 0.7, "light_energy": 0.45, "hp": 200, "fire_cd": 0.14, "dmg": 3, "bolt_scale": 0.95, "bolt_speed": 1500.0, "bolt_strong": true, "pbr": true,
 		"surf_roles": ["hull", "hull", "gold", "glass", "hull", "hull", "hull", "gold", "hull"] },
 	# Raptor 2 Neo ("mother ship"): the powerhouse — Stella's fire rate, Vela's top speed,
 	# Lyra's damage, HaniStar's hull. Silver-blue metal body + glass illuminators.
-	{ "name": "Raptor 2 Neo", "path": "res://assets/raptor2.obj", "tint": Color(1, 1, 1), "length": 0.65, "yaw": 0.0, "pitch": 0.0, "glow": 0.0, "engine_pitch": 0.7, "hp": 200, "bolt_scale": 1.3, "bolt_speed": 1700.0, "fire_cd": 0.06, "dmg": 3, "energy_max": 150.0, "energy_use": 0.7, "warp": 13.0, "pbr": true, "laser": true, "auto_capture": true,
+	{ "name": "Raptor 2 Neo", "path": "res://assets/raptor2.obj", "tint": Color(1, 1, 1), "length": 0.65, "yaw": 0.0, "pitch": 0.0, "glow": 0.0, "engine_pitch": 0.7, "hp": 200, "bolt_scale": 1.3, "bolt_speed": 1700.0, "fire_cd": 0.06, "dmg": 3, "energy_max": 150.0, "energy_use": 0.7, "warp": 26.35, "pbr": true, "laser": true, "auto_capture": true,
 		"laser_offset": Vector3(0.0, -0.03, -0.10),   # beam emitter point (slightly down)
 		# The OBJ has exactly 2 surfaces: 0 = "Mat" (the whole hull), 1 = "iluminators" (the
 		# glowing window strips). So the HULL is the solid metal body colour (picker recolours
@@ -62,7 +62,7 @@ const SHIP_MODELS := [
 	# HaniNebula — HaniStar's evolved "pro" form: metallic silver + slight pink, modern/
 	# feminine, super powerful (combat tuned to Raptor 2 Neo). Booster cluster: big main
 	# pair + smaller side subs + tiny top trio (see BOOSTER_LAYOUTS).
-	{ "name": "HaniNebula", "path": "res://assets/haninebula.obj", "tint": Color(0.86, 0.83, 0.90), "length": 0.85, "yaw": 0.0, "pitch": 0.0, "glow": 0.05, "engine_pitch": 0.7, "hp": 200, "bolt_scale": 0.95, "bolt_speed": 1700.0, "fire_cd": 0.06, "dmg": 3, "bolt_strong": true, "energy_max": 150.0, "energy_use": 0.7, "warp": 13.0, "pbr": true,
+	{ "name": "HaniNebula", "path": "res://assets/haninebula.obj", "tint": Color(0.86, 0.83, 0.90), "length": 0.85, "yaw": 0.0, "pitch": 0.0, "glow": 0.05, "engine_pitch": 0.7, "hp": 200, "bolt_scale": 0.95, "bolt_speed": 1700.0, "fire_cd": 0.06, "dmg": 3, "bolt_strong": true, "energy_max": 150.0, "energy_use": 0.7, "warp": 27.50, "pbr": true,
 		# Player-pickable colours (hangar swatches). Whole hull = the chosen body colour on
 		# every surface EXCEPT index 20 = wings (Wigns_Plane.001) = the chosen wing colour.
 		# The OBJ splits into 23 per-usemtl surfaces; wings land at surface 20. See SHIP_PALETTES.
@@ -172,12 +172,16 @@ const ZOOM_STEP := 0.12             # per wheel notch
 const THRUST := 1650.0        # forward/back accel (units/s^2) — ×10 for the spread-out system
 const STRAFE_THRUST := 1050.0 # lateral / vertical accel
 const BOOST_MULT := 3.0       # Shift multiplier
-const BOOST_DRAIN := 16.0     # boost energy/sec burned while boosting (generous; combat owns the pool)
+const BOOST_DRAIN := 5.0      # boost energy/sec burned while boosting — very efficient, so a full
+                              # tank lasts a long time and tops back up fast (combat owns the pool)
 const MAX_SPEED := 10000.0
 # Calm in-system cruise: sublight (non-warp) flight is capped here so you're not
 # blitzing past the planets near Sol. Boost (Shift) multiplies it for fast travel.
 # This is SEPARATE from warp — the per-ship ly tops are unaffected.
 const SUBLIGHT_MAX := 550.0
+# Weapons speed-lock: you can only fire at regular (sublight) speed. Holding fire force-caps
+# the ship to this, so opening fire while warping/boosting drops you to combat speed.
+const WEAPON_FIRE_SPEED := SUBLIGHT_MAX
 # Auto-settle: close to a body, gently bleed speed toward a hover so releasing thrust
 # holds you on station to capture (thrust still lets you nudge/orbit). Closer = stronger.
 const SETTLE_RANGE := 900.0
@@ -202,11 +206,19 @@ const WARP_ARRIVE_TIME := 2.0      # seconds-to-arrival at which warp starts eas
 const WARP_ARRIVE_SPEED := 400.0   # gentle speed warp bleeds down to (slow enough to scan)
 const BANK_ANGLE := 0.5       # max cosmetic bank into turns (rad)
 const BANK_SMOOTH := 5.0
+# Cinematic cruise sway: after holding a straight line for SWAY_DELAY seconds the hull
+# starts a slow, gentle roll left↔right (cosmetic, on the mesh only — the actual heading
+# never changes, so you stay on the same line). Steering resets it instantly.
+const SWAY_DELAY := 3.0       # seconds of straight cruise before the sway eases in
+const SWAY_RAMP := 2.0        # seconds to ramp the sway from 0 → full once it begins
+const SWAY_ANGLE := 0.11      # peak roll of the sway (rad ≈ 6.3°) — subtle, not a wobble
 # How much the gun muzzle follows the COSMETIC bank. 0 = the bullet start point is LOCKED to
 # the nose centreline and never swings left/right when you strafe/bank with A/D. (Real
 # rotation — mouse aim, Q/E roll — still moves it, since that lives in transform.basis.)
 const MUZZLE_BANK_FOLLOW := 0.0
-const CAM_OFFSET := Vector3(0.0, 0.26, 1.0)  # behind (+Z) and above the now-tiny ship
+const CAM_OFFSET := Vector3(0.0, 0.33, 1.0)  # behind (+Z) and above the ship; the higher Y
+                                             # drops the hull lower in frame → a bigger gap
+                                             # between the ship's nose and the centre crosshair
 const CAM_LAG := 6.0
 # Free-look (hold RMB or T): mouse orbits the camera instead of steering; the ship
 # holds its heading and flies on. Released, the view eases back behind the ship.
@@ -247,6 +259,7 @@ var has_laser := false         # right-click nose laser beam (Raptor 2 Neo) — 
 var laser_offset := Vector3.ZERO   # local muzzle offset for the beam (x=right, y=up)
 var auto_capture := false       # captures bodies in range automatically (no V) — Raptor 2 Neo
 var combat_lock := false        # set by main while in combat — no interstellar/FTL speed
+var firing := false             # set by main while holding fire — force-caps to combat speed
 var combat_ref: Node                   # set by main — owns the shared energy pools
 var _boost_starved := false            # true while boosting on an empty tank -> plume sputters
 var is_boosting := false               # true while boost is actually engaged (combat pauses boost regen)
@@ -260,10 +273,12 @@ const AP_TURN := 2.5            # autopilot turn rate toward the target
 var muzzle := 2.5              # forward distance bolts spawn at — this hull's nose tip
 var muzzle_drop := 0.0         # how far BELOW the nose bolts emerge (set per hull from its height)
 var _dual := false             # Raptor: can toggle between combat + warp modes
-# Warp is now a TOP-SPEED multiplier (cap = MAX_SPEED × warp). Tuned so the fastest
-# hull crosses ~1 light-year in ~45 seconds (1 ly = 6.32M units; 14×10000 ≈ 140k u/s).
-const RAPTOR_WARP := 12.0           # Raptor Warp mode
-const RAPTOR_COMBAT_WARP := 7.3    # Raptor Combat mode top
+var _raptor_warp_form := false # Raptor: true while in the Warp(X) form (else Combat form)
+# Warp is now a TOP-SPEED multiplier (cap = MAX_SPEED × warp). 1 ly = 6.32M units, so
+# time per ly = 632.41 / warp seconds. Per-hull tuning (sec/ly): Raptor combat 23 · Raptor
+# warp-form 30 · Raptor 2 Neo 24 · HaniNebula 23 · Vela 29 · Lyra/Stella/HaniStar 40.
+const RAPTOR_WARP := 21.08          # Raptor Warp (X) form — ~30s / ly
+const RAPTOR_COMBAT_WARP := 27.50   # Raptor Combat form — ~23s / ly (faster than warp form, per design)
 const HYPERSONIC_SPEED := 15000.0   # above this a warp ship is "hypersonic" (no combat)
 const WARP_FLOOR := 1.0        # zero-charge = calm sublight; holding W spools up to warp
 # FTL gate: warp can only spool up once you're beyond the system star's gravity field.
@@ -292,21 +307,24 @@ func warp_ready() -> bool:
 func toggle_warp_mode() -> String:
 	if not _dual:
 		return ""
-	if warp >= RAPTOR_WARP:
-		warp = RAPTOR_COMBAT_WARP   # back to Combat mode (≈0.12 ly cap)
-		return "COMBAT"
-	else:
-		warp = RAPTOR_WARP          # Warp / FTL mode (≈1.2 ly)
+	# Track the form with an explicit flag, not the warp magnitude — Combat is now FASTER
+	# than the Warp form, so a magnitude test would no longer tell the two modes apart.
+	_raptor_warp_form = not _raptor_warp_form
+	if _raptor_warp_form:
+		warp = RAPTOR_WARP          # Warp / FTL form
 		_warp_charge = 0.0
 		return "WARP"
+	else:
+		warp = RAPTOR_COMBAT_WARP   # back to Combat form
+		return "COMBAT"
 
 func is_warp_mode() -> bool:
 	return _dual and warp > 1.0
 
 # True only in Raptor's actual WARP form (not his combat mode) — drives the deployed,
-# flared booster. is_warp_mode() can't tell the two apart (both warps are > 1.0).
+# flared booster.
 func is_warp_form() -> bool:
-	return _dual and warp >= RAPTOR_WARP
+	return _dual and _raptor_warp_form
 
 var _current_model := 0        # index into SHIP_MODELS
 var _engine_pitch := 1.0       # per-ship engine voice character (set on build)
@@ -327,6 +345,7 @@ var _cam_zoom := 1.0          # target zoom (mouse wheel)
 var _cam_zoom_smooth := 1.0   # eased toward _cam_zoom
 var _cam_basis := Basis()
 var _bank := 0.0
+var _cruise_t := 0.0           # seconds held on a straight cruise (drives the cinematic sway)
 var _mouse_delta := Vector2.ZERO
 var _steer := Vector2.ZERO     # eased mouse-steer (rotational inertia for curving turns)
 var _strafe := 0.0             # eased A/D lateral input (heavy, drifting thrust)
@@ -534,9 +553,13 @@ func fly(delta: float) -> void:
 	cap = minf(cap, speed_limit)
 	# Harbour cap near stations — any mode, so you never blast through a structure.
 	cap = minf(cap, struct_limit)
+	# Weapons lock: while you hold fire you're pulled down to regular combat speed — you
+	# can't shoot above it, so opening fire itself slows the ship out of warp/boost.
+	if firing:
+		cap = minf(cap, WEAPON_FIRE_SPEED)
 	# Bleed warp charge when something is force-slowing us, so the drive visibly drops
-	# out of warp as you settle near a body/station instead of pinning at full spool.
-	if (speed_limit < INF or struct_limit < INF) and cap < MAX_SPEED:
+	# out of warp as you settle near a body/station (or open fire) instead of pinning at full spool.
+	if (speed_limit < INF or struct_limit < INF or firing) and cap < MAX_SPEED:
 		_warp_charge = minf(_warp_charge, cap / maxf(MAX_SPEED, 1.0))
 	velocity = velocity.limit_length(cap)
 
@@ -553,6 +576,23 @@ func fly(delta: float) -> void:
 
 	# --- Cosmetic banking (on the mesh only, so the camera stays steady) ---
 	var target_bank := clampf(-turn * 7.0 - _strafe * 0.35, -BANK_ANGLE, BANK_ANGLE)
+	# Cinematic cruise sway: hold a straight line (forward thrust, no steer/strafe input)
+	# and after a beat the hull breathes a slow roll left↔right. Any steer/strafe input
+	# unwinds it fast so it never fights real control.
+	var steering := absf(turn) > 0.0008 or absf(_strafe) > 0.04 or _free_look or autopilot or braking
+	var cruising := (Input.is_physical_key_pressed(KEY_W) or auto_cruise) and not steering
+	_cruise_t = (_cruise_t + delta) if cruising else maxf(_cruise_t - delta * 3.0, 0.0)
+	var sway_ramp := clampf((_cruise_t - SWAY_DELAY) / SWAY_RAMP, 0.0, 1.0)
+	if sway_ramp > 0.0:
+		# Two non-harmonic sines → an organic drift rather than a metronome wobble. At
+		# interstellar speed the wave stretches LONGER and a touch wider (a grand, slow
+		# banking roll) vs. the quicker breathe of normal sublight cruise.
+		var warpf := smoothstep(1.0, 2.0, eff_warp)        # 0 sublight → 1 full warp
+		var rate := lerpf(1.0, 0.5, warpf)                 # slower = longer wave at warp
+		var amp := SWAY_ANGLE * lerpf(1.0, 1.45, warpf)    # slightly wider roll at warp
+		var st := Time.get_ticks_msec() * 0.001
+		var sway := (sin(st * 0.9 * rate) + 0.4 * sin(st * 0.37 * rate + 1.1)) / 1.4
+		target_bank = clampf(target_bank + sway * amp * sway_ramp, -BANK_ANGLE, BANK_ANGLE)
 	_bank = lerpf(_bank, target_bank, clampf(BANK_SMOOTH * delta, 0.0, 1.0))
 	_mesh_root.rotation.z = _bank
 
@@ -745,6 +785,7 @@ func _build_ship_model(idx: int) -> void:
 	laser_offset = info.get("laser_offset", Vector3.ZERO)
 	auto_capture = bool(info.get("auto_capture", false))
 	_dual = info.get("dual", false)
+	_raptor_warp_form = false      # Raptor always loads in its (faster) Combat form
 	_engine_pitch = float(info.get("engine_pitch", 1.0))
 	_can_brake = info.get("brake", false)
 	_warp_charge = 0.0
@@ -769,7 +810,8 @@ func _build_ship_model(idx: int) -> void:
 	# their trailing streak visibly emerges from the ship — even from a side view. The
 	# slim bright tracer + soft trail keep it readable without sitting on the hull.
 	muzzle = box.size.z * 0.55
-	muzzle_drop = box.size.y * 0.12   # emerge just slightly below centre, where the guns sit
+	muzzle_drop = box.size.y * 0.18   # emerge a little below centre (lowered to match the
+	                                  # hull's new lower framing), where the guns sit
 	# Optionally lop off the model's rear (behind the ring) so the bell disc caps a
 	# clean cut instead of the GLB's messy tail.
 	if info.get("clip_back", false):

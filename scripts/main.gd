@@ -32,11 +32,46 @@ var _nav_locked := ""         # LOCKED map waypoint (orange) — persists until 
 var coins := 0                # player currency; persisted to the profile
 var _claimed := {}            # body name -> true once its capture reward is claimed
 var _loaded_custom := {}      # saved per-ship colour/bell/finish, applied to the ship in _ready
+var _visited := {}            # system id -> true once reached (= DISCOVERED → free fast-travel)
+var _nav_unlocked := {}       # star id -> true: navigation unlocked (paid or chest-dropped) →
+							  #   its imaginary wormhole is known. Once visited it's discovered.
+var _wormholes_found := {}    # star id -> true: this star's wormhole found by radar in the hub
+var _nav_goal := ""           # star the map asked to guide to (orange waypoint). The guide
+							  #   resolves the next hop each frame: in the hub → that star's
+							  #   wormhole; in a system → the exit gate. Session-only (not saved).
+var _onboarding_step := 0     # first-run guided tips: which step the player is on (see _onboarding)
+var _map_seen := false        # latched true by StarMap when first opened (the map pauses the tree,
+							  #   so _process can't poll map._open — the map notifies us instead)
 const PROFILE_PATH := "user://profile.cfg"
 const CAPTURE_REWARD := 100
+const ARRIVAL_REWARD := 150   # coins granted the FIRST time you reach a new system
 const NAV_COST := 40          # coins to buy a navigator (map Navigate / Auto-pilot)
+const NAV_UNLOCK_BASE := 80   # base coin cost to unlock navigation to a LOCKED star…
+const NAV_UNLOCK_PER_LY := 9  # …plus this per light-year of real distance (far = pricey)
+const WORMHOLE_RADAR := 750.0 # hub range at which your radar finds an undiscovered wormhole
+
+# First-run guided tips. Each step pairs its on-screen tip with the predicate that
+# completes it, so the text and its advance-condition live together and can't drift
+# apart (insert/reorder freely). Built once in _ready (predicates read live state at
+# call time). Persisted as _onboarding_step so the guide runs once, in order, forever.
+var _onboard: Array = []
+# Quest LINE — one active at a time, complete it for coins, then the next unlocks. Progress
+# is its own persisted counter (incremented by capture/kill/visit events), not derived from
+# cumulative stats (combat.kills resets each launch). See _quest_event / _update_quests.
+var _quests: Array = []
+var _quest_idx := 0
+var _quest_progress := 0
+var _last_kills := 0          # session-local: detect new kills as a delta of combat.kills
 var _nav_off := false         # NAV button: stop the Survey guide + waypoint marker entirely
 var _was_boost_blocked := false   # edge-trigger for the "boost unavailable" toast
+var _perf_on := false             # F3 perf/leak readout
+var _perf_t := 0.0                # throttle for the perf text update
+# Restored on boot: where you left off (system + position + active hull). See _restore_location.
+var _saved_system := ""
+var _saved_pos := Vector3.ZERO
+var _has_saved_pos := false
+var _saved_ship_index := -1
+var _autosave_t := 5.0            # periodic position autosave (also guards against the crash)
 var _scan := 0.0             # scan progress 0..1 of the nearest body
 var _scan_name := ""
 const SCAN_SECONDS := 2.0
@@ -48,6 +83,19 @@ var _env: Environment
 var docked := false
 var _dock_in_range := false
 var current_system := SystemDB.SOL
+
+# --- Dramatic teleport ritual (emergency home + station→station — the ONLY teleports).
+# Travel between stars is always flown through wormholes; teleport is the rare, theatrical
+# exception: ship held still, camera eases back, a hue-cycling RGB ring circles you, then
+# you arrive. ~TELEPORT_TIME seconds. (Wormholes are NOT teleport.)
+const TELEPORT_TIME := 12.0
+const TELEPORT_ZOOM := 2.2     # camera pull-back during the ritual
+var _tp_active := false
+var _tp_t := 0.0
+var _tp_dest := ""
+var _tp_label := ""
+var _tp_ring: MeshInstance3D
+var _tp_ring_mat: StandardMaterial3D
 var _music: AudioStreamPlayer
 var _music_default: AudioStream   # the shared bgm every hull flies to
 var _music_hani: AudioStream      # HaniNebula's dedicated theme (null if missing)
@@ -126,7 +174,7 @@ func _ready() -> void:
 	wormhole = Wormhole.new()
 	add_child(wormhole)
 	wormhole.set_ship(ship)
-	wormhole.set_system(current_system)
+	wormhole.set_portals(_known_portals(current_system))   # this system's KNOWN neighbour links
 
 	# Code-spawned SFX (fire / engine / explosion).
 	audio = GameAudio.new()
@@ -204,6 +252,60 @@ func _ready() -> void:
 	hud.nav_button.pressed.connect(toggle_nav)
 	hud.cancel_nav_button.pressed.connect(cancel_locked_nav)
 
+	# First-run guide: tip + its completion predicate, paired so they can't desync.
+	_onboard = [
+		{ "tip": "Hold  W  to thrust  ·  steer with the mouse, WASD to move",
+			"done": func(): return ship.true_pos.distance_to(START_POS) > 6.0 },
+		{ "tip": "Aim at a planet or star and hold  V  to survey it",
+			"done": func(): return codex.count() > 0 },
+		{ "tip": "Press  G  to claim your reward coins",
+			"done": func(): return not _claimed.is_empty() },
+		{ "tip": "Press  M  for the Star Map — it shows the wormhole network · pick a star, Navigate",
+			"done": func(): return _map_seen },
+		{ "tip": "Fly to a glowing  wormhole  and press  F  — it links to a neighbouring star",
+			"done": func(): return _visited.size() > 1 },
+		{ "tip": "Tab targets the wormhole · H is emergency return home · check your QUEST up top",
+			"done": func(): return _quest_idx > 0 },
+	]
+
+	# The quest line: capture bodies, kill hostiles, reach systems — escalating, for coins.
+	_quests = [
+		{ "id": "q_survey1", "title": "First Light — survey 1 body",        "type": "capture", "target": 1,  "reward": 120 },
+		{ "id": "q_kill1",   "title": "Trigger — destroy 6 hostiles",       "type": "kill",    "target": 6,  "reward": 200 },
+		{ "id": "q_visit1",  "title": "Wanderer — reach 2 new systems",     "type": "visit",   "target": 2,  "reward": 260 },
+		{ "id": "q_survey2", "title": "Cartographer — survey 5 bodies",     "type": "capture", "target": 5,  "reward": 380 },
+		{ "id": "q_kill2",   "title": "Ace — destroy 20 hostiles",          "type": "kill",    "target": 20, "reward": 520 },
+		{ "id": "q_visit2",  "title": "Pathfinder — reach 4 new systems",   "type": "visit",   "target": 4,  "reward": 700 },
+		{ "id": "q_survey3", "title": "Surveyor General — survey 12 bodies","type": "capture", "target": 12, "reward": 950 },
+	]
+
+	_restore_location()   # resume where you left off (system + position + hull)
+
+
+# Resume the last session's location: rebuild the saved system if it isn't the Sol start,
+# then drop the ship at the exact saved position with the saved hull, at FULL HP (resuming
+# next to a boss at 5 HP would be a rage-quit). Reusing _arrive is safe — the system is
+# already visited, so it grants no reward and clears transit/dock state for us.
+func _restore_location() -> void:
+	if _saved_system != "" and _saved_system != current_system:
+		_arrive(_saved_system)
+	if _has_saved_pos and _saved_pos.length() > 0.001:
+		ship.true_pos = _saved_pos
+		ship.face_toward(-_saved_pos)
+	if _saved_ship_index >= 0 and _saved_ship_index < ship.ship_count() \
+			and _saved_ship_index != ship.current_index():
+		ship.swap_ship(_saved_ship_index)
+	combat.player_hp = ship.max_hp
+	ship.transiting = false
+	_tp_active = false
+	_save_profile()       # capture the exact restored position
+
+
+# Save on window close so quitting preserves your exact spot (autosave covers crashes).
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_CLOSE_REQUEST:
+		_save_profile()
+
 
 func _process(delta: float) -> void:
 	ship.fly(delta)
@@ -214,40 +316,55 @@ func _process(delta: float) -> void:
 	ship.star_field_dist = planets.star_dist # FTL only unlocks beyond the star's gravity field
 	ship.gravity = planets.gravity           # gentle pull toward bodies
 	props.update(ship.true_pos, delta)
-	ship.struct_limit = props.struct_speed_limit   # strict speed cap near stations/probes
+	# Harbour speed-cap: ease down near stations/probes AND near wormholes (so you can line
+	# up and dive in instead of rocketing past) — whichever zone is slowing you most wins.
+	ship.struct_limit = minf(props.struct_speed_limit, wormhole.slow_limit(ship.true_pos))
 	if wormhole.update(ship.true_pos, delta):
 		_arrive(wormhole.dest_id)
 	# Combat runs in normal flight (not mid-transit, not docked). Docking at a
 	# station is a safe harbor — the fight pauses so you can swap ships in peace.
-	var firing := false
-	if not ship.transiting and not docked:
+	var want_fire := false
+	var want_laser := false
+	if not ship.transiting and not docked and not _tp_active:
 		var captured := Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED
-		firing = captured \
-			and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) \
-			and not ship.is_hypersonic()        # no shooting at hypersonic speed
+		want_fire = captured and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
 		# Right-click fires the nose laser beam (laser-equipped hulls only, e.g. Raptor II).
-		var laser := captured and ship.has_laser \
-			and Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) \
-			and not ship.is_hypersonic()
-		combat.update(ship, firing, delta, laser)
+		want_laser = captured and ship.has_laser and Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)
+		combat.update(ship, want_fire, delta, want_laser)
 		ship.combat_lock = combat.in_combat()       # no interstellar speed mid-fight
 	else:
 		ship.combat_lock = false
-	hud.firing = firing                          # blooms the dynamic crosshair
+	# Holding fire force-slows you to regular combat speed (you can't shoot at warp/boost) —
+	# set even while still fast so the slowdown engages; combat only spawns bolts once slow.
+	ship.firing = (want_fire and ship.can_fire) or (want_laser and ship.has_laser)
+	hud.firing = want_fire                       # blooms the dynamic crosshair
 	hud.coins = coins
-	hud.set_cancel_nav_visible(_nav_locked != "")
+	hud.set_cancel_nav_visible(_nav_locked != "" or _nav_goal != "")
 	# Tell the player (once) when they try to boost in a slow-zone where it does nothing.
 	if ship.boost_blocked and not _was_boost_blocked:
 		hud.toast = "⚠  Boost unavailable here — clear the slow-zone first"
 		hud.toast_t = 1.6
 	_was_boost_blocked = ship.boost_blocked
+	_update_teleport(delta)
 	_update_dock_ui()
 	if ship.autopilot:
 		ship.autopilot_target = ship.true_pos + planets.rel_of(ship.autopilot_name)
 	_update_navigator()
 	_update_minimap()
+	_update_wormhole_radar()
 	_update_scan(delta)
 	_update_music(delta)
+	_update_onboarding()
+	_update_quests()
+	hud.lore_t = maxf(hud.lore_t - delta, 0.0)
+	_update_debug(delta)
+	# Periodic autosave of location (every 5s, only from a stable state) so a crash or
+	# hard quit resumes you near where you were rather than back at Earth.
+	_autosave_t -= delta
+	if _autosave_t <= 0.0:
+		_autosave_t = 5.0
+		if not ship.transiting and not _tp_active:
+			_save_profile()
 	hud.refresh()
 
 
@@ -326,6 +443,8 @@ func _update_minimap() -> void:
 # peaceful Sol) spawn alien guardians you must clear first. Capture = beacon + rank. ---
 func _update_scan(delta: float) -> void:
 	hud.toast_t = maxf(hud.toast_t - delta, 0.0)
+	if _tp_active:
+		return                       # no scanning/capturing mid-teleport
 	var name := planets.nearest_name
 	# Hub gate-suns (✦) and the Interstellar hub are travel markers — never captured or
 	# guarded. Skip the whole flow there (no monsters in the hub, no fake captures).
@@ -373,6 +492,7 @@ func _update_scan(delta: float) -> void:
 			if codex.discover(name):
 				hud.toast = "✦  CAPTURED  %s   ·   press G and Claim %d coins" % [name, CAPTURE_REWARD]
 				hud.toast_t = 4.0
+				_quest_event("capture")              # quest line: bodies surveyed
 				if combat.guard_body == name:
 					combat.clear_guardians()
 			_scan = 0.0
@@ -456,15 +576,148 @@ func _load_profile() -> void:
 			_claimed[n] = true
 		# Saved per-ship colour/bell/finish choices — applied to the ship once it exists.
 		_loaded_custom = cfg.get_value("player", "customization", {})
+		# Which systems the player has already reached (= discovered → instant fast-travel).
+		_visited.clear()
+		for s in cfg.get_value("player", "visited", []):
+			_visited[s] = true
+		# Stars you've unlocked navigation to (paid / chest-dropped) but not yet discovered.
+		_nav_unlocked.clear()
+		for s in cfg.get_value("player", "nav_unlocked", []):
+			_nav_unlocked[s] = true
+		_wormholes_found.clear()
+		for s in cfg.get_value("player", "wormholes_found", []):
+			_wormholes_found[s] = true
+		_onboarding_step = int(cfg.get_value("player", "onboarding_step", 0))
+		# Where you left off last session (restored after the world is built — see
+		# _restore_location). Position is only ever saved from a STABLE state.
+		_saved_system = str(cfg.get_value("player", "system", ""))
+		_has_saved_pos = cfg.has_section_key("player", "pos")
+		_saved_pos = cfg.get_value("player", "pos", Vector3.ZERO)
+		_saved_ship_index = int(cfg.get_value("player", "ship_index", -1))
+		_quest_idx = int(cfg.get_value("player", "quest_idx", 0))
+		_quest_progress = int(cfg.get_value("player", "quest_progress", 0))
+	# Home (Sol) is always known — you start there, so it's instant-travel from frame one.
+	_visited[SystemDB.SOL] = true
 
 func _save_profile() -> void:
 	var cfg := ConfigFile.new()
 	cfg.load(PROFILE_PATH)            # keep any other keys we add later
 	cfg.set_value("player", "coins", coins)
 	cfg.set_value("player", "claimed", _claimed.keys())
+	cfg.set_value("player", "visited", _visited.keys())
+	cfg.set_value("player", "nav_unlocked", _nav_unlocked.keys())
+	cfg.set_value("player", "wormholes_found", _wormholes_found.keys())
+	cfg.set_value("player", "onboarding_step", _onboarding_step)
+	cfg.set_value("player", "quest_idx", _quest_idx)
+	cfg.set_value("player", "quest_progress", _quest_progress)
 	if ship != null:
 		cfg.set_value("player", "customization", ship.customization_state())
+		# Persist your location + active hull — but ONLY from a stable state. Mid-wormhole
+		# or mid-teleport we leave the last good values so a restore can't wedge the ship.
+		if not ship.transiting and not _tp_active:
+			cfg.set_value("player", "system", current_system)
+			cfg.set_value("player", "pos", ship.true_pos)
+			cfg.set_value("player", "ship_index", ship.current_index())
 	cfg.save(PROFILE_PATH)
+
+
+# True once the player has reached this system at least once (the map only
+# fast-travels to KNOWN systems; unknown ones must be flown via the wormhole first).
+func is_visited(id: String) -> bool:
+	return _visited.has(id)
+
+# --- Star travel states (read by the map) ---------------------------------------
+# "here" | "discovered" (visited → free instant fast-travel) | "nav" (navigation unlocked,
+# warp-able but undiscovered) | "locked" (must pay coins or get a chest location drop).
+func star_state(id: String) -> String:
+	if id == current_system:
+		return "here"
+	if _visited.has(id):
+		return "discovered"
+	if is_wormhole_known(id):          # nav unlocked (paid/chest) OR wormhole found by radar
+		return "nav"
+	return "locked"
+
+# Coin cost to unlock navigation to a LOCKED star — scales with REAL distance from where
+# you are now (the far dark is expensive to chart a lane to).
+func nav_cost(id: String) -> int:
+	var d: float = SystemDB.coord(current_system).distance_to(SystemDB.coord(id))
+	return NAV_UNLOCK_BASE + int(d * NAV_UNLOCK_PER_LY)
+
+# Pay to unlock navigation to a locked star (map action). Returns true if it could pay.
+func unlock_nav(id: String) -> bool:
+	if star_state(id) != "locked":
+		return false
+	var cost := nav_cost(id)
+	if coins < cost:
+		hud.toast = "Not enough coins to chart a lane to %s  (%d / %d)" % [SystemDB.display_name(id), coins, cost]
+		hud.toast_t = 2.5
+		return false
+	coins -= cost
+	_nav_unlocked[id] = true
+	_save_profile()
+	hud.toast = "◇  Navigation unlocked — %s  (-%d coins)" % [SystemDB.display_name(id), cost]
+	hud.toast_t = 3.0
+	return true
+
+# Free nav-unlock from a treasure-chest "star location" drop (Stage 4). No-op if already
+# reachable. Returns true if it actually revealed a new lane.
+func grant_nav_location(id: String) -> bool:
+	if id == "" or _visited.has(id) or _nav_unlocked.has(id):
+		return false
+	_nav_unlocked[id] = true
+	_save_profile()
+	return true
+
+# A wormhole LINK (a,b) is KNOWN once either endpoint is a discovered system, or it's been
+# charted/gifted. This auto-produces "go to Proxima first, then Alpha": the Sol→Alpha link
+# doesn't exist in the graph, and Proxima→Alpha only becomes known once you've REACHED Proxima.
+func is_edge_known(a: String, b: String) -> bool:
+	return _visited.has(a) or _visited.has(b) or _nav_unlocked.has(a) or _nav_unlocked.has(b)
+
+# This system's portals filtered to the links the player knows (what set_portals shows).
+func _known_portals(id: String) -> Array:
+	var out := []
+	for p in SystemDB.portals(id):
+		if is_edge_known(id, p.dest):
+			out.append(p)
+	return out
+
+# A star is "reachable" (map 'nav' state) when a KNOWN multi-hop route to it exists from here.
+func is_wormhole_known(id: String) -> bool:
+	return id != current_system and SystemDB.next_hop(current_system, id, Callable(self, "is_edge_known")) != ""
+
+# In the hub, flying within WORMHOLE_RADAR of an UNDISCOVERED wormhole reveals it: a happy
+# notification, it's added to the known field, and the portal pops in. (Only in the hub.)
+func _update_wormhole_radar() -> void:
+	# Disabled pending graph-rework: wormhole links are now known via the visited frontier
+	# (is_edge_known), not radar-found in a central hub. Re-add a per-system radar later.
+	return
+
+# Map "Navigate": set the orange guide toward a star. You FLY there — the guide resolves the
+# next hop each frame (this star's wormhole when you're in the hub; the exit gate when you're
+# in a system). Persists until toggled off (Cancel Nav button / cancel_locked_nav).
+func navigate_to(id: String) -> void:
+	if id == "" or id == current_system:
+		return
+	_nav_goal = id
+	_nav_locked = ""          # the goal-guide supersedes any old fixed waypoint
+	_nav_off = false
+	if hud != null:
+		hud.set_nav_stopped(false)
+
+# Survey rank = how many distinct systems you've reached. Cheap, derived stat — no
+# separate counter to keep in sync. Sol counts, so a fresh player is rank 1.
+func survey_rank() -> int:
+	return _visited.size()
+
+# The Survey's rank titles (lore.md): the count climbs toward a name, not a gate.
+func survey_rank_title() -> String:
+	var n := survey_rank()
+	if n >= 5:    return "Star-Marshal"
+	elif n >= 4:  return "Cartographer"
+	elif n >= 2:  return "Surveyor"
+	return "Cadet"
 
 
 # A real body you can capture: not the Interstellar hub, not a hub gate-sun (✦).
@@ -509,13 +762,15 @@ func _aim_sorted_targets() -> Array:
 		var rel: Vector3 = planets.rel_of(bname)
 		if rel.length() > 0.001:
 			list.append({ "name": bname, "align": fwd.dot(rel.normalized()) })
-	var wrel: Vector3 = wormhole.portal_rel(ship.true_pos)
-	if wrel.length() > 0.001:
-		list.append({ "name": "Wormhole", "align": fwd.dot(wrel.normalized()) })
 	list.sort_custom(func(a, b): return a.align > b.align)
 	var names := []
 	for it in list:
 		names.append(it.name)
+	# Wormholes are the priority Tab target: if this system has a known link, it's the FIRST
+	# pick (the first Tab press locks the way out), ahead of any body.
+	var wrel: Vector3 = wormhole.portal_rel(ship.true_pos)
+	if wrel.length() > 0.001:
+		names.push_front("Wormhole")
 	return names
 
 # NAV button: stop / resume the Survey guide and waypoint marker (the orientation
@@ -533,6 +788,7 @@ func toggle_nav() -> void:
 # Cancel a locked (paid) map waypoint + any autopilot (the on-screen Cancel Nav button).
 func cancel_locked_nav() -> void:
 	_nav_locked = ""
+	_nav_goal = ""            # also clear a map "Navigate" guide
 	ship.autopilot = false
 	hud.set_nav_stopped(false)
 	_update_navigator()
@@ -546,6 +802,23 @@ func _update_navigator() -> void:
 	if ship.transiting:
 		navigator.update_nav(ship.camera, false, Vector3.ZERO, "", "")   # gizmo only
 		hud.set_objective("")
+		return
+	elif _nav_goal != "":
+		# Map "Navigate" guide (orange): route over KNOWN links and point at THIS system's
+		# wormhole leading to the next hop ("go to Proxima first, then Alpha").
+		var gname := SystemDB.display_name(_nav_goal)
+		var hop := SystemDB.next_hop(current_system, _nav_goal, Callable(self, "is_edge_known"))
+		if hop == "":
+			navigator.update_nav(ship.camera, false, Vector3.ZERO, "", "")   # gizmo only
+			hud.set_objective("◆  NAVIGATE  %s  —  no known route yet, explore on" % gname)
+			return
+		rel = wormhole.portal_rel_for(hop, ship.true_pos)
+		var hopname := SystemDB.display_name(hop)
+		tname = ("WORMHOLE → %s" % hopname) if hop == _nav_goal else ("→ %s  via %s" % [gname, hopname])
+		var gd := _fmt_nav_dist(rel.length())
+		navigator.update_nav(ship.camera, true, rel, tname, gd, true)
+		var via := "" if hop == _nav_goal else "   (next: %s)" % hopname
+		hud.set_objective("◆  NAVIGATE  %s%s   %s" % [gname, via, gd])
 		return
 	elif _nav_locked != "":
 		# LOCKED (paid) map waypoint — orange, top priority, ignores the N toggle,
@@ -584,6 +857,11 @@ func _update_navigator() -> void:
 #  • In any normal system — the nearest UN-surveyed star to fly to. Once they're all
 #    surveyed, fall back to guiding you to the exit gate so you know to move on.
 func _current_objective() -> Dictionary:
+	# Initial phase: onboarding's final step asks the player to reach the wormhole, so
+	# point the guide arrow straight at the gate (overriding nearby-star targeting) — they
+	# can't miss where to go.
+	if not _onboard.is_empty() and _onboarding_step == _onboard.size() - 1:
+		return _nearest_gate_objective()
 	# CONTINUOUS cursor targeting: suggest whatever the CROSSHAIR is over — the body
 	# whose on-screen position is nearest screen-centre (not the camera axis, which is
 	# offset by the chase cam). Aim the cursor at things to read them; no Tab babysitting.
@@ -626,21 +904,152 @@ func _fmt_nav_dist(u: float) -> String:
 	return "%.0f u" % u
 
 
+# --- First-run onboarding -----------------------------------------------------
+# A tiny staged guide that teaches the core loop using actions the player already
+# performs. Each step shows one tip; doing the thing advances to the next. Once past
+# the last tip it never shows again (persisted in the profile). Hidden while docked
+# or mid-transit so it doesn't clutter those screens.
+# Called by StarMap when the map is first opened. The map pauses the scene tree, so
+# main._process can't observe map._open itself — the map notifies us instead.
+func notify_map_opened() -> void:
+	_map_seen = true
+
+
+func _update_onboarding() -> void:
+	if _onboarding_step >= _onboard.size() or docked or ship.transiting:
+		hud.set_tip("")
+		return
+	# Goal met? Advance (and persist). set_tip itself no-ops when the text is unchanged.
+	if _onboard[_onboarding_step].done.call():
+		_onboarding_step += 1
+		_save_profile()
+		if _onboarding_step >= _onboard.size():
+			hud.toast = "✦  The dark is yours to chart. Good flying, pilot."
+			hud.toast_t = 4.0
+			hud.set_tip("")
+			return
+	hud.set_tip(_onboard[_onboarding_step].tip)
+
+
+# Quest line: detect kills as a per-frame delta of combat.kills (monotonic within a session),
+# then refresh the top-center tracker. Capture/visit events are pushed from their own hooks.
+func _update_quests() -> void:
+	if combat != null:
+		var dk: int = combat.kills - _last_kills
+		if dk > 0:
+			_last_kills = combat.kills
+			_quest_event("kill", dk)
+	if _quest_idx >= _quests.size():
+		hud.set_quest("✦  ALL QUESTS COMPLETE — pilot of the Survey")
+		return
+	var q = _quests[_quest_idx]
+	hud.set_quest("✦  QUEST · %s   (%d/%d)" % [q.title, mini(_quest_progress, int(q.target)), int(q.target)])
+
+# Advance the active quest when an event of its type fires. n = how many (kills can batch).
+func _quest_event(kind: String, n := 1) -> void:
+	if _quest_idx >= _quests.size():
+		return
+	var q = _quests[_quest_idx]
+	if q.type != kind:
+		return
+	_quest_progress += n
+	if _quest_progress >= int(q.target):
+		coins += int(q.reward)
+		hud.toast = "✦  QUEST COMPLETE — %s   ·   +%d coins" % [q.title, int(q.reward)]
+		hud.toast_t = 5.0
+		_quest_idx += 1
+		_quest_progress = 0      # don't carry overflow across (next quest is a different type)
+	_save_profile()
+
+
+# Emergency return to Sol — the panic button. Always available; runs the full ritual.
 func teleport_home() -> void:
-	_arrive(SystemDB.SOL)              # instant jump back to Earth (no transit)
-	ship._set_capture(true)
+	start_teleport(SystemDB.SOL, "EMERGENCY RETURN — HOME")
+
+
+# Begin the teleport ritual to `dest`. Freezes the ship, eases the camera back, and spins
+# up the RGB ring; _update_teleport drives the countdown and does the actual _arrive at the
+# end. No-op if already teleporting or mid-wormhole.
+func start_teleport(dest: String, label: String) -> void:
+	if _tp_active or ship.transiting:
+		return
+	_tp_active = true
+	_tp_t = 0.0
+	_tp_dest = dest
+	_tp_label = label
+	ship.set_frozen(true)            # hold still + slow turntable (see ship.fly frozen branch)
+	ship._cam_zoom = TELEPORT_ZOOM   # camera eases back (smoothed in ship._update_camera)
+	if _tp_ring == null:
+		_build_teleport_vfx()
+	_tp_ring.visible = true
+	if audio != null:
+		audio.play_click()
+
+
+func _update_teleport(delta: float) -> void:
+	if not _tp_active:
+		return
+	_tp_t += delta
+	# Hue-cycling RGB ring, spinning on two axes + a soft breathe → a "containment field".
+	var hue: float = fmod(_tp_t * 0.5, 1.0)
+	var col := Color.from_hsv(hue, 0.85, 1.0)
+	_tp_ring_mat.emission = col
+	_tp_ring_mat.albedo_color = col
+	_tp_ring_mat.emission_energy_multiplier = 2.8
+	_tp_ring.rotate_y(3.2 * delta)
+	_tp_ring.rotate_x(1.9 * delta)
+	var s: float = 1.0 + 0.12 * sin(_tp_t * 4.0)
+	_tp_ring.scale = Vector3(s, s, s)
+	# Countdown overlay (reuses the centered menu label).
+	var rem: int = int(ceil(maxf(TELEPORT_TIME - _tp_t, 0.0)))
+	hud.set_menu("◇  TELEPORT  ◇\n\n%s\n\nLocking coordinates…\n\nArriving in  %d" % [_tp_label, rem])
+	if _tp_t >= TELEPORT_TIME:
+		_tp_active = false
+		_tp_ring.visible = false
+		hud.set_menu("")
+		ship.set_frozen(false)
+		ship._cam_zoom = 1.0
+		_arrive(_tp_dest)
+		ship._set_capture(true)
+
+
+# A torus "containment ring" that lives on the ship and circles it during a teleport.
+func _build_teleport_vfx() -> void:
+	var torus := TorusMesh.new()
+	torus.inner_radius = 1.15
+	torus.outer_radius = 1.5
+	torus.rings = 32
+	torus.ring_segments = 12
+	_tp_ring = MeshInstance3D.new()
+	_tp_ring.mesh = torus
+	_tp_ring_mat = StandardMaterial3D.new()
+	_tp_ring_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_tp_ring_mat.emission_enabled = true
+	_tp_ring_mat.emission = Color(1, 0, 0)
+	_tp_ring_mat.albedo_color = Color(1, 0, 0)
+	_tp_ring_mat.emission_energy_multiplier = 2.8
+	_tp_ring.material_override = _tp_ring_mat
+	_tp_ring.visible = false
+	ship.add_child(_tp_ring)
 
 
 # Emerge from a wormhole in a new system: swap bodies, hard-reset the ship to a
 # small LOCAL coord (so float precision is never stressed), re-aim the portal.
 func _arrive(system_id: String) -> void:
+	var first_visit := not _visited.has(system_id)
+	_visited[system_id] = true       # now a KNOWN system → instant map fast-travel hereafter
+	_nav_unlocked.erase(system_id)   # discovered → no longer just a "nav-unlocked" lane
 	current_system = system_id
 	planets.load_system(SystemDB.bodies(system_id))
 	planets.speed_zones = (system_id == SystemDB.SOL)   # planet safe-zone limits: Sol only
 	ship.true_pos = SystemDB.arrival_pos(system_id)
 	ship.transiting = false
 	ship.face_toward(-ship.true_pos)          # look back toward the system's star
-	wormhole.set_system(system_id)
+	# Show this system's neighbour wormholes that the player KNOWS — fly through any to
+	# transit straight to that neighbour (no central hub in the loop anymore).
+	wormhole.set_portals(_known_portals(system_id))
+	if system_id == _nav_goal:
+		_nav_goal = ""                             # reached the guided star — clear the guide
 	props.set_system(system_id)                    # show this system's stations/probes
 	# A large alien swarm haunts every star except peaceful Sol; Vortex (the boss)
 	# still only holds the true hostile Alien zone.
@@ -655,6 +1064,18 @@ func _arrive(system_id: String) -> void:
 	if docked:
 		_set_docked(false)
 	hud.origin_name = SystemDB.display_name(system_id) if system_id != SystemDB.SOL else "Earth"
+	# First time here = the trip paid off: coins, a rank bump, and a lore card. Re-visits
+	# (fast-travel, teleport home) are silent — the reward is for discovery, not commuting.
+	if first_visit and system_id != SystemDB.SOL:
+		coins += ARRIVAL_REWARD
+		hud.toast = "✦  NEW SYSTEM — %s   ·   +%d coins   ·   %s (%d charted)" \
+			% [SystemDB.display_name(system_id), ARRIVAL_REWARD, survey_rank_title(), survey_rank()]
+		hud.toast_t = 5.0
+		var lore: String = SystemDB.lore(system_id)
+		if lore != "":
+			hud.show_lore("%s\n\n%s" % [SystemDB.display_name(system_id), lore])
+		_quest_event("visit")                      # quest line: new systems reached
+	_save_profile()                                # persist visited set + any reward
 	print("[wormhole] arrived at %s — ship.true_pos.length()=%.2f (must be small)"
 		% [SystemDB.display_name(system_id), ship.true_pos.length()])
 
@@ -696,8 +1117,18 @@ func _input(event: InputEvent) -> void:
 	elif key == KEY_ESCAPE and not ship.transiting and not ship.frozen:
 		# Esc = release the mouse; press again to re-capture (back to flight).
 		ship._set_capture(Input.get_mouse_mode() != Input.MOUSE_MODE_CAPTURED)
-	elif key == KEY_H and not ship.transiting:
+	elif key == KEY_H and not ship.transiting and not _tp_active:
 		teleport_home()
+	elif key == KEY_F3:
+		_perf_on = not _perf_on          # toggle the perf/leak readout
+		if not _perf_on:
+			hud.set_debug("")
+	elif key == KEY_S and ship.auto_cruise:
+		# Tapping reverse drops you out of hands-free auto-cruise (don't consume the
+		# event — S still applies reverse thrust this frame).
+		ship.auto_cruise = false
+		hud.toast = "AUTO-CRUISE  OFF"
+		hud.toast_t = 2.0
 	elif docked and key >= KEY_1 and key <= KEY_9:
 		ship.swap_ship(key - KEY_1)
 		combat.player_hp = ship.max_hp   # new hull -> its full defence
@@ -708,7 +1139,28 @@ func _set_docked(d: bool) -> void:
 	ship.set_frozen(d)
 
 
+# F3 perf/leak readout (throttled to ~3 Hz so the text relayout is cheap). Watch which
+# counter climbs during play: OBJ/ORPHAN rising = node/resource leak; RAM rising = memory
+# leak; RENDER rising = draw-load growth (e.g. too many hub portals/stations on screen).
+func _update_debug(delta: float) -> void:
+	if not _perf_on:
+		return
+	_perf_t -= delta
+	if _perf_t > 0.0:
+		return
+	_perf_t = 0.33
+	var obj := int(Performance.get_monitor(Performance.OBJECT_COUNT))
+	var orphan := int(Performance.get_monitor(Performance.OBJECT_ORPHAN_NODE_COUNT))
+	var ram := Performance.get_monitor(Performance.MEMORY_STATIC) / 1048576.0
+	var rend := int(Performance.get_monitor(Performance.RENDER_TOTAL_OBJECTS_IN_FRAME))
+	var fps := int(Performance.get_monitor(Performance.TIME_FPS))
+	hud.set_debug("FPS %d  ·  OBJ %d  ·  ORPHAN %d  ·  RAM %.0f MB  ·  RENDER %d" \
+		% [fps, obj, orphan, ram, rend])
+
+
 func _update_dock_ui() -> void:
+	if _tp_active:
+		return                       # the teleport ritual owns the centered overlay
 	# Wormhole transit takes over the screen with its countdown.
 	if ship.transiting:
 		var rem := wormhole.transit_remaining()
@@ -720,21 +1172,34 @@ func _update_dock_ui() -> void:
 		return
 
 	hud.set_menu("")
-	# Docking: every system with a station has one (Earth + each exoplanet station).
-	var dock_dist := (props.dock_pos - ship.true_pos).length() \
-		if props.has_dock else INF
-	_dock_in_range = dock_dist < props.dock_range
+	# Dock target: in a star system it's that system's station (props). In the Interstellar
+	# hub there's no props station — instead ~half the KNOWN wormholes carry a space
+	# PLATFORM, so the target is the NEAREST platform (wormhole.nearest_station), letting
+	# you dock/swap close to wherever you are rather than flying back home.
+	var has_dock := props.has_dock
+	var dock_pos := props.dock_pos
+	var dock_name := props.dock_name
+	var dock_range := props.dock_range
+	if current_system == SystemDB.INTERSTELLAR:
+		var st := wormhole.nearest_station(ship.true_pos)
+		has_dock = not st.is_empty()
+		if has_dock:
+			dock_pos = st.pos
+			dock_name = st.name
+			dock_range = st.range
+	var dock_dist := (dock_pos - ship.true_pos).length() if has_dock else INF
+	_dock_in_range = dock_dist < dock_range
 	# Force-slow the ship as it enters the landing zone (smooth, proximity-based):
 	# 0 at the outer edge (dock_range + DOCK_SLOW_MARGIN), 1 once inside the pad.
-	ship.dock_approach = clampf(1.0 - (dock_dist - props.dock_range) / DOCK_SLOW_MARGIN, 0.0, 1.0) \
+	ship.dock_approach = clampf(1.0 - (dock_dist - dock_range) / DOCK_SLOW_MARGIN, 0.0, 1.0) \
 		if dock_dist < INF else 0.0
 	if docked:
 		hud.set_prompt("")
-		hud.set_hangar(true, _ship_names(), ship.current_index(), props.dock_name)
+		hud.set_hangar(true, _ship_names(), ship.current_index(), dock_name)
 	else:
 		hud.set_hangar(false, PackedStringArray(), 0, "")
 		if _dock_in_range:
-			hud.set_prompt("» Press F to dock at %s «" % props.dock_name)
+			hud.set_prompt("» Press F to dock at %s «" % dock_name)
 		elif props.probe_in_range:
 			hud.set_prompt(_probe_readout())   # drift up to a probe -> monster data
 		elif wormhole.in_range(ship.true_pos):

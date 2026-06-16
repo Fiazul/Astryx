@@ -11,8 +11,20 @@ extends Node3D
 # floating-origin tracked. Fly near any portal, press F, and a tunnel sequence
 # plays for ~ (ly × SEC_PER_LY) seconds, then main swaps to that portal's system.
 
-const PORTAL_RANGE := 60.0    # ×10 for the spread-out system
+const PORTAL_RANGE := 110.0   # F-window around a portal — generous so it's easy to dive in
 const MAX_PORTALS := 6                  # pool size (Interstellar hub uses 5; systems use 1)
+# Space platforms: ~half the hub wormholes carry a dockable station (see SystemDB.has_station)
+# so you never have to fly far — teleport platform→platform, then short-fly the rest. The
+# platform parks just off its wormhole ring; main docks at the nearest one (see nearest_station).
+const STATION_GLB := "res://assets/space station.glb"
+const STATION_SIZE := 34.0                  # fitted longest-axis size of the platform
+# Park the platform well clear of the wormhole ring — FARTHER than PORTAL_RANGE (110) so
+# that when you're in dock range of the platform you're OUT of the wormhole's F-range
+# (F-key priority is wormhole-enter first, dock second; otherwise the platform would be
+# unreachable, swallowed by the portal's range).
+const STATION_OFFSET := Vector3(150.0, -45.0, 0.0)   # |offset| ≈ 157 > PORTAL_RANGE
+const STATION_DOCK_RANGE := 110.0           # F-to-dock proximity at a platform
+const STATION_CULL := 3200.0                # stop drawing the platform mesh beyond this
 # Transit length = light-years × this (clamped). Tunable: 0.15 → ~18s for K2-18b
 # (dev-friendly); set ~2.9 for the ~6-minute "epic haul" the design calls for.
 const SEC_PER_LY := 0.15
@@ -31,9 +43,11 @@ var _tunnel: MeshInstance3D
 var _tunnel_mat: StandardMaterial3D
 var _t := 0.0
 var _duration := 0.0
+var _station_scene: PackedScene   # the platform GLB, instantiated lazily per platformed portal
 
 
 func _ready() -> void:
+	_station_scene = load(STATION_GLB) as PackedScene
 	for i in MAX_PORTALS:
 		_portals.append(_build_portal())
 
@@ -43,27 +57,55 @@ func set_ship(s: Node3D) -> void:
 	_build_tunnel()   # lives on the ship so it stays aligned with travel
 
 
-# Lay out this system's portals (positions + destinations) and label each one.
+# Lay out a system's portals from SystemDB (a star system's single exit gate). The hub's
+# KNOWN-filtered wormhole field is set by main via set_portals() directly.
 func set_system(id: String) -> void:
-	var defs: Array = SystemDB.portals(id)
-	for i in MAX_PORTALS:
+	set_portals(SystemDB.portals(id))
+
+# Show an explicit list of portals: [{ pos, dest, dest_ly? }]. Grows the pool as needed
+# (the hub can hold many imaginary wormholes once the player has discovered them).
+func set_portals(defs: Array) -> void:
+	while _portals.size() < defs.size():
+		_portals.append(_build_portal())
+	for i in _portals.size():
 		var p = _portals[i]
 		if i < defs.size():
 			p.pos = defs[i].pos
 			p.dest_id = defs[i].dest
-			p.dest_ly = SystemDB.light_years(defs[i].dest)
+			p.dest_ly = defs[i].get("dest_ly", SystemDB.light_years(defs[i].dest))
 			p.active = true
 			p.node.visible = true
 			p.label.text = "◇ %s ◇\n%.0f ly" % [SystemDB.display_name(p.dest_id), p.dest_ly]
 			p.label.visible = true
+			p.station = bool(defs[i].get("station", false))
+			if p.station and p.station_node == null:
+				p.station_node = _make_station()   # build the platform lazily, once
+			if p.station_node != null:
+				p.station_node.visible = p.station
+			if p.station_label != null:
+				p.station_label.text = "⬡ %s PLATFORM" % SystemDB.display_name(p.dest_id)
+				p.station_label.visible = p.station
 		else:
 			p.active = false
 			p.node.visible = false
 			p.label.visible = false
+			p.station = false
+			if p.station_node != null:
+				p.station_node.visible = false
+			if p.station_label != null:
+				p.station_label.visible = false
 	_active = -1
 	if defs.size() > 0:
 		dest_id = defs[0].dest
-		dest_ly = SystemDB.light_years(dest_id)
+		dest_ly = defs[0].get("dest_ly", SystemDB.light_years(dest_id))
+
+# Render-space offset of the KNOWN wormhole that leads to `dest` (for the nav guide).
+# Vector3.ZERO if that wormhole isn't currently present.
+func portal_rel_for(dest: String, ship_pos: Vector3) -> Vector3:
+	for p in _portals:
+		if p.active and p.dest_id == dest:
+			return p.pos - ship_pos
+	return Vector3.ZERO
 
 
 # True if the ship is within F-range of ANY portal; remembers the nearest one so
@@ -118,6 +160,45 @@ func nearest_portal(ship_pos: Vector3) -> Dictionary:
 	return out
 
 
+# Harbour speed-cap as you near a wormhole — the same "ease down so you don't blast past"
+# feel as a station/platform, so you can line up and dive in. INF when clear of all
+# portals; eases to WH_MIN_SPEED right at the ring. main folds this into ship.struct_limit.
+const WH_SLOW_RANGE := 750.0   # start easing down within this of the nearest portal
+const WH_EDGE_SPEED := 850.0   # cap as you enter the slow zone (drops you out of warp)
+const WH_MIN_SPEED := 40.0     # gentle crawl right at the mouth — easy to settle + press F
+
+func slow_limit(ship_pos: Vector3) -> float:
+	if transiting:
+		return INF
+	var best := INF
+	for p in _portals:
+		if not p.active:
+			continue
+		best = minf(best, (p.pos - ship_pos).length())
+	if best >= WH_SLOW_RANGE:
+		return INF
+	# Ease firmly from WH_EDGE_SPEED at the zone's rim down to a WH_MIN_SPEED crawl at the
+	# mouth, so the whole approach is slow and controllable (the old curve snapped back to
+	# full speed almost immediately, which is why landing felt impossible).
+	return lerpf(WH_MIN_SPEED, WH_EDGE_SPEED, clampf(best / WH_SLOW_RANGE, 0.0, 1.0))
+
+
+# Nearest dockable platform as { pos, name, range } (absolute scene pos, for main's dock
+# logic — the hub has many). {} when none are present (e.g. inside a star system).
+func nearest_station(ship_pos: Vector3) -> Dictionary:
+	var best := INF
+	var out := {}
+	for p in _portals:
+		if not p.active or not p.station:
+			continue
+		var sp: Vector3 = p.pos + STATION_OFFSET
+		var d := (sp - ship_pos).length()
+		if d < best:
+			best = d
+			out = { "pos": sp, "name": "%s Platform" % SystemDB.display_name(p.dest_id), "range": STATION_DOCK_RANGE }
+	return out
+
+
 func start_transit() -> void:
 	transiting = true
 	_t = 0.0
@@ -128,6 +209,29 @@ func start_transit() -> void:
 	for pp in _portals:
 		pp.node.visible = false
 		pp.label.visible = false
+		if pp.station_node != null:
+			pp.station_node.visible = false
+		if pp.station_label != null:
+			pp.station_label.visible = false
+	_tunnel.visible = true
+
+
+# Start a transit to an EXPLICIT destination (the star map's "warp here"), no portal
+# needed. Same tunnel + distance-scaled duration as a portal jump; main's update loop
+# detects completion and calls _arrive(dest_id) just like a normal transit.
+func start_warp(dest: String, ly: float) -> void:
+	transiting = true
+	_t = 0.0
+	dest_id = dest
+	dest_ly = ly
+	_duration = clampf(ly * SEC_PER_LY, TRANSIT_MIN, TRANSIT_MAX)
+	for pp in _portals:
+		pp.node.visible = false
+		pp.label.visible = false
+		if pp.station_node != null:
+			pp.station_node.visible = false
+		if pp.station_label != null:
+			pp.station_label.visible = false
 	_tunnel.visible = true
 
 
@@ -161,6 +265,21 @@ func update(ship_pos: Vector3, delta: float) -> bool:
 		p.label.visible = true
 		p.label.position = rel + Vector3(0.0, 11.0, 0.0)
 		p.label.pixel_size = clampf(rel.length() * 0.00012, 0.02, 1.2)
+		# Platform: park it just off the wormhole ring, slowly spinning, with a label.
+		# Distance-cull the GLB mesh (heavy) so only nearby platforms draw — at full
+		# discovery there can be ~25 of them, and you only ever dock at the close one.
+		if p.station and p.station_node != null:
+			var srel: Vector3 = (p.pos + STATION_OFFSET) - ship_pos
+			var near: bool = srel.length() < STATION_CULL
+			p.station_node.visible = near
+			if near:
+				p.station_node.position = srel
+				p.station_node.rotate_y(0.05 * delta)
+			if p.station_label != null:
+				p.station_label.visible = near
+				if near:
+					p.station_label.position = srel + Vector3(0.0, STATION_SIZE * 0.7, 0.0)
+					p.station_label.pixel_size = clampf(srel.length() * 0.00012, 0.02, 1.2)
 	return false
 
 
@@ -224,10 +343,97 @@ func _build_portal() -> Dictionary:
 	label.visible = false
 	add_child(label)
 
+	# Floating platform label (built once; shown only when this wormhole has a platform).
+	var slabel := Label3D.new()
+	slabel.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	slabel.outline_modulate = Color(0, 0, 0, 0.7)
+	slabel.outline_size = 8
+	slabel.font_size = 34
+	slabel.modulate = Color(0.55, 0.85, 1.0)
+	slabel.no_depth_test = true
+	slabel.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	slabel.visible = false
+	add_child(slabel)
+
 	return {
 		"node": portal, "mat": mat, "label": label,
 		"pos": Vector3.ZERO, "dest_id": "", "dest_ly": 0.0, "active": false,
+		"station": false, "station_node": null, "station_label": slabel,
 	}
+
+
+# Build one dockable platform: instantiate the station GLB, fit it to STATION_SIZE, and
+# self-illuminate it so it reads against black (no Light3D out here). Hidden until placed.
+func _make_station() -> Node3D:
+	var holder := Node3D.new()
+	add_child(holder)
+	if _station_scene == null:
+		push_warning("Wormhole: station GLB not loaded (%s)" % STATION_GLB)
+		holder.visible = false
+		return holder
+	var model := _station_scene.instantiate() as Node3D
+	holder.add_child(model)
+	_fit_glb(holder, model, STATION_SIZE)
+	_self_light_glb(model, 0.5)
+	holder.visible = false
+	return holder
+
+
+# Scale model so its longest axis == target and recenter it on the holder.
+func _fit_glb(holder: Node3D, model: Node3D, target: float) -> void:
+	var box := _glb_aabb(holder)
+	var longest := maxf(box.size.x, maxf(box.size.y, box.size.z))
+	if longest <= 0.0001:
+		return
+	var factor := target / longest
+	model.scale = model.scale * factor
+	model.position -= (box.position + box.size * 0.5) * factor
+
+
+func _glb_aabb(root: Node3D) -> AABB:
+	var out := AABB()
+	var first := true
+	var inv := root.global_transform.affine_inverse()
+	for mi in _gather_mi(root):
+		if mi.mesh == null:
+			continue
+		var box := (inv * mi.global_transform) * mi.get_aabb()
+		if first:
+			out = box
+			first = false
+		else:
+			out = out.merge(box)
+	return out
+
+
+func _gather_mi(node: Node) -> Array[MeshInstance3D]:
+	var out: Array[MeshInstance3D] = []
+	if node is MeshInstance3D:
+		out.append(node as MeshInstance3D)
+	for c in node.get_children():
+		out.append_array(_gather_mi(c))
+	return out
+
+
+func _self_light_glb(model: Node3D, glow: float) -> void:
+	for mi in _gather_mi(model):
+		if mi.mesh == null:
+			continue
+		for si in mi.mesh.get_surface_count():
+			var orig := mi.get_active_material(si)
+			var m: BaseMaterial3D
+			if orig is BaseMaterial3D:
+				m = orig.duplicate() as BaseMaterial3D
+			else:
+				m = StandardMaterial3D.new()
+			m.emission_enabled = true
+			if m.albedo_texture != null:
+				m.emission_texture = m.albedo_texture
+				m.emission = Color(1, 1, 1)
+			else:
+				m.emission = m.albedo_color
+			m.emission_energy_multiplier = glow
+			mi.set_surface_override_material(si, m)
 
 
 # Radial haze: bright near the rim, fading out — the hole's danger glow.

@@ -37,16 +37,19 @@ const WEAPON_REGEN := 34.0         # rapid weapon-energy regen (per second)
 const BOOST_REGEN := 22.0          # boost-energy regen (per second)
 const BOLT_ENERGY := 7.0           # base per bolt (× ship.energy_use)
 const LASER_ENERGY := 26.0         # base per second of beam (× ship.energy_use)
-# Energy pickups appear ONLY in open interstellar flight (never in a slow-zone, where
-# boost does nothing). They spawn ahead with a gap so you can see + fly into them.
-const PICKUP_EVERY := 2.4
-const PICKUP_AHEAD := 800.0        # base gap ahead (scales up with speed)
-const PICKUP_SCATTER := 220.0
-const PICKUP_COLLECT := 130.0      # grab radius (scales up with speed)
-const PICKUP_LIFE := 18.0
-const PICKUP_REFILL := 60.0        # energy restored to BOTH bars
+# Energy pickup — ONE ⚡ cell that appears only when you actually NEED it (boost tank
+# below PICKUP_NEED_FRAC) and only in open interstellar flight. It spawns ahead in view,
+# then HOMES to the ship so you always collect it (no chasing — that was the annoying part).
+const PICKUP_EVERY := 1.5          # min gap between cells (only matters once one is collected)
+const PICKUP_NEED_FRAC := 0.6      # only offer a cell when boost energy drops below 60%
+const PICKUP_AHEAD := 700.0        # where it first appears ahead (scales up with speed)
+const PICKUP_SCATTER := 120.0      # slight off-centre so it reads as "incoming", not pasted on
+const PICKUP_HOME := 650.0         # homing speed ABOVE the ship's own speed → guaranteed catch
+const PICKUP_COLLECT := 150.0      # grab radius (scales up with speed)
+const PICKUP_LIFE := 14.0
+const PICKUP_REFILL := 70.0        # energy restored to BOTH bars
 const PICKUP_HEAL := 14            # hull restored
-const PICKUP_CAP := 4              # max alive at once
+const PICKUP_CAP := 1              # only ever one in the air — it homes, you always get it
 # Probes: rare beacons far out in empty space — fly to one for a big refuel.
 const SPAWN_RADIUS := 60.0        # where new aliens appear around the player
 
@@ -242,7 +245,10 @@ func update(ship: Node3D, pressed: bool, delta: float, laser := false) -> void:
 	# Live muzzle, tracking the hull's cosmetic bank — bolts spawn here AND their trail tail
 	# re-anchors here every frame, so the start stays glued to the nose even as you strafe.
 	var muzzle_now: Vector3 = ship.muzzle_world() if ship.has_method("muzzle_world") else sp + fwd * ship.muzzle - ship.transform.basis.y * ship.muzzle_drop
-	var laser_on: bool = laser and ship.can_fire and energy > 0.0
+	# You can only fire at regular (sublight) combat speed. main force-slows the ship to it
+	# while you hold fire, so this just blocks the brief moment before the slowdown lands.
+	var slow_enough: bool = ship.velocity.length() <= Ship.WEAPON_FIRE_SPEED * 1.05
+	var laser_on: bool = laser and ship.can_fire and energy > 0.0 and slow_enough
 	if laser_on:
 		energy = maxf(energy - LASER_ENERGY * ship.energy_use * delta, 0.0)
 	_update_laser(ship, laser_on, sp, fwd, delta)
@@ -255,7 +261,7 @@ func update(ship: Node3D, pressed: bool, delta: float, laser := false) -> void:
 	# --- player firing: pure straight shots, no aim assist (utility hulls can't fire) ---
 	_cool = maxf(_cool - delta, 0.0)
 	var bolt_cost: float = BOLT_ENERGY * ship.energy_use
-	if pressed and _cool <= 0.0 and ship.can_fire and energy >= bolt_cost:
+	if pressed and slow_enough and _cool <= 0.0 and ship.can_fire and energy >= bolt_cost:
 		_cool = ship.fire_cooldown if ship.has_method("is_hypersonic") else BOLT_COOLDOWN
 		energy -= bolt_cost
 		var bmat: StandardMaterial3D = _laser_bolt_mat if ship.bolt_laser else (_bolt_mat_strong if ship.bolt_strong else _bolt_mat)
@@ -274,6 +280,7 @@ func update(ship: Node3D, pressed: bool, delta: float, laser := false) -> void:
 	_step_aliens(ship, sp, delta)
 	_step_boss(0.0, delta, sp)
 	_step_pickups(ship, sp, fwd, delta)
+	_sweep_dead_minions()
 
 
 # True for COMBAT_HOLD seconds after the last attack (you fire at enemies, an alien
@@ -627,32 +634,30 @@ func _boss_burst(a: Dictionary, sp: Vector3) -> void:
 	_spawn_bolt(_abolts, a.pos + aim * (a.size * 0.5), aim * (ALIEN_BOLT_SPEED * 1.4), _abolt_mat)
 	_combat_t = COMBAT_HOLD
 
-# Shiny pickups: spawn often ahead of the ship; flying through one restores energy +
-# a little hull. Floating-origin: stored in world space, drawn relative to the ship.
+# Energy cell: only ever offered when the boost tank is actually low, and only in open
+# interstellar flight. It appears ahead in view, then HOMES to the ship (faster than the
+# ship moves) so it always reaches you — no chasing. Floating-origin: world pos stored,
+# drawn relative to the ship; the ⚡ label is fixed-size so it stays readable at any range.
 func _step_pickups(ship: Node3D, sp: Vector3, fwd: Vector3, delta: float) -> void:
-	# Pickups ONLY in open interstellar flight — never in a slow-zone (where boost,
-	# and thus the energy economy, doesn't apply). Don't waste screen space otherwise.
-	# Same rule the boost uses: pickups appear exactly where boost works / energy is spent
-	# (open interstellar flight). In a star/station slow-zone -> no boost, no pickups.
 	var min_limit: float = minf(ship.speed_limit, ship.struct_limit)
 	var open_space: bool = min_limit >= ship.SUBLIGHT_MAX and not ship.transiting
 	var speed: float = ship.velocity.length()
 	_pickup_cd -= delta
-	if open_space and _pickup_cd <= 0.0 and _pickups.size() < PICKUP_CAP:
+	# Offer a cell only when you NEED it — boost tank under PICKUP_NEED_FRAC of full.
+	var need: bool = boost_energy < PICKUP_NEED_FRAC * e_max
+	if open_space and need and _pickup_cd <= 0.0 and _pickups.size() < PICKUP_CAP:
 		_pickup_cd = PICKUP_EVERY
-		var ahead: float = maxf(PICKUP_AHEAD, speed * 1.3)   # a GAP in front; lead grows with speed so it's on-screen long enough to see
+		var ahead: float = maxf(PICKUP_AHEAD, speed * 1.3)   # lead grows with speed so it's on-screen long enough to see
 		_spawn_pickup(sp + fwd * ahead + _rand_dir() * PICKUP_SCATTER)
 	var i := _pickups.size() - 1
 	while i >= 0:
 		var p = _pickups[i]
 		p.life -= delta
+		# Home to the ship at MORE than the ship's own speed → distance always shrinks, so
+		# the cell is guaranteed to catch you (the "100% hit" feel).
+		p.pos = p.pos.move_toward(sp, (speed + PICKUP_HOME) * delta)
 		p.node.position = p.pos - sp
 		var d: float = sp.distance_to(p.pos)
-		# Keep a constant ON-SCREEN size regardless of how far ahead it spawned or how
-		# fast we're closing — otherwise at interstellar/warp speed it's a sub-pixel dot
-		# you absorb before it ever renders. Grows a touch as you near it.
-		var s: float = clampf(d * 0.006, 0.6, 900.0)
-		p.node.scale = Vector3(s, s, s)
 		var grab: float = PICKUP_COLLECT + speed * 0.4   # window widens with speed
 		if d < grab:
 			energy = minf(energy + PICKUP_REFILL, e_max)
@@ -660,7 +665,7 @@ func _step_pickups(ship: Node3D, sp: Vector3, fwd: Vector3, delta: float) -> voi
 			player_hp = mini(player_hp + PICKUP_HEAL, player_max)
 			_boom(p.pos - sp, 9.0)
 			if audio != null:
-				audio.play_click()
+				audio.play_pickup()
 			p.node.queue_free()
 			_pickups.remove_at(i)
 		elif p.life <= 0.0:
@@ -670,21 +675,20 @@ func _step_pickups(ship: Node3D, sp: Vector3, fwd: Vector3, delta: float) -> voi
 
 
 func _spawn_pickup(world_pos: Vector3) -> void:
-	# A small, soft glowing energy orb — clean and modest (no giant glyphs).
-	var mi := MeshInstance3D.new()
-	var q := QuadMesh.new(); q.size = Vector2(16, 16)
-	mi.mesh = q
-	var mat := StandardMaterial3D.new()
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
-	mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
-	mat.billboard_keep_scale = true   # without this a billboard ignores node scale -> stays a dot at distance
-	mat.albedo_texture = _glow_tex
-	mat.albedo_color = Color(0.5, 1.0, 0.9, 0.95)   # soft cyan-mint glow
-	mi.material_override = mat
-	add_child(mi)
-	_pickups.append({ "pos": world_pos, "node": mi, "life": PICKUP_LIFE })
+	# A meaningful ⚡ energy cell — a bright, fixed-size billboard glyph that reads instantly
+	# as "boost juice" and stays the same size on screen however far out it spawns.
+	var lbl := Label3D.new()
+	lbl.text = "⚡"
+	lbl.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	lbl.fixed_size = true            # constant on-screen size regardless of distance
+	lbl.pixel_size = 0.0016
+	lbl.font_size = 96
+	lbl.no_depth_test = true         # never hidden behind a body — it's a HUD-ish cue
+	lbl.modulate = Color(1.0, 0.92, 0.35)        # electric yellow
+	lbl.outline_modulate = Color(0.1, 0.25, 0.5, 0.9)
+	lbl.outline_size = 12
+	add_child(lbl)
+	_pickups.append({ "pos": world_pos, "node": lbl, "life": PICKUP_LIFE })
 
 
 func clear_guardians() -> void:
@@ -710,6 +714,21 @@ func guardians_alive() -> int:
 		if a.get("guardian", false) and a.alive:
 			n += 1
 	return n
+
+# Free DEAD boss-summoned minions immediately instead of letting their hidden nodes pile
+# up in _aliens for the whole fight. The summon cap (line ~594) only counts LIVE minions,
+# so without this a long boss fight spawns unbounded GLB instances that persist (each
+# duplicating its materials) until the boss dies — a steady leak during combat. Dead
+# minions are never referenced again (every loop skips `not alive`), so freeing is safe.
+func _sweep_dead_minions() -> void:
+	var i := _aliens.size() - 1
+	while i >= 0:
+		var a = _aliens[i]
+		if a.get("minion", false) and not a.alive:
+			a.node.queue_free()
+			_aliens.remove_at(i)
+		i -= 1
+
 
 func _clear_minions() -> void:
 	var keep := []

@@ -51,6 +51,12 @@ var _speed_label: Label
 var _near_label: Label
 var _prompt: Label    # "Press F to dock" near the station
 var _menu: Label      # centered overlay text (wormhole-transit countdown)
+var _tip: Label       # first-run onboarding tip line (just under the crosshair)
+var _debug_label: Label   # F3 perf readout (object/RAM/render counters)
+var _quest_label: Label   # active-quest tracker (top-center)
+var _lore: PanelContainer   # arrival lore card (shown once, on first reaching a system)
+var _lore_label: Label
+var lore_t := 0.0     # seconds the lore card stays up (main counts it down; refresh fades it)
 # Hangar: the styled, bordered, gradient-backed ship-pickup table (top-right).
 var _hangar: PanelContainer
 var _hangar_bg: TextureRect
@@ -97,7 +103,7 @@ const LAYOUT_PATH := "user://hud_layout.cfg"
 const DEFAULT_LAYOUT := {
 	"nav": Vector2(16, 14), "combat": Vector2(11.33, 620), "hull": Vector2(15.33, 98.67),
 	"teleport": Vector2(1088, 674), "buttons": Vector2(10.67, 676.67),
-	"details": Vector2(552, 650), "radar": Vector2(1129.33, 11.33),
+	"details": Vector2(1088, 636), "radar": Vector2(1129.33, 11.33),
 }
 const DEFAULT_SCALE := {
 	"nav": 0.76, "combat": 0.76, "hull": 0.94, "teleport": 1.0,
@@ -151,6 +157,30 @@ func _ready() -> void:
 	_menu.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_menu.visible = false
 
+	# First-run onboarding tip — small, crisp warm-white, centered near the top (clear of
+	# the crosshair cluster at y≈416 and the bottom _prompt). Kept deliberately compact:
+	# small text reads fine on a PC monitor and doesn't bloat the view.
+	_tip = _make_label(Vector2(0, 110), 11, Color(1.0, 0.97, 0.9))
+	_tip.size = Vector2(1280, 20)
+	_tip.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_tip.visible = false
+
+	# Active-quest tracker (top-center, small gold): "✦ QUEST · <title>  (n/target)".
+	_quest_label = _make_label(Vector2(0, 84), 12, Color(1.0, 0.86, 0.4))
+	_quest_label.size = Vector2(1280, 18)
+	_quest_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_quest_label.visible = false
+
+	# Debug perf readout (top-center, hidden until F3). Monospace-ish small text: object
+	# count / orphans / static RAM / render objects / FPS — to catch leaks during play.
+	_debug_label = _make_label(Vector2(0, 40), 11, Color(0.6, 1.0, 0.7))
+	_debug_label.size = Vector2(1280, 18)
+	_debug_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_debug_label.visible = false
+
+	# Arrival lore card — a framed panel that fades up on first reaching a system.
+	_build_lore_card(_canvas)
+
 	# Styled ship-pickup table (top-right, shown while docked).
 	_build_hangar(_canvas)
 
@@ -193,9 +223,10 @@ func _ready() -> void:
 	_build_controls_menu(_canvas)
 	_build_guide(_canvas)
 
-	# "Details" button — appears (bottom-center) when you're near a planet.
+	# "Details" button — appears (bottom-right, above Teleport) when you're near a planet,
+	# so it never blocks the centre of the view.
 	details_button = Button.new()
-	details_button.position = Vector2(552, 650)
+	details_button.position = Vector2(1088, 636)
 	details_button.size = Vector2(176, 32)
 	details_button.focus_mode = Control.FOCUS_NONE
 	details_button.add_theme_font_size_override("font_size", 12)
@@ -571,12 +602,81 @@ func set_objective(text: String) -> void:
 	if _objective_label != null:
 		_objective_label.text = text
 
+# Active-quest tracker line. "" hides it. (Cheap: skip relayout when unchanged.)
+func set_quest(text: String) -> void:
+	if _quest_label == null or _quest_label.text == text:
+		return
+	_quest_label.text = text
+	_quest_label.visible = text != ""
+
 func set_prompt(text: String) -> void:
 	_prompt.text = text
 
 func set_menu(text: String) -> void:
 	_menu.text = text
 	_menu.visible = text != ""   # hide the centered overlay when there's nothing to show
+
+# F3 perf overlay. "" hides it; any text shows it (main feeds the counters each frame).
+func set_debug(text: String) -> void:
+	_debug_label.visible = text != ""
+	if text != "":
+		_debug_label.text = text
+
+
+# First-run onboarding tip line (warm-white, near the top). "" hides it. Called every
+# frame, so skip the work when the text hasn't changed (reassigning Label.text re-lays
+# out the text server even for an identical string). A new tip fades + drifts up gently.
+func set_tip(text: String) -> void:
+	if _tip == null or _tip.text == text:
+		return
+	_tip.text = text
+	_tip.visible = text != ""
+	if text != "":
+		_tip.modulate.a = 0.0
+		_tip.position.y = 118.0
+		var tw := create_tween().set_parallel(true)
+		tw.tween_property(_tip, "modulate:a", 1.0, 0.45)
+		tw.tween_property(_tip, "position:y", 110.0, 0.45).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+
+
+# Pop the arrival lore card up for a few seconds (fades out in refresh()). Called by
+# main on the FIRST arrival into a system.
+const LORE_SHOW := 9.0   # seconds the lore card stays up (fades in/out at the ends)
+
+func show_lore(text: String) -> void:
+	if _lore == null:
+		return
+	_lore_label.text = text
+	_lore.visible = true
+	lore_t = LORE_SHOW
+
+
+# Compact frosted lore card, centered. Small body text (PC-readable) with a thin glowing
+# edge — informative without taking over the screen. Fades in/out via lore_t in refresh().
+func _build_lore_card(canvas: CanvasLayer) -> void:
+	var w := 470.0
+	_lore = PanelContainer.new()
+	_lore.size = Vector2(w, 150)
+	_lore.position = Vector2((1280 - w) * 0.5, 150)
+	var frame := StyleBoxFlat.new()
+	frame.bg_color = Color(0.04, 0.06, 0.11, 0.88)
+	frame.set_border_width_all(1)
+	frame.border_color = Color(0.6, 1.0, 0.95, 0.8)
+	frame.set_corner_radius_all(7)
+	frame.set_content_margin_all(15)
+	frame.shadow_color = Color(0.3, 0.7, 1.0, 0.3)
+	frame.shadow_size = 12
+	_lore.add_theme_stylebox_override("panel", frame)
+	_lore_label = Label.new()
+	_lore_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_lore_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_lore_label.add_theme_font_size_override("font_size", 12)
+	_lore_label.add_theme_color_override("font_color", C_TEXT)
+	_lore_label.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.7))
+	_lore_label.add_theme_constant_override("shadow_offset_y", 1)
+	_lore.add_child(_lore_label)
+	_lore.visible = false
+	canvas.add_child(_lore)
 
 
 # --- Controls cheat-sheet menu --------------------------------------------------
@@ -1018,6 +1118,13 @@ func refresh() -> void:
 		_toast_label.modulate = Color(0.5, 1.0, 0.7, clampf(toast_t, 0.0, 1.0))
 	else:
 		_toast_label.text = ""
+	# Lore card eases IN over its first ~0.4s and OUT over its last second (lore_t is
+	# counted down by main from LORE_SHOW). alpha = min(fade-in, fade-out).
+	if _lore != null and _lore.visible:
+		var fade_in: float = clampf((LORE_SHOW - lore_t) / 0.4, 0.0, 1.0)
+		_lore.modulate.a = minf(fade_in, clampf(lore_t, 0.0, 1.0))
+		if lore_t <= 0.0:
+			_lore.visible = false
 
 	if planets != null and planets.nearest_name != "":
 		var near_au := planets.nearest_dist * AU_PER_UNIT

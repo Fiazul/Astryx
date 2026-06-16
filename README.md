@@ -1,4 +1,4 @@
-# Astryx · v0.8.0
+# Astryx · v0.9.0
 
 A potato-friendly **third-person space explorer** in Godot 4 / GDScript. Launch
 from Earth, fly the **real** solar system, wormhole to a real exoplanet, dogfight
