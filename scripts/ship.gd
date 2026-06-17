@@ -276,6 +276,8 @@ var laser_offset := Vector3.ZERO   # local muzzle offset for the beam (x=right, 
 var auto_capture := false       # captures bodies in range automatically (no V) — Raptor 2 Neo
 var combat_lock := false        # set by main while in combat — no interstellar/FTL speed
 var firing := false             # set by main while holding fire — force-caps to combat speed
+var touch_fire := false         # mobile: the on-screen FIRE button (NOT the emulated mouse, which
+                                # every touch would otherwise trigger) — main reads this on touch builds
 var combat_ref: Node                   # set by main — owns the shared energy pools
 var _boost_starved := false            # true while boosting on an empty tank -> plume sputters
 var is_boosting := false               # true while boost is actually engaged (combat pauses boost regen)

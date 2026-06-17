@@ -394,10 +394,19 @@ func _process(delta: float) -> void:
 	var want_fire := false
 	var want_laser := false
 	if not ship.transiting and not docked and not _tp_active:
-		var captured := _touch or Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED
-		want_fire = captured and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
-		# Right-click fires the nose laser beam (laser-equipped hulls only, e.g. Raptor II).
-		want_laser = captured and ship.has_laser and Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)
+		if _touch:
+			# Mobile: fire ONLY from the on-screen FIRE button (ship.touch_fire). We must NOT
+			# read the mouse here — emulate_mouse_from_touch turns EVERY screen touch into a
+			# left-click, which made the whole screen a trigger. Laser hulls fire the beam.
+			if ship.has_laser:
+				want_laser = ship.touch_fire
+			else:
+				want_fire = ship.touch_fire
+		else:
+			var captured := Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED
+			want_fire = captured and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
+			# Right-click fires the nose laser beam (laser-equipped hulls only, e.g. Raptor II).
+			want_laser = captured and ship.has_laser and Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)
 		combat.update(ship, want_fire, delta, want_laser)
 		ship.combat_lock = combat.in_combat()       # no interstellar speed mid-fight
 	else:
