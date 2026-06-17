@@ -9,7 +9,7 @@ few low-poly meshes.
 ## ▶ Gameplay
 [![Astryx — gameplay](https://img.youtube.com/vi/txmrN1_HsiM/maxresdefault.jpg)](https://www.youtube.com/watch?v=txmrN1_HsiM)
 
-*Raw, unedited gameplay — warp out to real stars, fight the guardian waves defending a world, and capture it.*
+*Gameplay clips (edited together, with sound) — warp out to real stars, fight the guardian waves defending a world, and capture it.*
 
 ## Features
 - **Real positions** — Sun + planets from live **JPL Horizons**, **~50 of the nearest
