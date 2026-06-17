@@ -1,13 +1,15 @@
-# Astryx · v0.10.0
+# Astryx · v0.11.3
 
 A potato-friendly **third-person space explorer** in Godot 4 / GDScript. Launch
-from Earth, fly the **real** solar system, wormhole to a real exoplanet, dogfight
-aliens, and customize your ship in the hangar. Everything is spawned from code; no
-detailed assets, just emissive bodies, glow, and a few low-poly meshes.
+from Earth, fly the **real** solar system, wormhole across a tested interstellar
+network to real exoplanets, dogfight aliens and their bosses, and customize your
+ship in the hangar. The world is spawned from code — emissive bodies, glow and a
+few low-poly meshes.
 
 ## Features
-- **Real positions** — Sun + planets from live **JPL Horizons**, nearby stars from
-  the J2000 catalog. Earth is the origin (floating-origin engine for AU↔ly scale).
+- **Real positions** — Sun + planets from live **JPL Horizons**, **~50 of the nearest
+  real star systems** from the J2000 catalog. Earth is the origin (floating-origin
+  engine for AU↔ly scale).
 - **Seven ships** — Lyra, Stella, Raptor, **Vela** (FTL), **HaniStar**,
   **Raptor 2 Neo** (laser mother-ship), **HaniNebula**. Dock with **F**, swap with
   **1–7**. Each hull has its own stats, boosters, and engine voice.
@@ -19,20 +21,29 @@ detailed assets, just emissive bodies, glow, and a few low-poly meshes.
   persists to your profile (defaults are the shipped layout).
 - **Flight feel** — sublight "space drift" that carries momentum through turns,
   weighted strafe, eased mouse-steer, and living animated booster flames.
-- **Wormhole travel** — fly to a portal, press **F**, transit the tunnel, emerge at
-  a real exoplanet system.
-- **Combat** — left-click bolts (aim by flying), right-click nose laser on Raptor 2;
-  alien ships hunt and fire back. Guarded bodies are defended by a **named boss** +
-  its summoned fleet — beat the boss to capture the body for **coins**.
+- **Wormhole network** — a **5-hub** graph (Prim's MST + extra edges, BFS routing) with a
+  *tested* guarantee: **Earth → anywhere ≤ 2 hops, any → any ≤ 3 hops** — you're never more
+  than 3 jumps from a star. Fly to a portal, press **F**, transit the tunnel, arrive.
+  See [`WORMHOLE_NETWORK.md`](WORMHOLE_NETWORK.md).
+- **Combat** — instant **hitscan "ray bullets"** (left-click; aim by flying), right-click nose
+  laser on Raptor 2; alien ships hunt and fire dodgeable bolts. Guarded bodies are defended by
+  a **named boss** + finite **guardian waves** — clear the swarm, break the boss, capture the
+  body for **coins** (with a capture-celebration payout).
+- **Ray Tab-targeting** — **Tab** locks onto whatever your nose points at (nearest the aim
+  *ray* by angle, not the nearest object), cycling the 4 closest; unscanned targets read
+  "Unknown Star/Planet" until you **scan (V)**. See [`TAB_TARGETING.md`](TAB_TARGETING.md).
 - **Navigation & discovery** — a real zoomable/pannable star **map** (M): star/wormhole/
   planet icons on toggleable layers, a live player cursor, hover read-outs, wormhole lanes,
   out to ~150 ly. Wormholes show live on the **corner radar** and the always-on nav arrow
-  points you to the nearest wormhole first. Paid **waypoint navigator** (Tab), **scan** (V) →
-  persistent **Codex** (L) with real NASA facts (G).
+  points you to the nearest wormhole first. **Scan (V)** → persistent **Codex** (L) with real
+  NASA facts (G). A **beginner tutorial/quest** eases new pilots in.
 - **Mission log** (J) — every star, planet & moon is its own mission with a crude,
   (mostly) true story and a coin bounty. Browse the board, click a mission to read it,
   and **Navigate** straight to it. Survey the body to complete it and claim the bounty.
-- **Audio** — per-ship engine voice + looping music; HaniNebula has her own track.
+- **Star gravity & teleport** — stars gently pull you in (and let go once you thrust away, so
+  you're never trapped). A rare, theatrical **teleport ritual** handles emergency-home and
+  station→station jumps; a **platform-network console** fast-travels between unlocked stations.
+- **Audio** — per-ship engine voice + script-generated SFX + background music.
 
 ## Controls
 `WASD` thrust · `Space/Ctrl` up·down · `Q/E` roll · `Shift` boost · `mouse` aim ·
@@ -47,14 +58,24 @@ No keys or build steps. *(Open it in the editor once after pulling so it imports
 any new `.obj` / audio assets.)*
 
 ## Layout
+~12k lines of GDScript across ~35 code-spawned modules:
 `main.gd` orchestrator · `ephemeris.gd` real data + Horizons fetch ·
-`systems.gd` star systems · `planet_system.gd` body LOD · `wormhole.gd` transit ·
-`combat.gd` dogfight · `ship.gd` flight/visuals · `ship_mesh.gd` mesh/material
-helpers · `props.gd` station · `hud.gd` UI · `audio.gd` sound · `map.gd` star map ·
-`codex.gd` discovery · `starfield.gd` backdrop · `tools/real_positions.py` verifier.
+`systems.gd` star systems · `planet_system.gd` body LOD + gravity · `wormhole.gd` graph +
+transit · `combat.gd` dogfight/bosses · `ship.gd` flight/visuals · `ship_mesh.gd`
+mesh/material helpers · `props.gd` stations/platforms · `platform_teleport.gd` fast-travel
+console · `hud.gd` + `minimap.gd` + `crosshair.gd` UI · `map.gd`/`map_chart.gd` star map ·
+`missions.gd`/`quest_log.gd` quests · `codex.gd`/`codex_panel.gd` discovery · `tutor.gd`
+tutorial · `reward_card.gd` payouts · `navigator.gd` routing · `audio.gd` sound ·
+`starfield.gd` backdrop · `touch.gd` mobile controls · `tools/` verifiers + asset/SFX
+generators.
 
 ## Data
 [JPL Horizons](https://ssd.jpl.nasa.gov/horizons/) (solar system) · HYG/SIMBAD (stars).
+
+## Assets
+World, effects and SFX are code/script-generated. 3D ship & prop models are free assets
+([Poly Pizza](https://poly.pizza/), [Free3D](https://free3d.com/)); music is AI-generated.
+See [`CREDITS.md`](CREDITS.md).
 
 ---
 Hobby / educational project. See `HANDOFF.md` for the full per-system breakdown.

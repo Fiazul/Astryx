@@ -1,13 +1,24 @@
-# Astryx — Session Handoff (v0.11.0)
+# Astryx — Session Handoff (v0.11.3 · current)
 
-> Pick-up doc for the next session. Project: `/home/zed/Desktop/Astryx`
-> Godot 4.6.2 / GDScript · repo `https://github.com/Iriajul/Astryx.git` (main).
+> Pick-up doc for the next session. Project: `/home/fiazul/Desktop/Astryx`
+> Godot 4.6.2 / GDScript · repo `git@github.com:Fiazul/Astryx.git` (main).
 > The game is **all code-spawned** — `Main.tscn` is a one-node stub; `main.gd` builds the
 > world, ship, camera, lights, and UI at runtime.
-> ⚠️ **NOT yet committed/pushed** as of this handoff — the v0.11.0 changes below are in the
-> working tree only (user paused the push). Everything in v0.10.0 and earlier is committed.
+> ✅ **Everything through v0.11.3 is committed + pushed** to `main`.
+> ~12k lines of GDScript · ~35 modules · 7 ships · ~50 real star systems · Android APK + CI.
 
-## What changed in v0.11.0 (this session)
+## What changed in v0.11.1 → v0.11.3 (latest)
+
+- **v0.11.1** — dark, dramatic **wormhole transit visual** (the *style* pass promised in the
+  v0.11.0 next-plan: ship holds facing the portal, slight shake, dark + cinematic).
+- **v0.11.2** — **boss fights** + a **combat HUD target** readout; **drift-flip** (W+C) flight
+  move; teleport / UX fixes.
+- **v0.11.3** — **beginner quest** onboarding; **finite guardian waves** (swarms now end);
+  **escape leap**; **capture ring** VFX; star-**gravity fixes**.
+- **Docs/assets** — added [`CREDITS.md`](CREDITS.md) (models = Poly Pizza / Free3D, SFX =
+  scripts, music = AI-generated) + README **Assets** section.
+
+## What changed in v0.11.0
 
 ### Camera / controls
 - **Free-look is HOLD again** (`ship.gd`): hold **T** (or RMB) to orbit the camera; full **360°**
@@ -79,8 +90,8 @@
 - All SFX are **pure-Python `wave` generators** in `tools/gen_*.py` (no deps). Regenerate then
   **re-import the real tree** so the running game picks them up.
 - Parse-check on a COPY: `cp -r . /tmp/c && rm -rf /tmp/c/.godot && godot --headless --path /tmp/c --import`.
-- Run: `DISPLAY=:1 <godot-bin> --path /home/zed/Desktop/Astryx`. Godot binary lives at
-  `/home/zed/Desktop/Godot_v4.6.2-stable_linux.x86_64`.
+- Run: `DISPLAY=:1 <godot-bin> --path /home/fiazul/Desktop/Astryx`. Godot binary lives at
+  `/home/fiazul/Desktop/Godot_v4.6.2-stable_linux.x86_64`.
 
 ---
 
