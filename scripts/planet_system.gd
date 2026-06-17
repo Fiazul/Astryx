@@ -459,11 +459,24 @@ func refresh(ship_pos: Vector3, delta: float) -> void:
 			st.dot.position = sdir * rd
 			st.dot.pixel_size = clampf(rd * 0.0022, 1.5, 7.0)
 			st.label.position = sdir * rd + Vector3(0.0, 14.0, 0.0)
-		st.label.text = "%s\n%.2f ly" % [st.name, sdist / Ephemeris.UNITS_PER_LY]
+		st.label.text = "%s\n%s" % [st.name, _fmt_star_dist(sdist)]
 
 	# speed_limit was accumulated above from each body's force-slow zone (min cap).
 	# Direction toward the nearest body (for the warp arrival ease-out).
 	nearest_dir = _rel.get(nearest_name, Vector3.ZERO).normalized()
+
+
+# Adaptive distance label for a star: light-years when genuinely far, but AU once you're
+# in-system so the number actually CHANGES as you move closer/away (instead of "0.00 ly").
+# (1 unit = 0.01 AU; Ephemeris.UNITS_PER_LY converts to light-years.)
+func _fmt_star_dist(units: float) -> String:
+	var ly := units / Ephemeris.UNITS_PER_LY
+	if ly >= 0.05:
+		return "%.2f ly" % ly
+	var au := units * 0.01
+	if au >= 10.0:
+		return "%.1f AU" % au
+	return "%.2f AU" % au
 
 
 # Slowest speed cap a body imposes at its centre, from its mass (Earth=1): heavier =>

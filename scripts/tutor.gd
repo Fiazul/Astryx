@@ -46,8 +46,10 @@ var _tips := [
 	  "d": "An emergency jump back to Earth from anywhere. A light-ball wraps the ship, shrinks, and you're home." },
 	{ "t": "Codex log", "s": "Press  L  for the Codex.",
 	  "d": "The Codex logs every body you've scanned — open it with L (it moved off C), browse your discoveries and click any entry to read its data." },
-	{ "t": "Drift-flip", "s": "Hold  W  + tap  C  to drift-flip.",
-	  "d": "A slow, heavy cinematic barrel-roll that carves a wide wavey arc through space — hold W and tap C, steer the side with A/D. You need open room for it. Pure style; your heading and aim stay put." },
+	{ "t": "Drift-flip leap", "s": "Hold  W  + tap  C  to leap.",
+	  "d": "A quick boost-leap with a slow, wide cinematic barrel-roll — hold W and tap C, steer the side with A/D. The leap PUNCHES THROUGH a star/planet's slow-zone, so it's your way to break free of gravity when it's holding you in. Needs a little room; heading and aim stay put." },
+	{ "t": "Break free", "s": "Trapped near a star?  W + C  to leap out.",
+	  "d": "Stars and planets force-slow you inside their zone — it can feel like you're stuck. Aim AWAY from the body and hold W + tap C: the drift-flip leap bypasses the slow-zone and shoots you clear. Chain it if you're deep in the well." },
 	{ "t": "Switch ships", "s": "Go to a station to switch ships.",
 	  "d": "Fly to any platform/station and press F to dock, then pick a hull (1–7) in the hangar. Each flies differently — tanky, glass-cannon, FTL, support, mother-ship — and some recolour in the hangar." },
 ]

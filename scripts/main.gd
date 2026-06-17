@@ -54,6 +54,10 @@ var _nav_goal := ""           # star the map asked to guide to (orange waypoint)
 							  #   resolves the next hop each frame: in the hub → that star's
 							  #   wormhole; in a system → the exit gate. Session-only (not saved).
 var _onboarding_step := 0     # first-run guided tips: which step the player is on (see _onboarding)
+var _ob := {}                 # beginner quest: set of completed step ids (event-latched, re-doable)
+var _ob_kills_base := 0       # combat.kills snapshot when the quest (re)started → "clear swarm"
+var _ob_boss_base := 0        # guardian-bosses-beaten snapshot when (re)started → "beat a guardian"
+var _ob_done_toast := false   # so the "quest complete" toast fires only once
 var _map_seen := false        # latched true by StarMap when first opened (the map pauses the tree,
 							  #   so _process can't poll map._open — the map notifies us instead)
 const PROFILE_PATH := "user://profile.cfg"
@@ -93,8 +97,9 @@ var _has_saved_pos := false
 var _saved_ship_index := -1
 var _autosave_t := 5.0            # periodic position autosave (also guards against the crash)
 var _scan := 0.0             # scan progress 0..1 of the nearest body
+var _last_waves_cleared := 0 # last guardian wave count we announced (for the "Wave k/N" toast)
 var _scan_name := ""
-const SCAN_SECONDS := 2.0
+const SCAN_SECONDS := 3.0     # capture takes a beat longer so the ritual reads + feels earned
 const SCAN_RANGE := 1500.0    # how close you must be to start a capture (generous)
 const GUARD_RANGE := 2500.0   # approach a guarded body within this → its guardians activate
 const GUARD_COUNT := 5        # guardian aliens per guarded body (placeholder meshes for now)
@@ -298,20 +303,33 @@ func _ready() -> void:
 	hud.nav_button.pressed.connect(toggle_nav)
 	hud.cancel_nav_button.pressed.connect(cancel_locked_nav)
 
-	# First-run guide: tip + its completion predicate, paired so they can't desync.
+	# Beginner quest "GETTING STARTED" — the staged first-run guide, now an event-latched
+	# questline (see _ob / _ob_note): each step completes when the player performs its action,
+	# so it can be RESTARTED and re-walked. Surfaced as the pinned top quest in the J log and
+	# as the on-screen tip. Order: core loop → travel → combat.
 	_onboard = [
-		{ "tip": "Hold  W  to thrust  ·  steer with the mouse, WASD to move",
-			"done": func(): return ship.true_pos.distance_to(START_POS) > 6.0 },
-		{ "tip": "Aim at a planet or star and hold  V  to survey it",
-			"done": func(): return codex.count() > 0 },
-		{ "tip": "Press  G  to claim your reward coins",
-			"done": func(): return not _claimed.is_empty() },
-		{ "tip": "Press  M  for the Star Map — it shows the wormhole network · pick a star, Navigate",
-			"done": func(): return _map_seen },
-		{ "tip": "Fly to a glowing  wormhole  and press  F  — it links to a neighbouring star",
-			"done": func(): return _visited.size() > 1 },
-		{ "tip": "Press  J  for the MISSION LOG — every star, planet & moon is a mission with a bounty",
-			"done": func(): return _log_seen },
+		{ "id": "thrust", "title": "Take the helm",
+			"tip": "Hold  W  to thrust  ·  steer with the mouse, A/D strafe, Space/Ctrl up·down" },
+		{ "id": "scan", "title": "Scan a world",
+			"tip": "Aim at a planet or star and hold  V  to survey it" },
+		{ "id": "claim", "title": "Claim your coins",
+			"tip": "Press  G  to claim your reward coins" },
+		{ "id": "map", "title": "Read the star map",
+			"tip": "Press  M  for the Star Map — the wormhole network · pick a star, Navigate" },
+		{ "id": "log", "title": "Open the mission log",
+			"tip": "Press  J  for the MISSION LOG — every star, planet & moon is a mission" },
+		{ "id": "wormhole", "title": "Ride a wormhole",
+			"tip": "Fly into a glowing  wormhole  and press  F  — it links to a neighbouring star" },
+		{ "id": "dock", "title": "Dock at a station",
+			"tip": "Approach a platform/station and press  F  to dock (swap & customise ships)" },
+		{ "id": "teleport_net", "title": "Use the teleport network",
+			"tip": "While docked, open the  TELEPORT NETWORK  (bottom-centre) to fast-travel" },
+		{ "id": "fire", "title": "Open fire",
+			"tip": "Left-click to fire — line a hostile up in the crosshair" },
+		{ "id": "swarm", "title": "Clear the hostiles",
+			"tip": "Destroy enemy ships — thin out a swarm (3 kills)" },
+		{ "id": "boss", "title": "Beat a guardian",
+			"tip": "A guarded world's boss is SHIELDED until its swarm is dead — clear them, then beat the boss to capture the world" },
 	]
 
 	# Touch / mobile controls overlay (on a phone, or force on desktop with --touch to test).
@@ -325,8 +343,9 @@ func _ready() -> void:
 
 	_restore_location()   # resume where you left off (system + position + hull)
 
-	if _fresh_game and tutor != null:
-		tutor.start()     # brand-new game → drip-feed the onboarding tips
+	# Onboarding is now the GETTING STARTED quest (always on, surfaced as the tip + J-log
+	# questline). The tutor's scripted drip is retired — it stays only as the occasional
+	# idle-nudge backup (tutor._process, beginner-gated). So we no longer call tutor.start().
 
 
 # Resume the last session's location: rebuild the saved system if it isn't the Sol start,
@@ -368,6 +387,7 @@ func _process(delta: float) -> void:
 	# up and dive in instead of rocketing past) — whichever zone is slowing you most wins.
 	ship.struct_limit = minf(props.struct_speed_limit, wormhole.slow_limit(ship.true_pos))
 	if wormhole.update(ship.true_pos, delta):
+		_ob_note("wormhole")
 		_arrive(wormhole.dest_id)
 	# Combat runs in normal flight (not mid-transit, not docked). Docking at a
 	# station is a safe harbor — the fight pauses so you can swap ships in peace.
@@ -385,6 +405,8 @@ func _process(delta: float) -> void:
 	# Holding fire force-slows you to regular combat speed (you can't shoot at warp/boost) —
 	# set even while still fast so the slowdown engages; combat only spawns bolts once slow.
 	ship.firing = (want_fire and ship.can_fire) or (want_laser and ship.has_laser)
+	if ship.firing:
+		_ob_note("fire")
 	hud.firing = want_fire                       # blooms the dynamic crosshair
 	hud.coins = coins
 	hud.set_cancel_nav_visible(_nav_locked != "" or _nav_goal != "" or _active_quest != "")
@@ -506,6 +528,24 @@ func _update_scan(delta: float) -> void:
 		var grel: Vector3 = planets.rel_of(combat.guard_body)
 		if grel != Vector3.ZERO and grel.length() > GUARD_RANGE * 2.5:
 			combat.abandon_combat()
+	# Guardian fight: always-visible WAVE/capture banner + a toast as each wave falls.
+	if combat.guard_body != "":
+		var wp: Dictionary = combat.guard_progress()
+		if wp.cleared:
+			hud.set_guardian("✓  %s  —  DEFENCES DOWN · CAPTURE READY (hold V)" % combat.guard_body, true)
+		else:
+			hud.set_guardian("⚔  GUARDIANS OF %s     WAVE  %d / %d     · capture locked ·" % [combat.guard_body, wp.wave, wp.total], false)
+		if wp.waves_cleared > _last_waves_cleared:
+			_last_waves_cleared = wp.waves_cleared
+			if wp.cleared:
+				hud.toast = "✦  %s's guardians are destroyed — capture it now!" % combat.guard_body
+			else:
+				hud.toast = "✦  Wave %d/%d cleared — brace for the next" % [wp.waves_cleared, wp.total]
+			hud.toast_t = 3.5
+			if audio != null:
+				audio.play_notify()
+	else:
+		hud.set_guardian("", false)
 	var name := planets.nearest_name
 	# Hub gate-suns (✦) and the Interstellar hub are travel markers — never captured or
 	# guarded. Skip the whole flow there (no monsters in the hub, no fake captures).
@@ -530,10 +570,10 @@ func _update_scan(delta: float) -> void:
 		# Bigger bodies (stars) get a tougher boss + bigger waves (power scales with radius).
 		var power: float = clampf(planets.nearest_radius / 7.0, 1.0, 3.0)
 		combat.set_guardians(ship.true_pos + planets.rel_of(name), name, power)
+		_last_waves_cleared = 0       # fresh fight → reset the wave-announce tracker
 
-	# Capturable once THIS body's boss is dead (its summoned fleet is endless till then).
-	var guards := combat.guardians_alive()    # live hostile count (fixes the "0 hostiles" bug)
-	var clear := not guarded or (combat.guard_body == name and not combat.guard_boss_alive())
+	# Capturable once ALL of THIS body's defending waves are beaten (finite — see combat).
+	var clear := not guarded or combat.guardians_cleared(name)
 
 	# Capture when within reach of the body's SURFACE (range scales with its size, so a
 	# giant star/nebula is grabbable without diving to its centre).
@@ -551,6 +591,7 @@ func _update_scan(delta: float) -> void:
 		_scan = minf(_scan + delta / SCAN_SECONDS, 1.0)
 		if _scan >= 1.0:
 			if codex.discover(name):
+				_ob_note("scan")
 				# Capture complete: AUTO-grant the bounty and pop the celebration card.
 				var bounty := claim_reward(name)
 				if reward_card != null:
@@ -573,7 +614,8 @@ func _update_scan(delta: float) -> void:
 	if name == "" or captured:
 		hud.scan_hint = ""
 	elif guarded and not clear:
-		hud.scan_hint = "⚠  Defeat the fleet to capture %s  ·  %d defeated · %d hostiles left — kill the BOSS" % [name, combat.zone_kills, guards]
+		var gp: Dictionary = combat.guard_progress()
+		hud.scan_hint = "⚠  GUARDIANS of %s — Wave %d/%d  ·  clear the swarm, then kill the boss (capture locked)" % [name, gp.wave, gp.total]
 	elif in_range and _scan <= 0.0:
 		hud.scan_hint = ("» auto-capturing %s «" % name) if ship.auto_capture else ("» hold V to capture %s «" % name)
 	else:
@@ -621,6 +663,7 @@ func claim_reward(body_name: String) -> int:
 	var bounty := MissionDB.reward(body_name)   # per-mission bounty (see MissionDB)
 	coins += bounty
 	_claimed[body_name] = true
+	_ob_note("claim")
 	_save_profile()
 	return bounty
 
@@ -669,6 +712,10 @@ func _load_profile() -> void:
 		for s in cfg.get_value("player", "wormholes_found", []):
 			_wormholes_found[s] = true
 		_onboarding_step = int(cfg.get_value("player", "onboarding_step", 0))
+		_ob.clear()
+		for k in cfg.get_value("player", "onboarding_done", []):
+			_ob[str(k)] = true
+		_ob_done_toast = _ob.has("boss")   # already finished once → don't re-toast on boot
 		_active_quest = str(cfg.get_value("player", "active_quest", ""))
 		# Where you left off last session (restored after the world is built — see
 		# _restore_location). Position is only ever saved from a STABLE state.
@@ -690,6 +737,7 @@ func _save_profile() -> void:
 	cfg.set_value("player", "nav_unlocked", _nav_unlocked.keys())
 	cfg.set_value("player", "wormholes_found", _wormholes_found.keys())
 	cfg.set_value("player", "onboarding_step", _onboarding_step)
+	cfg.set_value("player", "onboarding_done", _ob.keys())
 	cfg.set_value("player", "active_quest", _active_quest)
 	if ship != null:
 		cfg.set_value("player", "customization", ship.customization_state())
@@ -1141,7 +1189,7 @@ func _current_objective() -> Dictionary:
 	# Initial phase: onboarding's final step asks the player to reach the wormhole, so
 	# point the guide arrow straight at the gate (overriding nearby-star targeting) — they
 	# can't miss where to go.
-	if not _onboard.is_empty() and _onboarding_step == _onboard.size() - 1:
+	if _onboarding_step < _onboard.size() and _onboard[_onboarding_step].id == "wormhole":
 		return _nearest_gate_objective()
 	# The hub has no bodies — guide to the nearest gate to dive into.
 	if current_system == SystemDB.INTERSTELLAR:
@@ -1189,27 +1237,69 @@ func _fmt_nav_dist(u: float) -> String:
 # main._process can't observe map._open itself — the map notifies us instead.
 func notify_map_opened() -> void:
 	_map_seen = true
+	_ob_note("map")
 
 # Latched by QuestLog the first time the mission log is opened (drives the final onboarding
 # tip — the log pauses the tree, so _process can't observe its open flag directly).
 func notify_log_opened() -> void:
 	_log_seen = true
+	_ob_note("log")
+
+
+# Latch a beginner-quest step done (event-driven, so a restart can re-arm each one).
+func _ob_note(id: String) -> void:
+	_ob[id] = true
+
+
+# Restart the GETTING STARTED quest from step 1 — re-arms every step (counters re-baseline).
+func restart_onboarding() -> void:
+	_ob.clear()
+	_onboarding_step = 0
+	_ob_done_toast = false
+	_ob_kills_base = combat.kills
+	_ob_boss_base = combat.guardian_bosses_beaten
+	_save_profile()
+	hud.toast = "✦  GETTING STARTED — quest restarted."
+	hud.toast_t = 2.5
+
+
+# Snapshot for the J-log questline: each step's title/tip/done plus the current index.
+func onboarding_state() -> Dictionary:
+	var steps := []
+	for i in _onboard.size():
+		var s = _onboard[i]
+		steps.append({ "title": s.title, "tip": s.tip,
+			"done": _ob.get(s.id, false), "current": i == _onboarding_step })
+	return { "steps": steps, "step": _onboarding_step, "total": _onboard.size(),
+		"complete": _onboarding_step >= _onboard.size() }
 
 
 func _update_onboarding() -> void:
-	if _onboarding_step >= _onboard.size() or docked or ship.transiting:
+	if ship.transiting:
 		hud.set_tip("")
 		return
-	# Goal met? Advance (and persist). set_tip itself no-ops when the text is unchanged.
-	if _onboard[_onboarding_step].done.call():
+	# Live latches for the action-counted steps (re-armed on restart via the baselines).
+	if ship.velocity.length() > 30.0:
+		_ob_note("thrust")
+	if combat.kills - _ob_kills_base >= 3:
+		_ob_note("swarm")
+	if combat.guardian_bosses_beaten - _ob_boss_base >= 1:
+		_ob_note("boss")
+	# Advance past every completed step (persist as it moves).
+	var advanced := false
+	while _onboarding_step < _onboard.size() and _ob.get(_onboard[_onboarding_step].id, false):
 		_onboarding_step += 1
+		advanced = true
+	if advanced:
 		_save_profile()
-		if _onboarding_step >= _onboard.size():
-			hud.toast = "✦  The dark is yours to chart. Good flying, pilot."
+	if _onboarding_step >= _onboard.size():
+		if not _ob_done_toast:
+			_ob_done_toast = true
+			hud.toast = "✦  GETTING STARTED complete. The dark is yours to chart, pilot."
 			hud.toast_t = 4.0
-			hud.set_tip("")
-			return
-	hud.set_tip(_onboard[_onboarding_step].tip)
+		hud.set_tip("")
+		return
+	hud.set_tip("◈  GETTING STARTED  ·  " + _onboard[_onboarding_step].tip)
 
 
 # The top-center quest tracker. A TRACKED quest (chosen in the J log) takes priority and shows
@@ -1286,6 +1376,7 @@ func _on_open_teleport_map() -> void:
 	if _tp_active or ship.transiting:
 		return
 	platform_tp.open()
+	_ob_note("teleport_net")
 
 
 # Dock → pick a platform from the teleport map: undock, then run the (shorter) teleport
@@ -1541,6 +1632,8 @@ func _input(event: InputEvent) -> void:
 func _set_docked(d: bool) -> void:
 	docked = d
 	ship.set_frozen(d)
+	if d:
+		_ob_note("dock")
 
 
 # F3 perf/leak readout (throttled to ~3 Hz so the text relayout is cheap). Watch which

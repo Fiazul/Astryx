@@ -87,7 +87,11 @@ const MINION_SPEED := 18.0
 const MINION_KEEP := 28.0
 const MINION_FIRE := 1.0          # more aggressive minions (was 2.1)
 const MINION_CAP := 9             # base live minions; scaled up by star size (bigger = waves)
-const MINION_SUMMON_EVERY := 2.6  # seconds between summons
+# FIXED guardian structure (deterministic per body):
+#   body size → wave COUNT   ·   each wave = 1 boss (unique) + a FIXED swarm of minions
+const GUARD_WAVE_MINIONS := 4    # monsters per wave (fixed; a swarm at once)
+const WAVE_GAP := 2.6            # breather after a wave is fully cleared before the next spawns
+const GUARD_SPAWN_CLEAR := 220.0 # spawn the boss + swarm THIS far clear of the body's core (not inside the star)
 # Boss phases + telegraphed special. Phase 2 (enraged) triggers below this HP fraction:
 # faster summons + faster specials. The special is a radial bolt burst preceded by a
 # clear wind-up (the boss swells), so the player can dodge.
@@ -259,6 +263,11 @@ func reset(active := false, with_boss := false, count := SWARM_COUNT) -> void:
 	# Wipe any leftover guardian-fight state so a stale guard_body from the previous system
 	# can't block a fresh spawn (or make planets.rel_of() meaningless) here.
 	guard_body = ""
+	guard_wave = 0
+	guard_waves = 0
+	guard_waves_cleared = 0
+	_guard_cleared = false
+	_wave_cd = 0.0
 	zone_kills = 0
 	_combat_t = 0.0
 	_target = null            # no carried-over target into the new system
@@ -321,6 +330,7 @@ func update(ship: Node3D, pressed: bool, delta: float, laser := false) -> void:
 	_step_bolts(_abolts, sp, delta, false)
 	_step_aliens(ship, sp, delta)
 	_step_boss(0.0, delta, sp)
+	_update_guard_waves(delta)
 	_step_pickups(ship, sp, fwd, delta)
 	_sweep_dead_minions()
 
@@ -616,6 +626,7 @@ func _damage_alien(a: Dictionary, sp: Vector3, dmg := 1) -> void:
 			audio.play_explosion()
 		# Boss down → its summoned army vanishes and the body becomes capturable.
 		if a.get("guardian_boss", false):
+			guardian_bosses_beaten += 1
 			_clear_minions()
 
 
@@ -682,9 +693,19 @@ func threat_report() -> Dictionary:
 # --- Guardians: a non-respawning cluster that defends a capturable body. main spawns
 # them when you approach a guarded body, and the body is capturable once they're clear.
 var guard_body := ""    # name of the body these guardians defend ("" = none)
+# FINITE waves: a capturable body is defended by N waves (N scales with its size). Each wave
+# is a fresh boss (different warlord) + a swarm; clear it to advance; after the last wave the
+# body is capturable. (Only the hostile Alien zone has the separate ever-respawning swarm.)
+var guard_wave := 0          # current wave (1-based; 0 = none)
+var guard_waves := 0         # total waves for this body
+var guard_waves_cleared := 0 # waves beaten so far (HUD reads this for "Wave k/N cleared")
+var _guard_cleared := false  # all waves down → the body can be captured
+var _guard_center := Vector3.ZERO  # where waves spawn (the body's true position)
+var _wave_cd := 0.0          # breather countdown between waves
 
 var _zone_power := 1.0   # current guard zone's strength (scales with the body's size)
 var zone_kills := 0      # hostiles defeated in the current guard zone (HUD reads this)
+var guardian_bosses_beaten := 0   # lifetime guardian bosses killed (the beginner quest reads this)
 var energy := ENERGY_MAX       # weapon energy (HUD reads this)
 var boost_energy := ENERGY_MAX # boost energy (drained by the ship's Shift boost)
 var e_max := ENERGY_MAX        # current per-ship cap for BOTH bars (set each frame)
@@ -703,16 +724,61 @@ const BOSS_NAMES := [
 func _boss_name_for(body: String) -> String:
 	return BOSS_NAMES[(hash(body) % BOSS_NAMES.size() + BOSS_NAMES.size()) % BOSS_NAMES.size()]
 
-# `power` ~ the body's size; bigger stars get a tougher, bigger boss + bigger waves.
+# `power` ~ the body's size; bigger bodies get more waves + tougher bosses. Spawns wave 1.
 func set_guardians(center: Vector3, body: String, power := 1.0) -> void:
 	clear_guardians()
 	guard_body = body
 	_zone_power = clampf(power, 1.0, 3.0)
 	zone_kills = 0
-	var boss := _make_guardian_boss(center, _zone_power)
-	boss["boss_name"] = _boss_name_for(body)
+	# Wave COUNT is fixed by body size: small/planet → 1, medium → 2, big star → 3.
+	guard_waves = clampi(int(round(_zone_power)), 1, 3)
+	guard_wave = 0
+	guard_waves_cleared = 0
+	_guard_cleared = false
+	_guard_center = center
+	_spawn_guard_wave()
+
+
+# Spawn the next defending wave: a fresh boss (a DIFFERENT warlord each wave) plus its swarm,
+# all at once, around the body. The boss is shielded until this wave's swarm is dead.
+func _spawn_guard_wave() -> void:
+	guard_wave += 1
+	var boss := _make_guardian_boss(_guard_center, _zone_power)
+	var idx := (hash(guard_body) + guard_wave * 7) % BOSS_NAMES.size()
+	boss["boss_name"] = BOSS_NAMES[(idx + BOSS_NAMES.size()) % BOSS_NAMES.size()]
 	boss["name"] = boss["boss_name"]
 	_aliens.append(boss)
+	for _i in GUARD_WAVE_MINIONS:        # fixed swarm size per wave
+		_summon_minion(_guard_center, boss.size)
+	_wave_cd = WAVE_GAP
+
+
+# Advance the finite wave fight: when a wave's boss AND swarm are all dead, mark it cleared and
+# (after a breather) spawn the next — or, on the last wave, flag the body capturable.
+func _update_guard_waves(delta: float) -> void:
+	if guard_body == "" or _guard_cleared:
+		return
+	if guard_boss_alive() or _minions_alive() > 0:
+		return                                  # this wave isn't fully cleared yet
+	if guard_waves_cleared < guard_wave:
+		guard_waves_cleared = guard_wave        # one-shot: a wave just fell (HUD toasts it)
+	if guard_wave >= guard_waves:
+		_guard_cleared = true                   # all waves down → capturable
+		return
+	_wave_cd -= delta
+	if _wave_cd <= 0.0:
+		_spawn_guard_wave()
+
+
+# HUD/state readout for the active guardian fight.
+func guard_progress() -> Dictionary:
+	return { "wave": guard_wave, "total": guard_waves, "cleared": _guard_cleared,
+		"waves_cleared": guard_waves_cleared }
+
+
+# True once every defending wave of `body` is beaten — the gate for capturing it.
+func guardians_cleared(body: String) -> bool:
+	return guard_body == body and _guard_cleared
 
 # Abandon the current guardian fight AND end the combat lock immediately (warp frees the same
 # frame) — main calls this on the "leash" when you've left the guarded body far behind.
@@ -720,8 +786,8 @@ func abandon_combat() -> void:
 	clear_guardians()
 	_combat_t = 0.0
 
-# One identity boss (a random monster GLB, big, raw colours) that defends a body and
-# summons small vortex minions. Reuses the alien-model loader at boss scale.
+# One identity boss (a random monster GLB, big, raw colours) that LEADS a defending wave.
+# Reuses the alien-model loader at boss scale. Its swarm is spawned alongside it per wave.
 func _make_guardian_boss(center: Vector3, power := 1.0) -> Dictionary:
 	var size := GUARD_BOSS_SIZE * clampf(power, 1.0, 1.8)   # bigger stars = bigger boss
 	var node := _load_alien_model(size)
@@ -732,17 +798,17 @@ func _make_guardian_boss(center: Vector3, power := 1.0) -> Dictionary:
 	})
 	a["guardian"] = true
 	a["guardian_boss"] = true
-	a["summon_cd"] = MINION_SUMMON_EVERY
 	a["special_cd"] = BOSS_SPECIAL_EVERY
 	a["fast_cd"] = BOSS_FAST_EVERY
 	a["telegraph_t"] = 0.0
 	a["enraged"] = false
+	a["menace_mats"] = _menace_paint(node)   # dark hull + red-hot glow → reads as a threat
 	a["base_scale"] = a.node.scale
-	a.pos = center + _rand_dir() * (size * 2.0)
+	a.pos = center + _rand_dir() * (size * 2.0 + GUARD_SPAWN_CLEAR)   # clear of the star core
 	a.node.position = a.pos
 	return a
 
-func _summon_minion(center: Vector3) -> void:
+func _summon_minion(center: Vector3, boss_size := 0.0) -> void:
 	var node := _load_boss_model(MINION_SIZE)   # small "old vortex"
 	var a := _make_enemy(node, {
 		"size": MINION_SIZE, "hp": MINION_HP, "speed": MINION_SPEED, "keep": MINION_KEEP,
@@ -750,31 +816,30 @@ func _summon_minion(center: Vector3) -> void:
 	})
 	a["guardian"] = true
 	a["minion"] = true
-	a.pos = center + _rand_dir() * (MINION_SIZE * 2.0 + 18.0)
+	# Spawn in a shell WELL CLEAR of the body core AND the boss hull (+ jitter) so they don't
+	# stack inside the star or the boss.
+	var ring: float = GUARD_SPAWN_CLEAR + maxf(boss_size * 1.4, MINION_SIZE * 2.0) + randf_range(45.0, 110.0)
+	a.pos = center + _rand_dir() * ring
 	a.node.position = a.pos
 	_aliens.append(a)
 
-# Boss tick: summons (capped), phase change at low HP (enrage = faster), and a
-# telegraphed radial burst the player can see coming and dodge.
+# Boss tick: menacing glow, phase change at low HP (enrage = faster), an ultra-fast aimed
+# shot, and a telegraphed radial burst you can see coming and dodge. Waves are spawned by the
+# finite-wave system (_spawn_guard_wave) — the boss no longer summons over time.
 func _step_boss(_unused: float, delta: float, sp := Vector3.ZERO) -> void:
-	var minions := 0
-	for a in _aliens:
-		if a.get("minion", false) and a.alive:
-			minions += 1
 	for a in _aliens:
 		if not (a.get("guardian_boss", false) and a.alive):
 			continue
 		var enraged: bool = a.hp <= a.max_hp * BOSS_ENRAGE_AT
 		var rate := 0.6 if enraged else 1.0          # phase 2 = faster everything
-		# Bigger stars sustain bigger waves; enrage pushes the cap higher still.
-		var cap := MINION_CAP + int((_zone_power - 1.0) * 5.0) + (3 if enraged else 0)
-		# Summon minions, faster when enraged.
-		a.summon_cd -= delta
-		if a.summon_cd <= 0.0:
-			a.summon_cd = MINION_SUMMON_EVERY * rate
-			if minions < cap:
-				_summon_minion(a.pos)
-				minions += 1
+		# Menacing throb — a pulsing red glow, hotter and faster (angrier) once enraged.
+		var mm: Array = a.get("menace_mats", [])
+		if not mm.is_empty():
+			var beat: float = 0.5 + 0.5 * sin(Time.get_ticks_msec() * (0.006 if enraged else 0.0035))
+			var hot: float = (2.4 if enraged else 1.7) + (1.5 if enraged else 0.9) * beat
+			for m in mm:
+				m.emission_energy_multiplier = hot
+				m.emission = Color(1.0, 0.08, 0.04) if enraged else Color(1.0, 0.18, 0.12)
 		# Ultra-fast aimed shot the player must dodge (between the big specials).
 		a.fast_cd -= delta
 		if a.fast_cd <= 0.0 and a.telegraph_t <= 0.0:
@@ -872,6 +937,11 @@ func clear_guardians() -> void:
 			keep.append(a)
 	_aliens = keep
 	guard_body = ""
+	guard_wave = 0
+	guard_waves = 0
+	guard_waves_cleared = 0
+	_guard_cleared = false
+	_wave_cd = 0.0
 
 # Capture is gated on the BOSS being dead (minions are endless until then).
 func guard_boss_alive() -> bool:
@@ -987,6 +1057,24 @@ func _make_enemy(node: Node3D, cfg: Dictionary) -> Dictionary:
 # A crude/savage name for an ordinary hostile (reuses the boss-name pool for flavour).
 func _enemy_name() -> String:
 	return BOSS_NAMES[randi() % BOSS_NAMES.size()]
+
+
+# Make a guardian boss read as DANGEROUS: near-black metallic hull with a red-hot emissive
+# glow. Returns the override materials so _step_boss can pulse them (a menacing throb).
+func _menace_paint(node: Node3D) -> Array:
+	var mats := []
+	for mi in _meshes(node):
+		for si in mi.mesh.get_surface_count():
+			var m := StandardMaterial3D.new()
+			m.albedo_color = Color(0.05, 0.04, 0.06)     # near-black hull
+			m.metallic = 0.7
+			m.roughness = 0.35
+			m.emission_enabled = true
+			m.emission = Color(1.0, 0.18, 0.12)          # red-hot menace
+			m.emission_energy_multiplier = 2.0
+			mi.set_surface_override_material(si, m)
+			mats.append(m)
+	return mats
 
 
 func _load_alien_model(size := ALIEN_SIZE) -> Node3D:

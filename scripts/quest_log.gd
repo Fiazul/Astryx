@@ -62,6 +62,9 @@ func _open_log() -> void:
 	_open = true
 	if main != null:
 		main.notify_log_opened()             # advances onboarding (the log pauses the tree)
+	# Newcomers land on the GETTING STARTED quest first; once it's done, fall through to missions.
+	if main != null and _sel == "" and not main.onboarding_state().complete:
+		_sel = "__beginner__"
 	if main != null and _sel == "":
 		# Default selection: first unfinished mission in the system you're in.
 		for body in MissionDB.bodies_in(main.current_system):
@@ -182,6 +185,9 @@ func _refresh() -> void:
 	for c in _list.get_children():
 		c.queue_free()
 
+	# Pinned first: the GETTING STARTED beginner quest (always present, even when complete).
+	_add_beginner_group()
+
 	# Group by system; show the system you're in first, then by distance from home.
 	var ids: Array = SystemDB.all().duplicate()
 	var here: String = main.current_system
@@ -240,12 +246,75 @@ func _add_mission_row(id: String, body: String, st: String) -> void:
 	_list.add_child(b)
 
 
+# The pinned GETTING STARTED quest at the top of the list: a clickable header + a compact
+# step checklist. Always shown (re-doable even after completion).
+func _add_beginner_group() -> void:
+	if main == null:
+		return
+	var ob: Dictionary = main.onboarding_state()
+	var done := 0
+	for s in ob.steps:
+		if s.done:
+			done += 1
+	var col: Color = Color(0.55, 1.0, 0.7) if ob.complete else Color(1.0, 0.84, 0.4)
+	var b := Button.new()
+	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	b.focus_mode = Control.FOCUS_NONE
+	b.flat = true
+	b.add_theme_font_size_override("font_size", 14)
+	b.add_theme_color_override("font_hover_color", Color(1, 1, 1))
+	b.add_theme_color_override("font_color", col)
+	b.text = "%s%s  GETTING STARTED   %d/%d" % \
+		["▸" if _sel == "__beginner__" else " ", "✓" if ob.complete else "★", done, ob.total]
+	b.pressed.connect(func():
+		_click()
+		_sel = "__beginner__"
+		_refresh_detail())
+	_list.add_child(b)
+	for s in ob.steps:
+		var l := Label.new()
+		var ic: String = "✓" if s.done else ("◆" if s.current else "○")
+		l.text = "       %s  %s" % [ic, s.title]
+		l.add_theme_font_size_override("font_size", 12)
+		var lc: Color = Color(0.55, 1.0, 0.6) if s.done else (Color(0.45, 0.85, 1.0) if s.current else Color(0.62, 0.65, 0.72))
+		l.add_theme_color_override("font_color", lc)
+		_list.add_child(l)
+	var sep := HSeparator.new()
+	_list.add_child(sep)
+
+
+# The right-hand detail for the GETTING STARTED quest: full checklist + a Restart button.
+func _refresh_beginner_detail() -> void:
+	var ob: Dictionary = main.onboarding_state()
+	_dlabel("GETTING STARTED", 21, Color(1.0, 0.84, 0.4), true)
+	_dlabel("Your first quest — learn the controls. It stays here; replay it any time.",
+		13, Color(0.7, 0.8, 0.95))
+	_detail.add_child(HSeparator.new())
+	for s in ob.steps:
+		var ic: String = "✓" if s.done else ("◆" if s.current else "○")
+		var c: Color = Color(0.55, 1.0, 0.6) if s.done else (Color(0.45, 0.85, 1.0) if s.current else Color(0.88, 0.9, 0.95))
+		_dlabel("%s  %s" % [ic, s.title], 14, c)
+		_dlabel("        %s" % s.tip, 11, Color(0.62, 0.66, 0.74))
+	_detail.add_child(_spacer(8))
+	if ob.complete:
+		_dlabel("✓  Completed. Replay any time to brush up.", 13, Color(0.6, 0.9, 0.65))
+	var r := _action_button("↻   RESTART  THIS  QUEST", Color(1.0, 0.72, 0.32))
+	r.pressed.connect(func():
+		_click()
+		main.restart_onboarding()
+		_refresh())
+	_detail.add_child(r)
+
+
 # Build the right-hand detail for the selected mission.
 func _refresh_detail() -> void:
 	if _detail == null:
 		return
 	for c in _detail.get_children():
 		c.queue_free()
+	if _sel == "__beginner__":
+		_refresh_beginner_detail()
+		return
 	if _sel == "":
 		return
 	var id := MissionDB.system_of(_sel)

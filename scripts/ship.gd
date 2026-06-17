@@ -188,6 +188,7 @@ const MAX_SPEED := 10000.0
 # blitzing past the planets near Sol. Boost (Shift) multiplies it for fast travel.
 # This is SEPARATE from warp — the per-ship ly tops are unaffected.
 const SUBLIGHT_MAX := 550.0
+const GRAVITY_IDLE_SPEED := 50.0   # below this, an un-thrusting ship is released from gravity (no idle drift)
 # Weapons speed-lock: you can only fire at regular (sublight) speed. Holding fire force-caps
 # the ship to this, so opening fire while warping/boosting drops you to combat speed.
 const WEAPON_FIRE_SPEED := SUBLIGHT_MAX
@@ -208,10 +209,12 @@ const STEER_SMOOTH := 9.0     # mouse-steer inertia: lower = heavier, more turn 
 const STRAFE_SMOOTH := 5.0    # A/D & up/down (strafe/lift) input inertia: lower = heavier
 const MOUSE_SENS := 0.0022    # default; runtime value lives in `mouse_sens` (Settings menu)
 const ROLL_RATE := 1.8        # manual Q/E roll (rad/s)
-const FLIP_TIME := 1.9        # cinematic drift-flip duration — SLOW: a heavy hull rolls lazily (W+C)
-const FLIP_SPEED := 300.0     # forward+lateral momentum injected so it carves through SPACE
-const FLIP_SWERVE := 2.6      # peak yaw-rate of the wavey S-curve drift (rad/s)
-const FLIP_PITCH := 0.28      # vertical bob through the roll → a round arc, not a flat spin
+const FLIP_TIME := 3.4        # cinematic drift-flip duration — long & SLOW, a heavy lazy roll (W+C)
+const FLIP_CRUISE := 340.0    # steady glide speed DURING the flip so it travels across space
+const FLIP_SWERVE := 4.2      # peak yaw-rate of the wavey curve the glide carves (rad/s)
+const FLIP_EASE := 2.2        # how gently the glide blends in/out (lower = more seamless)
+const FLIP_LEAP_BOOST := 0.9  # extra speed at the START of the flip → a quick LEAP that punches
+							  # out of slow-zones (the flip also BYPASSES the body speed cap)
 
 # Warp arrival: a warp ship eases out of warp as it falls toward the nearest mark, so
 # it arrives instead of blasting past (and the star has time to bloom into a sphere).
@@ -362,6 +365,7 @@ var _cam_basis := Basis()
 var _bank := 0.0
 var _flip_t := 0.0            # remaining cinematic flip time (0 = not flipping)
 var _flip_dir := 1.0          # +1 roll/drift right · -1 left
+var _flip_yaw := 0.0          # accumulated swerve of the drift heading during the flip
 var _cruise_t := 0.0           # seconds held on a straight cruise (drives the cinematic sway)
 var _mouse_delta := Vector2.ZERO
 var _steer := Vector2.ZERO     # eased mouse-steer (rotational inertia for curving turns)
@@ -553,10 +557,15 @@ func fly(delta: float) -> void:
 		velocity += (transform.basis * local_accel) * boost * delta
 
 	# Gravitational tug toward nearby bodies. It draws you in and helps you settle to land,
-	# but must NEVER trap you: as soon as you thrust AWAY from the pull, the gravity fades
-	# out (fully gone when thrusting straight out), so a star's slow-zone can't hold you in.
+	# but must NEVER trap you. Two safeguards:
+	#  • IDLE RELEASE — a parked, slow ship (no thrust) is let go entirely, so gravity can't
+	#    balance damping into a permanent ~30 u/s drift toward the star while you sit still.
+	#  • OUTWARD FADE — thrusting away from the pull fades it out (gone when straight out).
 	var g := gravity
-	if g.length() > 0.01 and local_accel.length_squared() > 0.0001:
+	var g_thrusting := local_accel.length_squared() > 0.0001
+	if not g_thrusting and velocity.length() < GRAVITY_IDLE_SPEED:
+		g = Vector3.ZERO                        # idle + slow → released; you settle to a stop
+	elif g.length() > 0.01 and g_thrusting:
 		var thrust_dir := (transform.basis * local_accel).normalized()
 		var outward := -g.normalized()
 		var align := thrust_dir.dot(outward)   # 1 = thrusting straight out, -1 = straight in
@@ -572,9 +581,10 @@ func fly(delta: float) -> void:
 	if eff_warp > 1.0:
 		damp = lerpf(DRIFT_DAMPING, DAMPING, smoothstep(1.0, 2.0, eff_warp))
 	velocity = velocity.lerp(Vector3.ZERO, clampf(damp * delta, 0.0, 1.0))
-	# Auto-settle near a body: a soft, always-on brake that strengthens as you close in,
-	# so easing off the throttle lets you hover and capture instead of drifting past.
-	if nearest_dist < SETTLE_RANGE and not braking:
+	# Auto-settle near a body: a soft brake that strengthens as you close in, so EASING OFF the
+	# throttle lets you hover and capture instead of drifting past. Only while coasting, though —
+	# holding thrust pushes you right in (and through), so a body never freezes you in place.
+	if nearest_dist < SETTLE_RANGE and not braking and not g_thrusting:
 		var settle := SETTLE_RATE * (1.0 - nearest_dist / SETTLE_RANGE)
 		velocity = velocity.lerp(Vector3.ZERO, clampf(settle * delta, 0.0, 1.0))
 	# Vela's air-brake (R): a smooth, hard stop — ~1.5s to a standstill — plus a warp
@@ -599,6 +609,9 @@ func fly(delta: float) -> void:
 	# out of warp as you settle near a body/station (or open fire) instead of pinning at full spool.
 	if (speed_limit < INF or struct_limit < INF or firing) and cap < MAX_SPEED:
 		_warp_charge = minf(_warp_charge, cap / maxf(MAX_SPEED, 1.0))
+	# The drift-flip LEAP bypasses slow-zone/gravity caps so it can break you out of a well.
+	if _flip_t > 0.0:
+		cap = maxf(cap, FLIP_CRUISE * (1.0 + FLIP_LEAP_BOOST))
 	velocity = velocity.limit_length(cap)
 
 	# Platform approach: inside the station's landing zone the speed is force-reduced
@@ -638,34 +651,44 @@ func fly(delta: float) -> void:
 	if _flip_t > 0.0:
 		_flip_t = maxf(_flip_t - delta, 0.0)
 		var fp := 1.0 - _flip_t / FLIP_TIME            # 0 → 1 across the move
-		# Heavy, eased barrel roll — slow-fast-slow, one full 360°.
+		# NOSE STAYS STRAIGHT: a pure barrel roll around the forward axis — only the wings
+		# sweep (x-y), the nose never pitches/yaws off the aim line. Heavy eased slow-fast-slow.
 		var fe := fp * fp * (3.0 - 2.0 * fp)
 		_mesh_root.rotation.z = _bank + _flip_dir * TAU * fe
-		# Wavey: the nose rises then dips through the roll (one smooth arc, not a flat spin).
-		_mesh_root.rotation.x = sin(fp * PI) * FLIP_PITCH
-		# Drift: swerve the TRAJECTORY in a wavey S (out then back) so the ship traces a wide
-		# round curve through space. Heading/aim (transform) is untouched — a slide, not a turn.
-		velocity = velocity.rotated(Vector3.UP, _flip_dir * FLIP_SWERVE * sin(fp * TAU) * delta)
+		# DRIVE the ship through a wide wavey arc so it visibly TRAVELS while rolling. A compound
+		# sine gives a rich S-on-S-on-S weave (more curve); facing/aim (transform) is untouched.
+		# The glide is LERPED in (and out), so entering/leaving the flip is seamless — no snap.
+		var weave := sin(fp * TAU) + 0.45 * sin(fp * 2.0 * TAU) + 0.22 * sin(fp * 3.0 * TAU)
+		_flip_yaw += _flip_dir * FLIP_SWERVE * weave * delta
+		# Quick LEAP: a speed burst that decays into the cruise glide over the first third.
+		var leap := 1.0 + FLIP_LEAP_BOOST * (1.0 - smoothstep(0.0, 0.32, fp))
+		var glide := (-transform.basis.z).rotated(Vector3.UP, _flip_yaw) * (FLIP_CRUISE * leap)
+		velocity = velocity.lerp(glide, clampf(FLIP_EASE * delta, 0.0, 1.0))
 
 	# --- Engine / booster intensity ---
+	var flipping := _flip_t > 0.0
 	var throttle := 1.0 if (Input.is_physical_key_pressed(KEY_W) or auto_cruise) else 0.18
 	if Input.is_physical_key_pressed(KEY_S):
 		throttle = maxf(throttle, 0.55)
 	if boost > 1.0:
 		throttle *= 1.4
+	if flipping:
+		throttle = 1.7                      # boosters BLAZE — the leap-push is a hard burn
 	_update_boosters(throttle, delta)
 
 	# --- Engine voice: loop while we're on the gas, with start/stop whooshes ---
 	if audio:
-		var thrusting := local_accel != Vector3.ZERO
+		var thrusting := local_accel != Vector3.ZERO or flipping
 		var ship_name: String = SHIP_MODELS[_current_model].name
-		audio.update_engine(ship_name, thrusting, clampf(throttle, 0.0, 1.0), boost > 1.0, _engine_pitch, delta, is_warp_mode())
+		# During the leap, force the boost voice so you HEAR the push.
+		audio.update_engine(ship_name, thrusting, clampf(throttle, 0.0, 1.0), boost > 1.0 or flipping, _engine_pitch, delta, is_warp_mode())
 	if _engine_mat:  # fallback ship only
 		var e := 2.0 + throttle * 4.0
 		_engine_mat.emission_energy_multiplier = lerpf(
 			_engine_mat.emission_energy_multiplier, e, clampf(8.0 * delta, 0.0, 1.0))
 
-	_update_streaks(velocity.length())
+	# Fat motion streaks during the leap-push (warp-like), normal speed-based otherwise.
+	_update_streaks(maxf(velocity.length(), MAX_SPEED * 0.7) if flipping else velocity.length())
 	_update_camera(delta)
 
 
@@ -1086,9 +1109,9 @@ func do_flip(dir := 1.0) -> void:
 		return
 	_flip_dir = -1.0 if dir < 0.0 else 1.0
 	_flip_t = FLIP_TIME
-	# Inject momentum so a heavy hull carves through SPACE rather than spinning on the spot:
-	# a forward surge plus a lean to the chosen side. The per-frame swerve then curves it.
-	velocity += -transform.basis.z * FLIP_SPEED + transform.basis.x * (_flip_dir * FLIP_SPEED * 0.45)
+	_flip_yaw = 0.0
+	# Motion is DRIVEN each frame during the flip (see fly()'s flip block) so the ship glides
+	# through a wide arc instead of spinning on the spot — no one-shot impulse to be damped away.
 
 
 # Begin hands-off cinematic flight to a body (main keeps autopilot_target current).

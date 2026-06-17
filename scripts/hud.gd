@@ -80,6 +80,9 @@ var _reticle: Control   # dynamic crosshair (crosshair.gd)
 const RETICLE_AIM_DIST := 800.0   # how far down the nose the crosshair marks the shot line
 var _lock_ring: Control # radial progress arc drawn around the crosshair while holding X
 var _lock_frac := 0.0   # 0..1 hold progress (set by main from the X-hold timer)
+var _capture_ring: Control  # big centred radial that fills while capturing a body
+var _capture_label: Label   # "◎ CAPTURING …" centred under the ring
+var _guardian_label: Label  # guardian-fight banner: "WAVE 2/3 · capture locked/ready"
 var firing := false     # set by main each frame — blooms the crosshair while held
 var _hitmarker: Label   # flashes on the crosshair when a shot lands
 var _codex_label: Label # "Discovered N/M"
@@ -236,6 +239,13 @@ func _ready() -> void:
 	_boss_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_build_boss_bar(_canvas)
 
+	# Guardian fight banner (top-centre, under the boss bar): always-visible wave count +
+	# capture status during a guardian fight, so you can see "WAVE 2/3" and whether you can grab it.
+	_guardian_label = _make_label(Vector2(0, 102), 15, Color(1.0, 0.55, 0.4))
+	_guardian_label.size = Vector2(1280, 24)
+	_guardian_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_guardian_label.visible = false
+
 	# Dynamic aiming reticle (custom-drawn): blooms while firing, kicks on a hit.
 	_reticle = load("res://scripts/crosshair.gd").new()
 	_reticle.size = Vector2(80, 80)
@@ -248,6 +258,18 @@ func _ready() -> void:
 	_lock_ring.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_lock_ring.draw.connect(_draw_lock_ring)
 	_canvas.add_child(_lock_ring)
+
+	# Capture ring — a big, centred, semi-transparent radial that FILLS while you survey/capture
+	# a body, so the player sees and enjoys the progress. Driven from the scan block each frame.
+	_capture_ring = Control.new()
+	_capture_ring.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_capture_ring.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_capture_ring.draw.connect(_draw_capture_ring)
+	_canvas.add_child(_capture_ring)
+	_capture_label = _make_label(Vector2(0, 446), 16, C_GREEN)
+	_capture_label.size = Vector2(1280, 24)
+	_capture_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_capture_label.visible = false
 
 	# Hitmarker — a bright ✕ that pops over the crosshair when a shot connects.
 	_hitmarker = _make_label(Vector2(0, 344), 23, Color(1, 1, 1, 0))
@@ -762,7 +784,7 @@ const CONTROLS := [
 	["RMB hold", "Raptor form swap"],
 	["Tab", "Cycle target"],
 	["X hold", "Lock nav target"],
-	["W + C", "Drift-flip (barrel roll)"],
+	["W + C", "Drift-flip leap (escape)"],
 	["N", "Stop / resume nav"],
 	["V", "Scan / capture"],
 	["G", "Planet details"],
@@ -788,7 +810,7 @@ const GUIDE := [
 	["PLATFORMS & STATIONS",
 	 "Every charted system has a dockable platform; Earth has the home station. Press F nearby to dock, then swap ships (1–7), recolour them, and open the TELEPORT NETWORK. From the network you can jump to any platform you have already reached and arrive right beside it. All platforms share the same ship roster and the same network."],
 	["WARP & FLIGHT",
-	 "WASD thrusts, Shift boosts (drains the boost bar), Q/E roll, Space/Ctrl climb and dive. Hold W in open space to spool the warp drive and cross light-years; near stars and planets you are held to sublight. Num Lock toggles hands-free auto-cruise; Vela air-brakes with R. For a cinematic move, hold W and tap C to drift-flip — a slow, heavy barrel roll that carves a wide wavey arc through space (A/D picks the side; you need open room)."],
+	 "WASD thrusts, Shift boosts (drains the boost bar), Q/E roll, Space/Ctrl climb and dive. Hold W in open space to spool the warp drive and cross light-years; near stars and planets you are held to sublight. Num Lock toggles hands-free auto-cruise; Vela air-brakes with R. Hold W and tap C for a drift-flip LEAP — a quick boost with a slow, wide cinematic barrel roll (A/D picks the side). The leap punches through a star/planet slow-zone, so it's how you break free when gravity is holding you in."],
 	["COMBAT & DISCOVERY",
 	 "Left-click fires instant ray-bullets down the crosshair (opening fire eases you to combat speed); Raptor 2 fires a nose laser on right-click. Press V near a body to scan/capture it — that fills the Codex (L), the details panel (G), and completes its survey mission. A guarded body's boss is SHIELDED until you clear its summoned swarm — kill the minions first, then burn the boss down to capture the body."],
 ]
@@ -876,6 +898,17 @@ func _build_controls_menu(canvas: CanvasLayer) -> void:
 
 func toggle_controls() -> void:
 	_controls.visible = not _controls.visible
+
+
+# Guardian-fight banner: pass the wave/capture text and whether the body is capturable now.
+# Empty text hides it. Green when capture is ready, hot-amber while the waves are locking it.
+func set_guardian(text: String, ready := false) -> void:
+	if _guardian_label == null:
+		return
+	_guardian_label.visible = text != ""
+	_guardian_label.text = text
+	_guardian_label.add_theme_color_override("font_color",
+		Color(0.5, 1.0, 0.65) if ready else Color(1.0, 0.55, 0.4))
 
 # A little dark "keycap" chip with a glowing edge — the key you press.
 func _keycap(text: String) -> PanelContainer:
@@ -1206,6 +1239,29 @@ func _draw_lock_ring() -> void:
 		_lock_ring.draw_arc(c, r, 0.0, TAU, 48, Color(1.0, 0.85, 0.4, 1.0), 5.0, true)
 
 
+# Big centred capture ring: a soft semi-transparent disc with a filling arc + breathing glow,
+# so surveying a world feels like a ritual you can watch. Driven by scan_progress each frame.
+func _draw_capture_ring() -> void:
+	if scan_progress <= 0.0 or scan_name == "":
+		return
+	var c := Vector2(640.0, 360.0)
+	var f := clampf(scan_progress, 0.0, 1.0)
+	var r := 84.0
+	var t := Time.get_ticks_msec() * 0.001
+	var pulse := 0.5 + 0.5 * sin(t * 4.0)
+	# Soft translucent disc — the "circle" the player sees fill with light.
+	_capture_ring.draw_circle(c, r, Color(0.20, 1.0, 0.75, 0.06 + 0.05 * pulse))
+	_capture_ring.draw_circle(c, r * f, Color(0.30, 1.0, 0.80, 0.10 + 0.06 * pulse))   # inner fill grows
+	# Faint full track, then the bright filling arc from the top (clockwise).
+	_capture_ring.draw_arc(c, r, 0.0, TAU, 72, Color(0.5, 1.0, 0.8, 0.22), 3.0, true)
+	_capture_ring.draw_arc(c, r, -PI * 0.5, -PI * 0.5 + TAU * f, 72, Color(0.6, 1.0, 0.85, 0.95), 5.0, true)
+	# Spinning lead dot riding the arc tip, and a complete-flash when full.
+	var tip := c + Vector2(cos(-PI * 0.5 + TAU * f), sin(-PI * 0.5 + TAU * f)) * r
+	_capture_ring.draw_circle(tip, 4.0 + 2.0 * pulse, Color(0.85, 1.0, 0.92, 0.9))
+	if f >= 1.0:
+		_capture_ring.draw_arc(c, r, 0.0, TAU, 72, Color(0.9, 1.0, 0.95, 1.0), 7.0, true)
+
+
 func refresh() -> void:
 	if ship == null:
 		return
@@ -1279,8 +1335,15 @@ func refresh() -> void:
 		_codex_label.text = "Discovered  %d / %d" % [codex.count(), codex.total()]
 	if scan_progress > 0.0 and scan_name != "":
 		_scan_label.text = "Capturing  %s …  %d%%" % [scan_name, int(scan_progress * 100.0)]
+		_capture_label.text = "◎  CAPTURING  %s   %d%%" % [scan_name, int(scan_progress * 100.0)]
+		_capture_label.visible = true
+		_capture_label.modulate = Color(0.6, 1.0, 0.82, 0.85)
+		_capture_ring.queue_redraw()          # animate the ring each frame while capturing
 	else:
 		_scan_label.text = scan_hint
+		if _capture_label.visible:
+			_capture_label.visible = false
+			_capture_ring.queue_redraw()      # clear the ring once capture ends
 	if toast_t > 0.0:
 		_toast_label.text = toast
 		_toast_label.modulate = Color(0.5, 1.0, 0.7, clampf(toast_t, 0.0, 1.0))
