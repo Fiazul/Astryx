@@ -169,7 +169,7 @@ Seven hulls. Each entry tunes hp / fire / warp / booster / surface roles.
 ## Controls
 WASD thrust · **Shift** boost · **Q/E** roll · **Space/Ctrl** up·down ·
 **L-click** fire · **R-click** laser (Raptor 2) · **Tab** waypoint · **V** scan/capture ·
-**C** codex · **J** mission log · **G** details · **M** map · **F** dock/wormhole ·
+**L** codex · **W+C** drift-flip · **J** mission log · **G** details · **M** map · **F** dock/wormhole ·
 **R** Vela brake · **Num Lock** auto-cruise · **H** teleport Earth · **Esc** cursor/back ·
 wheel zoom · **1–7** swap ship (docked).
 

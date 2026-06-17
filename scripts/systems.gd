@@ -197,6 +197,12 @@ static func has_station(star: String) -> bool:
 		_station_set = _compute_stations()
 	return _station_set.has(star)
 
+# A dockable platform you can teleport to. Same as has_station PLUS Sol — Sol carries the
+# hand-placed HOME station (not a generic platform, so has_station stays false for it to
+# avoid double-spawning one), but it IS a valid teleport destination once you've been home.
+static func is_teleport_platform(star: String) -> bool:
+	return star == SOL or has_station(star)
+
 static func _compute_stations() -> Dictionary:
 	var ids := []
 	var pos := {}

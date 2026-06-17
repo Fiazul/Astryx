@@ -208,6 +208,10 @@ const STEER_SMOOTH := 9.0     # mouse-steer inertia: lower = heavier, more turn 
 const STRAFE_SMOOTH := 5.0    # A/D & up/down (strafe/lift) input inertia: lower = heavier
 const MOUSE_SENS := 0.0022    # default; runtime value lives in `mouse_sens` (Settings menu)
 const ROLL_RATE := 1.8        # manual Q/E roll (rad/s)
+const FLIP_TIME := 1.9        # cinematic drift-flip duration — SLOW: a heavy hull rolls lazily (W+C)
+const FLIP_SPEED := 300.0     # forward+lateral momentum injected so it carves through SPACE
+const FLIP_SWERVE := 2.6      # peak yaw-rate of the wavey S-curve drift (rad/s)
+const FLIP_PITCH := 0.28      # vertical bob through the roll → a round arc, not a flat spin
 
 # Warp arrival: a warp ship eases out of warp as it falls toward the nearest mark, so
 # it arrives instead of blasting past (and the star has time to bloom into a sphere).
@@ -356,6 +360,8 @@ var _cam_zoom := 1.0          # target zoom (mouse wheel)
 var _cam_zoom_smooth := 1.0   # eased toward _cam_zoom
 var _cam_basis := Basis()
 var _bank := 0.0
+var _flip_t := 0.0            # remaining cinematic flip time (0 = not flipping)
+var _flip_dir := 1.0          # +1 roll/drift right · -1 left
 var _cruise_t := 0.0           # seconds held on a straight cruise (drives the cinematic sway)
 var _mouse_delta := Vector2.ZERO
 var _steer := Vector2.ZERO     # eased mouse-steer (rotational inertia for curving turns)
@@ -627,6 +633,19 @@ func fly(delta: float) -> void:
 		target_bank = clampf(target_bank + sway * amp * sway_ramp, -BANK_ANGLE, BANK_ANGLE)
 	_bank = lerpf(_bank, target_bank, clampf(BANK_SMOOTH * delta, 0.0, 1.0))
 	_mesh_root.rotation = Vector3(0.0, 0.0, _bank)   # clear any transit flip/wobble
+	# Cinematic drift-flip: a full 360° barrel roll layered on the bank (cosmetic — heading
+	# is untouched). The sideways drift kick was added to velocity in do_flip().
+	if _flip_t > 0.0:
+		_flip_t = maxf(_flip_t - delta, 0.0)
+		var fp := 1.0 - _flip_t / FLIP_TIME            # 0 → 1 across the move
+		# Heavy, eased barrel roll — slow-fast-slow, one full 360°.
+		var fe := fp * fp * (3.0 - 2.0 * fp)
+		_mesh_root.rotation.z = _bank + _flip_dir * TAU * fe
+		# Wavey: the nose rises then dips through the roll (one smooth arc, not a flat spin).
+		_mesh_root.rotation.x = sin(fp * PI) * FLIP_PITCH
+		# Drift: swerve the TRAJECTORY in a wavey S (out then back) so the ship traces a wide
+		# round curve through space. Heading/aim (transform) is untouched — a slide, not a turn.
+		velocity = velocity.rotated(Vector3.UP, _flip_dir * FLIP_SWERVE * sin(fp * TAU) * delta)
 
 	# --- Engine / booster intensity ---
 	var throttle := 1.0 if (Input.is_physical_key_pressed(KEY_W) or auto_cruise) else 0.18
@@ -1057,6 +1076,19 @@ func face_toward(world_point: Vector3) -> void:
 		return
 	look_at(world_point, Vector3.UP)
 	_cam_basis = transform.basis
+
+
+# Cinematic drift-flip (W + C): a full barrel roll plus a sideways drift slew. The roll is
+# cosmetic (mesh only, so heading/aim are unaffected); the drift is a one-off velocity kick
+# that decays through the normal damping. dir < 0 = left, ≥ 0 = right. Works in free-look too.
+func do_flip(dir := 1.0) -> void:
+	if _flip_t > 0.0 or frozen or transiting:
+		return
+	_flip_dir = -1.0 if dir < 0.0 else 1.0
+	_flip_t = FLIP_TIME
+	# Inject momentum so a heavy hull carves through SPACE rather than spinning on the spot:
+	# a forward surge plus a lean to the chosen side. The per-frame swerve then curves it.
+	velocity += -transform.basis.z * FLIP_SPEED + transform.basis.x * (_flip_dir * FLIP_SPEED * 0.45)
 
 
 # Begin hands-off cinematic flight to a body (main keeps autopilot_target current).

@@ -18,22 +18,22 @@ for i in range(N):
     t = i / SR
     p = t / DUR
     rise = p ** 0.7                       # pitch climbs across the whole drone
-    freq = 140.0 + 950.0 * rise           # slow upward sweep
-    freq += 90.0 * math.sin(2 * math.pi * 4.5 * t)    # vibrato wobble -> the warble
+    freq = 110.0 + 360.0 * rise           # GENTLE upward sweep (stays low/warm, not piercing)
+    freq += 16.0 * math.sin(2 * math.pi * 2.8 * t)    # shallow, slow vibrato -> soft warble
     tone = math.sin(2 * math.pi * freq * t)
-    tone += 0.5 * math.sin(2 * math.pi * freq * 0.5 * t)   # sub-octave body
-    tone += 0.3 * math.sin(2 * math.pi * freq * 1.5 * t)   # fifth shimmer
+    tone += 0.6 * math.sin(2 * math.pi * freq * 0.5 * t)   # stronger sub-octave -> warmer body
+    tone += 0.08 * math.sin(2 * math.pi * freq * 1.5 * t)  # faint fifth (was the harsh shimmer)
     tone *= 0.5
     noise = random.uniform(-1.0, 1.0)
-    cutoff = 0.04 + 0.18 * rise           # filter opens as it climbs
+    cutoff = 0.025 + 0.07 * rise          # darker filter -> the air stays soft, not hissy
     lp += cutoff * (noise - lp)
-    air = lp * 1.5
-    # Steady amplitude; only 40ms anti-click ramps at the very start/end.
-    edge = min(1.0, t / 0.04, (DUR - t) / 0.04)
-    samples.append((tone * 0.7 + air * 0.55) * edge)
+    air = lp * 0.7
+    # Steady amplitude; longer 150ms anti-click ramps soften the on/off edges.
+    edge = min(1.0, t / 0.15, (DUR - t) / 0.15)
+    samples.append((tone * 0.7 + air * 0.28) * edge)
 
 peak = max(abs(x) for x in samples) or 1.0
-gain = 0.9 / peak
+gain = 0.72 / peak
 data = b"".join(struct.pack("<h", int(max(-1, min(1, x * gain)) * 32767)) for x in samples)
 out = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "assets", "teleport.wav"))
 with wave.open(out, "wb") as w:

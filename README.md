@@ -28,7 +28,7 @@ detailed assets, just emissive bodies, glow, and a few low-poly meshes.
   planet icons on toggleable layers, a live player cursor, hover read-outs, wormhole lanes,
   out to ~150 ly. Wormholes show live on the **corner radar** and the always-on nav arrow
   points you to the nearest wormhole first. Paid **waypoint navigator** (Tab), **scan** (V) →
-  persistent **Codex** (C) with real NASA facts (G).
+  persistent **Codex** (L) with real NASA facts (G).
 - **Mission log** (J) — every star, planet & moon is its own mission with a crude,
   (mostly) true story and a coin bounty. Browse the board, click a mission to read it,
   and **Navigate** straight to it. Survey the body to complete it and claim the bounty.
@@ -37,7 +37,7 @@ detailed assets, just emissive bodies, glow, and a few low-poly meshes.
 ## Controls
 `WASD` thrust · `Space/Ctrl` up·down · `Q/E` roll · `Shift` boost · `mouse` aim ·
 **`L-click` fire** · **`R-click` laser** (Raptor 2) · `R` Vela air-brake ·
-`Num Lock` auto-cruise · **`Tab`** waypoint · **`V`** scan · **`C`** codex ·
+`Num Lock` auto-cruise · `W+C` drift-flip · **`Tab`** waypoint · **`V`** scan · **`L`** codex ·
 **`J`** mission log · **`G`** details · **`M`** map · **`F`** dock / wormhole · **`H`** teleport to Earth ·
 wheel zoom · **`1–7`** swap ship (docked) · `Esc` free cursor / back
 

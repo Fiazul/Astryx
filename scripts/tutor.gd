@@ -8,12 +8,16 @@ extends CanvasLayer
 var audio                       # set by main, for the ting-tong chime
 var main                        # set by main — lets us pace faster while Sol isn't unlocked
 
-const MARGIN_X := 18.0          # gap from the left edge
-const BOX_W := 300.0
-const GAP := 10.0
+const MARGIN_X := 18.0          # gap from the left edge (resting x)
+const BOX_W := 208.0            # small tab (was 300)
+const GAP := 8.0
 const ANCHOR_Y := 250.0         # top of the stack (design space 1280×720) — left-of-middle
-const LIFE := 16.0              # seconds a tip lingers before auto-fading
-const DISMISS_X := -70.0        # drag the box left past this → dismissed
+const LIFE := 13.0              # seconds a tip lingers before auto-fading
+const DISMISS_X := -90.0        # drag the box left past this → dismissed
+const SLIDE_IN := 0.32          # seconds the tab takes to draw in from the left edge
+const START_X := -(BOX_W + 24.0)   # off-screen left — where each tab starts before sliding in
+const FLASH := 0.55             # seconds the bright spawn-flash decays over
+const IDLE_TRIGGER := 40.0      # seconds of no player input → re-surface a tip (with the chime)
 
 var _tips := [
 	{ "t": "Open the Map", "s": "Press  M  for the star map.",
@@ -29,7 +33,7 @@ var _tips := [
 	{ "t": "Dock & wormholes", "s": "Press  F  to dock or enter a wormhole.",
 	  "d": "Near a station, F docks (swap ships, customize, teleport). Near a glowing wormhole, F dives through to a neighbouring system." },
 	{ "t": "Scan to discover", "s": "Press  V  near a body to scan it.",
-	  "d": "Scanning reveals a body's data in the Codex (C) and details panel (G), and completes its survey mission." },
+	  "d": "Scanning reveals a body's data in the Codex (L) and details panel (G), and completes its survey mission." },
 	{ "t": "Mission Log", "s": "Press  J  for missions.",
 	  "d": "Every star, planet and moon is a mission with a story and a coin bounty. Track one and the nav arrow guides you to it." },
 	{ "t": "Boost & roll", "s": "Shift = boost · Q/E roll · Space/Ctrl up·down.",
@@ -40,15 +44,20 @@ var _tips := [
 	  "d": "From any platform you've reached, open the teleport console and jump straight to another platform — then short-fly the rest." },
 	{ "t": "Teleport home", "s": "Press  H  to return to Earth.",
 	  "d": "An emergency jump back to Earth from anywhere. A light-ball wraps the ship, shrinks, and you're home." },
-	{ "t": "Swap ships", "s": "Press  1–7  while docked.",
-	  "d": "Each hull flies differently — tanky, glass-cannon, FTL, support, mother-ship. Some can be recoloured in the hangar." },
+	{ "t": "Codex log", "s": "Press  L  for the Codex.",
+	  "d": "The Codex logs every body you've scanned — open it with L (it moved off C), browse your discoveries and click any entry to read its data." },
+	{ "t": "Drift-flip", "s": "Hold  W  + tap  C  to drift-flip.",
+	  "d": "A slow, heavy cinematic barrel-roll that carves a wide wavey arc through space — hold W and tap C, steer the side with A/D. You need open room for it. Pure style; your heading and aim stay put." },
+	{ "t": "Switch ships", "s": "Go to a station to switch ships.",
+	  "d": "Fly to any platform/station and press F to dock, then pick a hull (1–7) in the hangar. Each flies differently — tanky, glass-cannon, FTL, support, mother-ship — and some recolour in the hangar." },
 ]
 
 var _order := []
 var _next := 0
 var _timer := 0.0
 var _running := false
-var _active := []               # [{ panel, life, detail, dragging, moved }]
+var _idle := 0.0                # seconds since the player last did anything → idle re-surfacing
+var _active := []               # [{ panel, life, detail, dragging, moved, age, sb, base_border }]
 var _root: Control
 
 
@@ -65,7 +74,7 @@ func start() -> void:
 	_order = range(_tips.size()).duplicate()
 	_order.shuffle()
 	_next = 0
-	_timer = 3.0          # first tip a few seconds in
+	_timer = 1.5          # first tip pops in quickly
 	_running = true
 
 
@@ -89,15 +98,37 @@ func _process(delta: float) -> void:
 			if _running and _next < _order.size():
 				_spawn(_tips[_order[_next]])
 				_next += 1
-				_timer = randf_range(4.0, 8.0) if beginner else randf_range(10.0, 16.0)
-	# Age + fade active notes; drop the expired.
+				_timer = randf_range(2.5, 4.5) if beginner else randf_range(6.0, 10.0)
+	# Idle re-surfacing: once the player goes hands-off for a while — and isn't in a
+	# menu/map/dock/teleport (all of which free the mouse cursor) — pop ONE tip with the
+	# chime, then reset the idle clock so it only nudges occasionally. Works after the
+	# beginner phase too (and on resumed games where start() never ran).
+	var captured: bool = Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED
+	if Input.is_anything_pressed() or not captured:
+		_idle = 0.0
+	else:
+		_idle += delta
+		# Only nudge genuine newcomers — once Sol is fully scanned, no more idle tips.
+		var beginner: bool = main != null and not main._sol_fully_unlocked()
+		if beginner and _idle >= IDLE_TRIGGER and _active.is_empty():
+			_spawn(_tips[randi() % _tips.size()])
+			_idle = 0.0
+	# Age active notes: drive the slide-in, the bright spawn-flash, and the fades; drop expired.
 	for n in _active.duplicate():
+		if not is_instance_valid(n.panel):
+			continue
 		if not n.dragging:
+			n.age += delta
 			n.life -= delta
 			if n.life <= 0.0:
 				_dismiss(n)
 				continue
-			n.panel.modulate.a = clampf(n.life, 0.0, 1.0)   # fade out in the last second
+			# Bright border flash on entry that decays to the resting accent colour.
+			var flash: float = clampf(1.0 - n.age / FLASH, 0.0, 1.0)
+			n.sb.border_color = n.base_border.lerp(Color(1, 1, 1, 1), flash * 0.85)
+			# Fade IN with the slide, fade OUT over the last second of life.
+			var fin: float = clampf(n.age / SLIDE_IN, 0.0, 1.0)
+			n.panel.modulate.a = minf(fin, clampf(n.life, 0.0, 1.0))
 	_restack()
 
 
@@ -109,22 +140,24 @@ func _spawn(tip: Dictionary) -> void:
 	var panel := PanelContainer.new()
 	panel.custom_minimum_size = Vector2(BOX_W, 0)
 	panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	var base_border := Color(0.45, 0.85, 1.0, 0.85)
 	var sb := StyleBoxFlat.new()
 	sb.bg_color = Color(0.04, 0.06, 0.10, 0.92)
 	sb.set_border_width_all(1)
-	sb.border_color = Color(0.45, 0.85, 1.0, 0.8)
-	sb.set_corner_radius_all(6)
-	sb.set_content_margin_all(10)
+	sb.border_width_left = 3          # bright accent bar down the left edge (tab feel)
+	sb.border_color = base_border
+	sb.set_corner_radius_all(5)
+	sb.set_content_margin_all(7)
 	panel.add_theme_stylebox_override("panel", sb)
 
 	var vb := VBoxContainer.new()
-	vb.add_theme_constant_override("separation", 4)
+	vb.add_theme_constant_override("separation", 3)
 	vb.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	panel.add_child(vb)
 
 	var head := Label.new()
 	head.text = "◈  %s" % str(tip.t)
-	head.add_theme_font_size_override("font_size", 14)
+	head.add_theme_font_size_override("font_size", 12)
 	head.add_theme_color_override("font_color", Color(0.55, 0.95, 1.0))
 	head.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	vb.add_child(head)
@@ -132,8 +165,8 @@ func _spawn(tip: Dictionary) -> void:
 	var short := Label.new()
 	short.text = str(tip.s)
 	short.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	short.custom_minimum_size = Vector2(BOX_W - 20, 0)
-	short.add_theme_font_size_override("font_size", 15)
+	short.custom_minimum_size = Vector2(BOX_W - 18, 0)
+	short.add_theme_font_size_override("font_size", 13)
 	short.add_theme_color_override("font_color", Color(0.9, 0.94, 1.0))
 	short.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	vb.add_child(short)
@@ -141,25 +174,25 @@ func _spawn(tip: Dictionary) -> void:
 	var detail := Label.new()
 	detail.text = str(tip.d)
 	detail.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	detail.custom_minimum_size = Vector2(BOX_W - 20, 0)
-	detail.add_theme_font_size_override("font_size", 13)
+	detail.custom_minimum_size = Vector2(BOX_W - 18, 0)
+	detail.add_theme_font_size_override("font_size", 11)
 	detail.add_theme_color_override("font_color", Color(0.7, 0.8, 0.9))
 	detail.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	detail.visible = false
 	vb.add_child(detail)
 
 	var foot := Label.new()
-	foot.text = "click for more · drag away to dismiss"
-	foot.add_theme_font_size_override("font_size", 10)
+	foot.text = "click · drag away ✕"
+	foot.add_theme_font_size_override("font_size", 9)
 	foot.add_theme_color_override("font_color", Color(0.5, 0.6, 0.72))
 	foot.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	vb.add_child(foot)
 
-	panel.position = Vector2(MARGIN_X, ANCHOR_Y)
+	panel.position = Vector2(START_X, ANCHOR_Y)   # start off-screen; _restack slides it in
 	panel.modulate.a = 0.0
 	_root.add_child(panel)
 	var note := { "panel": panel, "life": LIFE, "detail": detail, "foot": foot,
-		"dragging": false, "moved": false }
+		"dragging": false, "moved": false, "age": 0.0, "sb": sb, "base_border": base_border }
 	panel.gui_input.connect(_on_note_input.bind(note))
 	_active.append(note)
 	if audio != null:
@@ -180,8 +213,8 @@ func _on_note_input(event: InputEvent, note: Dictionary) -> void:
 			else:
 				# A clean click toggles the detail and refreshes its lifetime.
 				note.detail.visible = not note.detail.visible
-				note.foot.text = "click to collapse · drag away to dismiss" if note.detail.visible \
-					else "click for more · drag away to dismiss"
+				note.foot.text = "collapse · drag away ✕" if note.detail.visible \
+					else "click · drag away ✕"
 				note.life = LIFE
 	elif event is InputEventMouseMotion and note.dragging:
 		note.panel.position += event.relative
@@ -197,11 +230,14 @@ func _dismiss(note: Dictionary) -> void:
 		note.panel.queue_free()
 
 
-# Stack the (non-dragged) boxes down the left-middle.
+# Stack the (non-dragged) boxes down the left-middle, each easing in from the left edge
+# (a small "tab" drawing out) based on its age.
 func _restack() -> void:
 	var y := ANCHOR_Y
 	for n in _active:
-		if not n.dragging and is_instance_valid(n.panel):
-			n.panel.position.x = MARGIN_X
-			n.panel.position.y = y
-			y += n.panel.size.y + GAP
+		if n.dragging or not is_instance_valid(n.panel):
+			continue
+		var t_in: float = clampf(n.age / SLIDE_IN, 0.0, 1.0)
+		var e: float = 1.0 - pow(1.0 - t_in, 3.0)   # ease-out draw-in
+		n.panel.position = Vector2(lerpf(START_X, MARGIN_X, e), y)
+		y += n.panel.size.y + GAP

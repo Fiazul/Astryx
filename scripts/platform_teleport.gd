@@ -107,7 +107,7 @@ func _build_tiles() -> void:
 	for c in _grid.get_children():
 		c.queue_free()
 	for id in SystemDB.all():
-		if not SystemDB.has_station(id) or id == SystemDB.INTERSTELLAR:
+		if not SystemDB.is_teleport_platform(id) or id == SystemDB.INTERSTELLAR:
 			continue
 		var here: bool = (id == main.current_system)
 		var unlocked: bool = main.is_teleport_unlocked(id)

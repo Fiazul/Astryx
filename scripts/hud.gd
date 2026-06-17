@@ -88,6 +88,7 @@ var _scan_label: Label  # scan prompt / progress (center-lower)
 var _toast_label: Label # "✓ X discovered" pop
 var _controls: PanelContainer   # the controls cheat-sheet menu (toggled by ?)
 var teleport_button: Button   # connected by main -> teleport_home()
+var _tp_net_button: Button    # bottom-centre "TELEPORT NETWORK" → open_teleport_map (while docked)
 var tp_cancel_button: Button  # shown only during a teleport ritual -> main.cancel_teleport()
 var details_button: Button    # connected by main -> PlanetInfo.open_for_nearest()
 var map_button: Button        # -> StarMap.toggle()
@@ -255,6 +256,7 @@ func _ready() -> void:
 	_hitmarker.text = "✕"
 
 	_build_teleport_button(_canvas)
+	_build_teleport_net_button(_canvas)
 	_build_button_bar(_canvas)
 	_build_controls_menu(_canvas)
 	# Bottom help line removed in the declutter pass (verbs live in the ? controls panel).
@@ -292,6 +294,26 @@ func _build_teleport_button(canvas: CanvasLayer) -> void:
 	teleport_button.add_theme_stylebox_override("pressed", _metal_box(Color(0.7, 1.0, 1.0), 1.0))
 	canvas.add_child(teleport_button)
 	_track("teleport", teleport_button)
+
+
+# Bottom-centre "TELEPORT NETWORK" button — appears while docked at a platform (set_hangar
+# toggles it), opens the platform fast-travel console. Disabled-looking when nothing's unlocked.
+func _build_teleport_net_button(canvas: CanvasLayer) -> void:
+	_tp_net_button = Button.new()
+	_tp_net_button.text = "⌖  TELEPORT NETWORK"
+	_tp_net_button.size = Vector2(268, 36)
+	_tp_net_button.position = Vector2(640 - 134, 660)   # design-space bottom-centre
+	_tp_net_button.focus_mode = Control.FOCUS_NONE
+	_tp_net_button.add_theme_font_size_override("font_size", 13)
+	_tp_net_button.add_theme_color_override("font_color", C_TEXT)
+	_tp_net_button.add_theme_color_override("font_hover_color", Color(1, 1, 1))
+	_tp_net_button.add_theme_stylebox_override("normal", _metal_box(Color(0.40, 1.0, 0.85), 0.5))
+	_tp_net_button.add_theme_stylebox_override("hover", _metal_box(Color(0.55, 1.0, 0.9), 0.9))
+	_tp_net_button.add_theme_stylebox_override("pressed", _metal_box(Color(0.7, 1.0, 0.95), 1.0))
+	_tp_net_button.add_theme_stylebox_override("disabled", _metal_box(Color(0.4, 0.45, 0.5), 0.3))
+	_tp_net_button.visible = false
+	_tp_net_button.pressed.connect(func(): open_teleport_map.emit())
+	canvas.add_child(_tp_net_button)
 
 
 # A bar widget: dark frame + a coloured fill that we resize to the value ratio.
@@ -728,26 +750,54 @@ func _build_lore_card(canvas: CanvasLayer) -> void:
 # pop open with the [?] button (keeps the flight view clean).
 const CONTROLS := [
 	["WASD", "Thrust / strafe"],
+	["Q / E", "Roll"],
+	["Spc/Ctrl", "Climb / dive"],
 	["Shift", "Boost"],
-	["L-Click", "Fire weapons"],
-	["RMB / T", "Free-look"],
-	["Tab", "Cycle waypoint"],
-	["V", "Scan body"],
-	["G", "Planet details"],
-	["F", "Dock / wormhole"],
-	["C", "Codex log"],
-	["M", "Star map"],
-	["X", "Raptor mode"],
+	["W hold", "Spool warp (open space)"],
 	["R", "Air-brake (Vela)"],
-	["H", "Teleport Earth"],
-	["Esc", "Release cursor"],
+	["Num Lk", "Auto-cruise toggle"],
+	["L-Click", "Fire weapons"],
+	["R-Click", "Laser (Raptor 2)"],
+	["T / RMB", "Free-look (hold)"],
+	["RMB hold", "Raptor form swap"],
+	["Tab", "Cycle target"],
+	["X hold", "Lock nav target"],
+	["W + C", "Drift-flip (barrel roll)"],
+	["N", "Stop / resume nav"],
+	["V", "Scan / capture"],
+	["G", "Planet details"],
+	["L", "Codex log"],
+	["J", "Mission log"],
+	["M", "Star map"],
+	["F", "Dock / wormhole"],
+	["1–7", "Swap ship (docked)"],
+	["H", "Teleport home"],
+	["F11", "Fullscreen"],
+	["Esc", "Release cursor / back"],
+]
+
+# System explainers shown under the controls grid in the ? panel — always available, so a
+# player past the beginner tips can still look up exactly how each mechanic works.
+const GUIDE := [
+	["TAB TARGETING",
+	 "Aim down the crosshair and press Tab to lock the object your aim ray passes nearest to. Tab steps through the up-to-4 closest (1st → 2nd → 3rd → 4th → loop); move the cursor to re-rank. Unscanned objects read \"Unknown\" until you scan them. Hold X for 1s to LOCK the target as an orange waypoint — it sticks through aim changes and further Tabs until you press ✖ Cancel Nav."],
+	["WORMHOLES",
+	 "Glowing rings are wormholes to neighbouring systems. Fly close and press F to dive through — a dark tunnel carries you across the light-years (longer hops take longer). Known lanes show on the map (M) and the corner radar; the network links every system within a few hops of home."],
+	["TELEPORT  (H)",
+	 "Press H anywhere for an emergency jump straight home to Earth: a light-ball wraps the ship, shrinks to a bead, and you arrive. It is the rare, theatrical exception — ordinary travel between stars is always flown through wormholes."],
+	["PLATFORMS & STATIONS",
+	 "Every charted system has a dockable platform; Earth has the home station. Press F nearby to dock, then swap ships (1–7), recolour them, and open the TELEPORT NETWORK. From the network you can jump to any platform you have already reached and arrive right beside it. All platforms share the same ship roster and the same network."],
+	["WARP & FLIGHT",
+	 "WASD thrusts, Shift boosts (drains the boost bar), Q/E roll, Space/Ctrl climb and dive. Hold W in open space to spool the warp drive and cross light-years; near stars and planets you are held to sublight. Num Lock toggles hands-free auto-cruise; Vela air-brakes with R. For a cinematic move, hold W and tap C to drift-flip — a slow, heavy barrel roll that carves a wide wavey arc through space (A/D picks the side; you need open room)."],
+	["COMBAT & DISCOVERY",
+	 "Left-click fires instant ray-bullets down the crosshair (opening fire eases you to combat speed); Raptor 2 fires a nose laser on right-click. Press V near a body to scan/capture it — that fills the Codex (L), the details panel (G), and completes its survey mission. A guarded body's boss is SHIELDED until you clear its summoned swarm — kill the minions first, then burn the boss down to capture the body."],
 ]
 
 func _build_controls_menu(canvas: CanvasLayer) -> void:
 	# Dim full-screen scrim so the panel reads as a modal overlay.
 	_controls = PanelContainer.new()
-	_controls.position = Vector2(380, 150)
-	_controls.custom_minimum_size = Vector2(520, 0)
+	_controls.position = Vector2(348, 92)
+	_controls.custom_minimum_size = Vector2(600, 0)
 	_controls.add_theme_stylebox_override("panel", _frame_box(C_ACCENT))
 
 	var bg := TextureRect.new()
@@ -763,19 +813,34 @@ func _build_controls_menu(canvas: CanvasLayer) -> void:
 		margin.add_theme_constant_override("margin_" + side, 18)
 	_controls.add_child(margin)
 
-	var col := VBoxContainer.new()
-	col.add_theme_constant_override("separation", 12)
-	margin.add_child(col)
+	var outer := VBoxContainer.new()
+	outer.add_theme_constant_override("separation", 10)
+	margin.add_child(outer)
 
-	var title := _new_label(15, Color(0.7, 0.95, 1.0))
-	title.text = "FLIGHT CONTROLS"
-	col.add_child(title)
+	var title := _new_label(16, Color(0.7, 0.95, 1.0))
+	title.text = "◆  GUIDE  —  CONTROLS & SYSTEMS"
+	outer.add_child(title)
+
+	# Scrollable body so the full reference always fits on screen.
+	var scroll := ScrollContainer.new()
+	scroll.custom_minimum_size = Vector2(560, 430)
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	outer.add_child(scroll)
+
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 11)
+	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(col)
+
+	var ctl_head := _new_label(13, C_ACCENT)
+	ctl_head.text = "CONTROLS"
+	col.add_child(ctl_head)
 
 	# Two-column grid of keycap + action.
 	var grid := GridContainer.new()
 	grid.columns = 4
 	grid.add_theme_constant_override("h_separation", 10)
-	grid.add_theme_constant_override("v_separation", 8)
+	grid.add_theme_constant_override("v_separation", 7)
 	col.add_child(grid)
 	for row in CONTROLS:
 		grid.add_child(_keycap(row[0]))
@@ -783,6 +848,17 @@ func _build_controls_menu(canvas: CanvasLayer) -> void:
 		desc.text = row[1]
 		desc.custom_minimum_size = Vector2(150, 0)
 		grid.add_child(desc)
+
+	# System explainers: how targeting / wormholes / teleport / platforms / combat work.
+	for sec in GUIDE:
+		var sh := _new_label(13, C_ACCENT)
+		sh.text = "◈  " + sec[0]
+		col.add_child(sh)
+		var body := _new_label(11, C_TEXT)
+		body.text = sec[1]
+		body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		body.custom_minimum_size = Vector2(520, 0)
+		col.add_child(body)
 
 	var close := Button.new()
 	close.text = "CLOSE  [ ? ]"
@@ -793,7 +869,7 @@ func _build_controls_menu(canvas: CanvasLayer) -> void:
 	close.add_theme_stylebox_override("hover", _metal_box(C_ACCENT.lightened(0.2), 0.85))
 	close.add_theme_stylebox_override("pressed", _metal_box(C_ACCENT.lightened(0.4), 1.0))
 	close.pressed.connect(toggle_controls)
-	col.add_child(close)
+	outer.add_child(close)
 
 	_controls.visible = false
 	canvas.add_child(_controls)
@@ -952,6 +1028,13 @@ func set_hangar(open: bool, names: PackedStringArray, current: int, station: Str
 		return
 	_hangar_sig = sig
 	_hangar.visible = open
+	# Bottom-centre network button rides with the dock state.
+	_tp_net_button.visible = open
+	if open:
+		var n: int = teleports.size()
+		_tp_net_button.disabled = n == 0
+		_tp_net_button.text = ("⌖  TELEPORT NETWORK  ·  %d station%s" % [n, "" if n == 1 else "s"]) \
+			if n > 0 else "⌖  TELEPORT NETWORK  ·  none unlocked yet"
 	if not open:
 		return
 	_hangar_title.text = "HANGAR · %s" % station
@@ -969,8 +1052,7 @@ func set_hangar(open: bool, names: PackedStringArray, current: int, station: Str
 		_hangar_rows.add_child(_make_choice_row("FINISH",
 			[{"key": "metallic", "label": "METALLIC"}, {"key": "glassy", "label": "GLASSY"}],
 			finish, _on_finish_choice))
-	# Teleport network: one button → opens the star map in teleport mode (pick + confirm).
-	_hangar_rows.add_child(_make_teleport_button(teleports.size()))
+	# (Teleport-network button now lives bottom-centre — see _build_teleport_net_button.)
 
 
 # One bordered table row: ◈ icon · ship name · number key. Current ship is lit up.
@@ -1016,50 +1098,6 @@ func _on_hangar_row_input(event: InputEvent, idx: int) -> void:
 	if event is InputEventMouseButton and event.pressed \
 			and event.button_index == MOUSE_BUTTON_LEFT:
 		ship_selected.emit(idx)
-
-
-# The dock's "TELEPORT NETWORK" button → emits open_teleport_map (main opens the chart in
-# teleport mode). Disabled with a hint when no platforms are unlocked yet.
-func _make_teleport_button(count: int) -> PanelContainer:
-	var row := PanelContainer.new()
-	var box := StyleBoxFlat.new()
-	box.set_corner_radius_all(4)
-	box.set_content_margin_all(8)
-	var active := count > 0
-	box.bg_color = Color(0.10, 0.22, 0.20, 0.45) if active else Color(0.12, 0.13, 0.16, 0.30)
-	box.border_color = Color(0.4, 1.0, 0.85, 0.75) if active else Color(0.4, 0.45, 0.5, 0.4)
-	box.set_border_width_all(1)
-	row.add_theme_stylebox_override("panel", box)
-	if active:
-		row.mouse_filter = Control.MOUSE_FILTER_STOP
-		row.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
-		row.gui_input.connect(_on_teleport_button_input)
-	else:
-		row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var h := HBoxContainer.new()
-	h.add_theme_constant_override("separation", 10)
-	h.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	row.add_child(h)
-	var col := Color(0.4, 1.0, 0.85) if active else Color(0.55, 0.6, 0.65)
-	var icon := _new_label(14, col)
-	icon.text = "⌖"
-	h.add_child(icon)
-	var nm := _new_label(13, Color(1, 1, 1) if active else Color(0.6, 0.65, 0.7))
-	nm.text = "TELEPORT NETWORK  ·  %d station%s" % [count, "" if count == 1 else "s"] if active \
-		else "TELEPORT NETWORK  ·  none unlocked yet"
-	nm.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	h.add_child(nm)
-	if active:
-		var go := _new_label(11, col)
-		go.text = "▸ open map"
-		h.add_child(go)
-	return row
-
-
-func _on_teleport_button_input(event: InputEvent) -> void:
-	if event is InputEventMouseButton and event.pressed \
-			and event.button_index == MOUSE_BUTTON_LEFT:
-		open_teleport_map.emit()
 
 
 # A "BODY COLOUR" label + a row of clickable colour swatches. The current colour is ringed
@@ -1224,11 +1262,14 @@ func refresh() -> void:
 		# Hitmarker flash (alpha tracks the combat hit timer).
 		var hm: float = clampf(combat.hitmarker / 0.18, 0.0, 1.0)
 		_hitmarker.modulate = Color(1.0, 0.95, 0.55, hm)
-		var bs: Dictionary = combat.boss_state()
+		var bs: Dictionary = combat.target_state()
 		_boss_bar.visible = bs.alive
 		if bs.alive:
 			var br: float = clampf(float(bs.hp) / maxf(float(bs.max), 1.0), 0.0, 1.0)
-			_boss_label.text = "◼  %s   %d%%" % [String(bs.get("name", "VORTEX")).to_upper(), int(round(100.0 * br))]
+			if bs.get("shielded", false):
+				_boss_label.text = "◼  %s   ⛨ SHIELDED · clear the swarm" % String(bs.get("name", "VORTEX")).to_upper()
+			else:
+				_boss_label.text = "◼  %s   %d%%" % [String(bs.get("name", "VORTEX")).to_upper(), int(round(100.0 * br))]
 			_boss_fill.size.x = _boss_bar_w * br
 		else:
 			_boss_label.text = ""

@@ -110,7 +110,7 @@ var current_system := SystemDB.SOL
 # you arrive. ~TELEPORT_TIME seconds. (Wormholes are NOT teleport.)
 const TELEPORT_TIME := 8.0            # long, dramatic ritual: whoosh fades in, holds, fades out
 const TELEPORT_PLATFORM_TIME := 8.0   # platform-network jump
-const TELEPORT_SFX_DB := -5.0   # peak volume of the whoosh at the middle of its fade bell
+const TELEPORT_SFX_DB := -9.0   # peak volume of the whoosh at the middle of its fade bell (gentle)
 const TELEPORT_ZOOM := 3.0      # pull the camera BACK so it views the light-ball from OUTSIDE
 const TP_ORB_BASE := 1.6        # base radius of the light-ball wrapping the ship (must stay
 								# well under the camera distance ≈ 1.05 × TELEPORT_ZOOM, or the
@@ -120,6 +120,7 @@ var _tp_t := 0.0
 var _tp_dur := TELEPORT_TIME
 var _tp_dest := ""
 var _tp_label := ""
+var _tp_platform := false              # this jump came from the platform network → land beside the dock
 var _tp_ring: MeshInstance3D          # shiny light-ball that wraps the ship
 var _tp_ring_mat: StandardMaterial3D  # additive glowing-orb material (pulses in a light wave)
 var _music: AudioStreamPlayer
@@ -245,7 +246,7 @@ func _ready() -> void:
 	planet_info.main = self
 	add_child(planet_info)
 	hud.details_button.pressed.connect(planet_info.open_for_nearest)
-	# Codex logbook (C): browse discovered bodies, click to read.
+	# Codex logbook (L): browse discovered bodies, click to read.
 	var codex_panel := CodexPanel.new()
 	codex_panel.codex = codex
 	codex_panel.info = planet_info
@@ -1265,7 +1266,7 @@ func _unlocked_platforms() -> Array:
 	for id in SystemDB.all():
 		if id == current_system or id == SystemDB.INTERSTELLAR:
 			continue
-		if SystemDB.has_station(id) and _visited.has(id):
+		if SystemDB.is_teleport_platform(id) and _visited.has(id):
 			out.append({ "id": id, "name": SystemDB.display_name(id) })
 	out.sort_custom(func(a, b): return String(a.name) < String(b.name))
 	return out
@@ -1275,7 +1276,7 @@ func _unlocked_platforms() -> Array:
 # not where you are now. Used by the teleport-mode map to decide whether to offer "confirm".
 func is_teleport_unlocked(id: String) -> bool:
 	return id != current_system and id != SystemDB.INTERSTELLAR \
-		and SystemDB.has_station(id) and _visited.has(id)
+		and SystemDB.is_teleport_platform(id) and _visited.has(id)
 
 
 # Dock → "TELEPORT NETWORK" button: open the ISOLATED platform console (its own screen, not
@@ -1295,6 +1296,7 @@ func teleport_to_platform(id: String) -> void:
 		return
 	_set_docked(false)
 	start_teleport(id, "PLATFORM JUMP → %s" % SystemDB.display_name(id), TELEPORT_PLATFORM_TIME)
+	_tp_platform = true              # platform-network jump: land right beside the dest platform
 
 
 # Begin the teleport ritual to `dest`. Freezes the ship, eases the camera back, and spins
@@ -1308,6 +1310,7 @@ func start_teleport(dest: String, label: String, dur := TELEPORT_TIME) -> void:
 	_tp_dur = dur
 	_tp_dest = dest
 	_tp_label = label
+	_tp_platform = false             # teleport_to_platform re-sets this true after this call
 	ship.set_frozen(true)            # hold still + slow turntable (see ship.fly frozen branch)
 	ship._set_capture(false)         # free the cursor so the Cancel button is clickable
 	ship._cam_zoom = TELEPORT_ZOOM   # camera eases back (smoothed in ship._update_camera)
@@ -1383,6 +1386,9 @@ func _update_teleport(delta: float) -> void:
 		if audio != null:
 			audio.stop_teleport()
 		_arrive(_tp_dest)
+		if _tp_platform:
+			_land_beside_dock()      # platform jump → emerge right next to the dest platform
+			_tp_platform = false
 		ship._set_capture(true)
 
 
@@ -1458,6 +1464,23 @@ func _arrive(system_id: String) -> void:
 		% [SystemDB.display_name(system_id), ship.true_pos.length()])
 
 
+# Platform-network arrival: instead of the far generic arrival point, set down right beside
+# the destination platform so you emerge nose-on and already in the docking ring (no long
+# fly-back). props.set_system (called from _arrive) has just placed this system's dock, so
+# props.dock_pos is current. We sit a short hop off it on the star-facing side and aim the
+# nose at the platform. (Bodies render at true_pos - ship.true_pos, so the dock renders at
+# props.dock_pos - ship.true_pos — that's what we face toward.)
+func _land_beside_dock() -> void:
+	if not props.has_dock:
+		return
+	var st: Vector3 = props.dock_pos
+	var to_star: Vector3 = (-st).normalized() if st.length() > 0.001 else Vector3.FORWARD
+	var gap: float = clampf(props.dock_range * 0.6, 35.0, 60.0)   # close, but inside the ring
+	ship.true_pos = st + to_star * gap
+	ship.velocity = Vector3.ZERO
+	ship.face_toward(st - ship.true_pos)     # nose dead-on the platform (rendered position)
+
+
 # --- Docking at the station + ship swap ---
 # How far out (beyond dock_range) the landing zone begins force-slowing the ship.
 const DOCK_SLOW_MARGIN := 40.0
@@ -1486,6 +1509,15 @@ func _input(event: InputEvent) -> void:
 		hud.toast_t = 2.0
 	elif key == KEY_N:
 		toggle_nav()          # keyboard shortcut for the ⊘ NAV stop/resume button
+	elif key == KEY_C and Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED \
+			and Input.is_physical_key_pressed(KEY_W):
+		# W + C = cinematic drift-flip. A/D picks the side (default right).
+		var fd := 1.0
+		if Input.is_physical_key_pressed(KEY_A):
+			fd = -1.0
+		elif Input.is_physical_key_pressed(KEY_D):
+			fd = 1.0
+		ship.do_flip(fd)
 	elif key == KEY_ESCAPE and not ship.transiting and not ship.frozen:
 		# Esc = release the mouse; press again to re-capture (back to flight).
 		ship._set_capture(Input.get_mouse_mode() != Input.MOUSE_MODE_CAPTURED)

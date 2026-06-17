@@ -75,18 +75,18 @@ const BOSS_SPAWN_DIST := 160.0
 # (raw colours), that summons small "old vortex" minions (BOSS_MODEL) as its army.
 # Clear the boss to capture the body. ---
 const GUARD_BOSS_SIZE := 40.0   # EXTREMELY big, imposing monster guarding the star/body
-const GUARD_BOSS_HP := 180      # base — scaled up further by star size in set_guardians
+const GUARD_BOSS_HP := 320      # base — scaled up further by star size in set_guardians (tough)
 const GUARD_BOSS_SPEED := 9.0
 const BOSS_FAST_EVERY := 2.2    # seconds between ultra-fast aimed shots (between specials)
 const BOSS_FAST_SPEED := 320.0  # ultra-fast bullet/laser the player must dodge
 const GUARD_BOSS_KEEP := 55.0
 const GUARD_BOSS_FIRE := 0.9
 const MINION_SIZE := 7.0          # small vortexes
-const MINION_HP := 4
-const MINION_SPEED := 16.0
+const MINION_HP := 7
+const MINION_SPEED := 18.0
 const MINION_KEEP := 28.0
-const MINION_FIRE := 1.3          # more aggressive minions (was 2.1)
-const MINION_CAP := 6             # base live minions; scaled up by star size (bigger = waves)
+const MINION_FIRE := 1.0          # more aggressive minions (was 2.1)
+const MINION_CAP := 9             # base live minions; scaled up by star size (bigger = waves)
 const MINION_SUMMON_EVERY := 2.6  # seconds between summons
 # Boss phases + telegraphed special. Phase 2 (enraged) triggers below this HP fraction:
 # faster summons + faster specials. The special is a radial bolt burst preceded by a
@@ -261,6 +261,8 @@ func reset(active := false, with_boss := false, count := SWARM_COUNT) -> void:
 	guard_body = ""
 	zone_kills = 0
 	_combat_t = 0.0
+	_target = null            # no carried-over target into the new system
+	_target_t = 0.0
 	player_hp = PLAYER_MAX_HP
 	if active:
 		for i in count:
@@ -273,6 +275,7 @@ func reset(active := false, with_boss := false, count := SWARM_COUNT) -> void:
 func update(ship: Node3D, pressed: bool, delta: float, laser := false) -> void:
 	hitmarker = maxf(hitmarker - delta, 0.0)
 	_combat_t = maxf(_combat_t - delta, 0.0)
+	_target_t = maxf(_target_t - delta, 0.0)   # the hit-target bar fades back to the boss
 	# Slow passive regen, then a fast top-up of both bars drawn from the storage reserve.
 	# Per-ship cap; both bars auto-regen toward it (weapon faster than boost).
 	e_max = float(ship.energy_max) if ship.has_method("is_hypersonic") else ENERGY_MAX
@@ -555,7 +558,7 @@ func _step_bolts(list: Array, sp: Vector3, delta: float, player: bool, muzzle :=
 					break
 		else:
 			if b.pos.distance_to(sp) < SHIP_HIT_RADIUS:
-				player_hp = maxi(player_hp - 8, 0)
+				player_hp = maxi(player_hp - 12, 0)
 				_combat_t = COMBAT_HOLD            # taking damage = in combat
 				hit = true
 		if hit or b.life <= 0.0:
@@ -593,12 +596,19 @@ func _update_trail(b: Dictionary, sp: Vector3) -> void:
 
 
 func _damage_alien(a: Dictionary, sp: Vector3, dmg := 1) -> void:
+	_target = a               # auto-aggro: the thing you hit becomes the HUD bar's target
+	_target_t = TARGET_HOLD
+	# A guardian boss is SHIELDED while its swarm lives — you must clear the minions first.
+	if a.get("guardian_boss", false) and _minions_alive() > 0:
+		return
 	a.hp -= dmg
 	if a.hp <= 0:
 		a.alive = false
 		a.respawn = a.respawn_after
 		a.node.visible = false
 		kills += 1
+		energy = e_max          # a kill refills the weapon-energy bar — reward the shot
+
 		if a.get("guardian", false):
 			zone_kills += 1     # track hostiles defeated in this star zone
 		_boom(a.pos - sp, a.size)
@@ -618,13 +628,41 @@ func _revive(a: Dictionary, sp: Vector3) -> void:
 	a.node.visible = true
 
 
-# Boss state for the HUD: returns alive/hp/max for Vortex (or alive=false).
+# The enemy you're actively hitting — the HUD bar shows ITS name/HP. Set by _damage_alien
+# (every player hit auto-aggros that target onto the bar), and held a few seconds after the
+# last hit so the bar doesn't flicker between shots.
+const TARGET_HOLD := 5.0
+var _target = null      # the alien dict the player last damaged
+var _target_t := 0.0    # seconds the target stays on the bar after the last hit
+
+
+# Living minions summoned by the guardian boss (the boss is shielded until they're gone).
+func _minions_alive() -> int:
+	var n := 0
+	for m in _aliens:
+		if m.get("minion", false) and m.alive:
+			n += 1
+	return n
+
+
+# HUD bar source: show whoever you're currently shooting (name + HP). When you're not
+# actively hitting anyone, fall back to the boss so a present boss still shows.
+func target_state() -> Dictionary:
+	if _target != null and _target.get("alive", false) and _target_t > 0.0:
+		var shielded: bool = _target.get("guardian_boss", false) and _minions_alive() > 0
+		return { "alive": true, "hp": _target.hp, "max": _target.max_hp,
+			"name": String(_target.get("name", "Hostile")), "shielded": shielded }
+	return boss_state()
+
+
+# Boss state for the HUD: returns alive/hp/max for the present boss (or alive=false).
 func boss_state() -> Dictionary:
 	for a in _aliens:
 		if a.is_boss or a.get("guardian_boss", false):
+			var shielded: bool = a.get("guardian_boss", false) and _minions_alive() > 0
 			return { "alive": a.alive, "hp": a.hp, "max": a.max_hp,
-				"name": String(a.get("boss_name", "Vortex")) }
-	return { "alive": false, "hp": 0, "max": 1, "name": "Vortex" }
+				"name": String(a.get("boss_name", "Vortex")), "shielded": shielded }
+	return { "alive": false, "hp": 0, "max": 1, "name": "Vortex", "shielded": false }
 
 
 # Monster data for a probe scan: how many hostiles are loose, total swarm size,
@@ -673,6 +711,7 @@ func set_guardians(center: Vector3, body: String, power := 1.0) -> void:
 	zone_kills = 0
 	var boss := _make_guardian_boss(center, _zone_power)
 	boss["boss_name"] = _boss_name_for(body)
+	boss["name"] = boss["boss_name"]
 	_aliens.append(boss)
 
 # Abandon the current guardian fight AND end the combat lock immediately (warp frees the same
@@ -892,6 +931,7 @@ func _make_boss() -> Dictionary:
 		"spawn_dist": BOSS_SPAWN_DIST, "is_boss": true,
 	})
 	b["boss_name"] = "Vortex"
+	b["name"] = "Vortex"
 	return b
 
 
@@ -938,9 +978,15 @@ func _make_enemy(node: Node3D, cfg: Dictionary) -> Dictionary:
 		"size": cfg.size, "speed": cfg.speed, "keep": cfg.keep,
 		"fire_every": cfg.fire_every, "respawn_after": cfg.respawn_after,
 		"spawn_dist": sd, "is_boss": cfg.is_boss,
+		"name": _enemy_name(),   # so the HUD can show WHO you're hitting (overridden for bosses)
 	}
 	node.position = a.pos
 	return a
+
+
+# A crude/savage name for an ordinary hostile (reuses the boss-name pool for flavour).
+func _enemy_name() -> String:
+	return BOSS_NAMES[randi() % BOSS_NAMES.size()]
 
 
 func _load_alien_model(size := ALIEN_SIZE) -> Node3D:

@@ -23,10 +23,10 @@ func _ready() -> void:
 
 func _input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
-		if event.keycode == KEY_C and not _open:
+		if event.keycode == KEY_L and not _open:
 			_open_panel()
 			get_viewport().set_input_as_handled()
-		elif _open and event.keycode in [KEY_C, KEY_ESCAPE]:
+		elif _open and event.keycode in [KEY_L, KEY_ESCAPE]:
 			_close()
 			get_viewport().set_input_as_handled()
 
