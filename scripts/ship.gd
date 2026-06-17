@@ -34,14 +34,33 @@ const SHIP_MODELS := [
 	# light rig so the metal reads without glowing. One engine -> one booster.
 	{ "name": "Lyra",   "path": "res://assets/lyra.obj",   "tint": Color(1.0, 1.0, 1.0),    "length": 0.7, "yaw": 180.0, "pitch": 0.0, "glow": 0.0, "engine_pitch": 1.0,  "hp": 280, "bolt_scale": 1.8, "bolt_speed": 820.0,  "fire_cd": 0.22, "dmg": 3, "bolt_laser": true, "energy_max": 130.0, "energy_use": 0.85, "warp": 71.9, "pbr": true,
 		"surf_roles": ["glass", "red", "red", "goldtrim", "goldtrim"],
+		# Hangar dye: body = the red surfaces, WING/accent = the gold-trim surfaces (canopy glass
+		# stays glass). Defaults keep her authored red-+-gold look.
+		"color_pick": true, "body_role": "red", "wing_role": "goldtrim",
+		"default_color": "burgundy", "default_wing": "champagne",
 		"light_accent": Color(1.0, 0.86, 0.84), "light_energy": 0.85 },
-	{ "name": "Stella", "path": "res://assets/Spaceship.glb",     "tint": Color(0.70, 0.62, 0.95), "length": 0.55, "yaw": 180.0, "pitch": 0.0, "glow": 0.0, "engine_pitch": 0.92, "hp": 80, "bolt_scale": 1.1, "bolt_speed": 1700.0, "fire_cd": 0.04, "dmg": 1, "energy_max": 80.0, "energy_use": 1.6, "warp": 71.9 },
+	# Stella's GLB is ONE fused mesh that reads a tiny "atlas" palette: grey/black body +
+	# two magenta accent swatches (no separate parts). swatch_split lists the model's five
+	# swatch U-centres; swatch_accent marks the two magenta ones. split_by_swatch carves the
+	# mesh into surface 0 = body, surface 1 = accent, then the color_pick/pbr path dyes them
+	# independently (BODY COLOUR + WING COLOUR swatches + metallic/glassy finish in the hangar).
+	{ "name": "Stella", "path": "res://assets/Spaceship.glb",     "tint": Color(0.70, 0.62, 0.95), "length": 0.55, "yaw": 180.0, "pitch": 0.0, "glow": 0.0, "engine_pitch": 0.92, "hp": 80, "bolt_scale": 1.1, "bolt_speed": 1700.0, "fire_cd": 0.04, "dmg": 1, "energy_max": 100.0, "energy_use": 0.5, "warp": 71.9, "pbr": true,
+		"swatch_split": [0.015, 0.045, 0.077, 0.108, 0.140], "swatch_accent": [0.015, 0.108],
+		"surf_roles": ["sbody", "saccent"], "color_pick": true, "body_role": "sbody", "wing_surfs": [1],
+		"default_color": "onyx", "default_wing": "burgundy",
+		"light_accent": Color(0.80, 0.86, 1.00), "light_energy": 0.7 },
 	{ "name": "Raptor", "path": "res://assets/Spaceship (2).glb", "tint": Color(0.70, 0.90, 0.95), "length": 0.55, "yaw": 180.0, "pitch": 0.0, "glow": 0.0, "engine_pitch": 0.82, "hp": 170, "bolt_scale": 1.15, "bolt_speed": 1050.0, "fire_cd": 0.10, "dual": true, "dmg": 2, "energy_max": 170.0, "energy_use": 0.55, "warp": 125.0 },
 	# Vela: a fast FTL ship (~29 s/ly cruise). Her drive spools up over time
 	# (see WARP_CHARGE_*), so she eases into warp rather than snapping to it.
 	# "brake": her ultimate — hold R to ease to a full stop (she's so fast that stopping
 	# at a star is otherwise brutal; the air-brake makes her usable). Squishy hull.
-	{ "name": "Vela",   "path": "res://assets/Spaceship (3).glb", "tint": Color(0.55, 0.80, 1.0),  "length": 0.55, "yaw": 180.0, "pitch": 0.0, "glow": 0.0, "energy_max": 100.0, "energy_use": 1.2, "warp": 99.1, "engine_pitch": 1.14, "brake": true, "hp": 90, "bolt_scale": 1.1, "bolt_speed": 1050.0, "fire_cd": 0.06, "dmg": 2, "raw": true },
+	# Vela's GLB has 3 surfaces: 0 = nose/antenna trim, 1 = red accent (WING), 2 = grey body (main
+	# hull). Surfaces 0 AND 2 both dye with the BODY colour (so the nose antenna recolours too,
+	# instead of staying black); surface 1 dyes with the WING/accent colour.
+	{ "name": "Vela",   "path": "res://assets/Spaceship (3).glb", "tint": Color(0.55, 0.80, 1.0),  "length": 0.55, "yaw": 180.0, "pitch": 0.0, "glow": 0.0, "energy_max": 100.0, "energy_use": 1.2, "warp": 99.1, "engine_pitch": 1.14, "brake": true, "hp": 90, "bolt_scale": 1.1, "bolt_speed": 1050.0, "fire_cd": 0.06, "dmg": 2, "pbr": true,
+		"surf_roles": ["vbody", "vred", "vbody"], "color_pick": true, "body_role": "vbody", "wing_surfs": [1],
+		"default_color": "graphite", "default_wing": "burgundy",
+		"light_accent": Color(0.72, 0.85, 1.0), "light_energy": 0.8 },
 	# HaniStar — a slow, pretty support hull that CAN fight: fires a touch faster than
 	# Lyra, hits a bit harder than Stella, 125 HP. Three light-blue boosters.
 	# surf_roles indexes the GLB's 9 surfaces: gold = shiny rose-gold (7 = wings), glass =
@@ -277,7 +296,7 @@ var auto_capture := false       # captures bodies in range automatically (no V) 
 var combat_lock := false        # set by main while in combat — no interstellar/FTL speed
 var firing := false             # set by main while holding fire — force-caps to combat speed
 var touch_fire := false         # mobile: the on-screen FIRE button (NOT the emulated mouse, which
-                                # every touch would otherwise trigger) — main reads this on touch builds
+								# every touch would otherwise trigger) — main reads this on touch builds
 var combat_ref: Node                   # set by main — owns the shared energy pools
 var _boost_starved := false            # true while boosting on an empty tank -> plume sputters
 var is_boosting := false               # true while boost is actually engaged (combat pauses boost regen)
@@ -359,6 +378,13 @@ var _booster_ring := false            # add a glowing engine-ring at the nozzle 
 var _plume_len_s := 0.6               # smoothed plume length (live flicker layered on top)
 var _plume_a_s := 0.0                 # smoothed plume alpha
 var _core_a_s := 0.0                  # smoothed core-glow alpha
+# Booster TIER (4 levels): slow-zone L1 (base) / L2 (Shift — fatter+longer, clear gap),
+# interstellar L3 (brighter/stronger) / L4 (+Shift — max). Each lever eases smoothly so
+# crossing tiers swells the plume instead of popping. See _update_boosters().
+var _tier_w_s := 1.0                  # smoothed plume WIDTH (radius) multiplier
+var _tier_len_s := 1.0                # smoothed plume LENGTH multiplier
+var _tier_bright_s := 1.0             # smoothed plume BRIGHTNESS multiplier
+var _tier_hot_s := 0.0                # smoothed hot/white shift (interstellar L3/L4)
 var _streaks: GPUParticles3D          # motion streaks at high speed
 var _streak_mat: StandardMaterial3D
 var _cam_zoom := 1.0          # target zoom (mouse wheel)
@@ -716,26 +742,64 @@ func _update_boosters(throttle: float, delta: float) -> void:
 	if _boost_starved:
 		sputter = 0.15 if fmod(t * 11.0, 1.0) < 0.45 else 1.0
 		k = 1.0   # snap, so the stutter is visible instead of smoothed away
+	# --- Booster TIER from flight state (4 levels, see _tier_* vars) ---
+	#   L1 slow-zone, no Shift      : base
+	#   L2 slow-zone + Shift        : fatter + longer (clear gap from L1)
+	#   L3 interstellar, no Shift   : brighter / stronger (hot-shifted glow)
+	#   L4 interstellar + Shift     : max — biggest + brightest
+	var interstellar := is_hypersonic()
+	var tier_w := 1.0
+	var tier_len := 1.0
+	var tier_bright := 1.0
+	var tier_hot := 0.0
+	if interstellar and is_boosting:          # L4
+		tier_w = 1.6; tier_len = 1.25; tier_bright = 1.9; tier_hot = 0.6
+	elif interstellar:                         # L3
+		tier_w = 1.4; tier_len = 1.2; tier_bright = 1.5; tier_hot = 0.4
+	elif is_boosting or boost_blocked:         # L2 (Shift in a slow-zone)
+		tier_w = 1.5; tier_len = 1.2; tier_bright = 1.18; tier_hot = 0.0
+	var ks := clampf(6.0 * delta, 0.0, 1.0)    # tiers ease a touch slower than the flicker
+	_tier_w_s = lerpf(_tier_w_s, tier_w, ks)
+	_tier_len_s = lerpf(_tier_len_s, tier_len, ks)
+	_tier_bright_s = lerpf(_tier_bright_s, tier_bright, ks)
+	_tier_hot_s = lerpf(_tier_hot_s, tier_hot, ks)
+	# Interstellar (L3/L4) may glow brighter than the cruise cap.
+	max_alpha = maxf(max_alpha, 0.6 + 0.35 * _tier_hot_s)
 	# Smooth only the throttle-driven BASE values; the flicker/shimmer are applied
 	# instantly on top so the per-frame lerp can't iron the animation flat.
 	_plume_len_s = lerpf(_plume_len_s, (0.35 + throttle * 0.7) * deploy * sputter, k)
 	_plume_a_s = lerpf(_plume_a_s, clampf((0.05 + throttle * 0.45) * (1.7 if fire else 1.0) * sputter, 0.0, max_alpha), k)
 	_core_a_s = lerpf(_core_a_s, clampf((0.12 + throttle * 0.5) * sputter, 0.0, 0.95), k)
+	var hot_col: Color = _booster_color.lerp(Color.WHITE, _tier_hot_s * 0.7)   # interstellar runs hotter/whiter
+	# Bell + ring grow WITH the plume (gentler than the plume so the nozzle stays in proportion).
+	var bell_w := 1.0 + (_tier_w_s - 1.0) * 0.7
 	for b in _boosters:
-		# Plume length stretches with throttle and flickers live; bell + ring stay fixed.
+		# Plume length stretches with throttle (× tier) and flickers live; bell + ring stay fixed.
+		# Width (x/z) is driven entirely by the tier so higher tiers read as FATTER.
 		var sc: Vector3 = b.plume_holder.scale
-		sc.y = _plume_len_s * flick
+		sc.x = _tier_w_s
+		sc.z = _tier_w_s
+		sc.y = _plume_len_s * flick * _tier_len_s
 		b.plume_holder.scale = sc
-		# Plume brightness (additive) tracks throttle and pulses with the shimmer.
+		# Plume brightness (additive) tracks throttle × tier and pulses with the shimmer;
+		# interstellar tiers also shift the colour hotter/whiter for a stronger look.
 		var pcol: Color = b.plume_mat.albedo_color
-		pcol.a = clampf(_plume_a_s * shimmer, 0.0, max_alpha)
+		pcol.r = hot_col.r; pcol.g = hot_col.g; pcol.b = hot_col.b
+		pcol.a = clampf(_plume_a_s * shimmer * _tier_bright_s, 0.0, max_alpha)
 		b.plume_mat.albedo_color = pcol
 		# Soft core glow at the nozzle — flickers with the flame so the root looks alive.
-		var cs := (0.35 + throttle * 0.7) * (1.6 if fire else 1.0) * sputter * flick
+		var cs := (0.35 + throttle * 0.7) * (1.6 if fire else 1.0) * sputter * flick * _tier_w_s
 		b.core.scale = Vector3(cs, cs, cs)
 		var ccol: Color = b.core_mat.albedo_color
-		ccol.a = clampf(_core_a_s * shimmer, 0.0, 0.95)
+		var hot_core: Color = hot_col.lerp(Color.WHITE, 0.35)
+		ccol.r = hot_core.r; ccol.g = hot_core.g; ccol.b = hot_core.b
+		ccol.a = clampf(_core_a_s * shimmer * _tier_bright_s, 0.0, 0.98)
 		b.core_mat.albedo_color = ccol
+		# Grow the metal bell + ring (fatter, matching the wider plume) — radius only.
+		if b.bell != null:
+			b.bell.scale = Vector3(bell_w, 1.0, bell_w)
+		if b.ring != null:
+			b.ring.scale = Vector3(bell_w, 1.0, bell_w)
 
 
 func _update_camera(delta: float) -> void:
@@ -904,6 +968,10 @@ func _build_ship_model(idx: int) -> void:
 	if info.get("clip_back", false):
 		var cut: float = box.size.z * float(BOOSTER_BACK_OVERRIDE.get(info.name, BOOSTER_BACK))
 		ShipMesh.clip_behind(model, _mesh_root, cut)
+	# Single-surface "atlas palette" hulls (Stella) get split into body + accent surfaces
+	# FIRST, so the color_pick path below can dye the two parts independently.
+	if not (info.get("swatch_split", []) as Array).is_empty():
+		ShipMesh.split_by_swatch(model, info.swatch_split, info.get("swatch_accent", []))
 	# Resolve per-surface roles + hull-light accent. Ships flagged "color_pick" build their
 	# roles from the player's chosen palette (body + wings independently).
 	var roles: Array = info.get("surf_roles", [])
@@ -1181,13 +1249,16 @@ func _make_booster(mount: Vector3, radius: float, length: float) -> Dictionary:
 	pivot.position = mount
 	pivot.rotation = Vector3(deg_to_rad(90.0), 0.0, 0.0)
 	_mesh_root.add_child(pivot)
+	# Hoisted so the tier system can grow the bell/ring with the plume (see _update_boosters).
+	var bell: MeshInstance3D = null
+	var ring: MeshInstance3D = null
 
 	# Rough-metallic engine bell the plume emerges from (ring ships only). Extends
 	# BACKWARD past the hull (+Y in pivot space = +Z = tail) so the nozzle reads as a
 	# real engine housing — especially the central main booster, whose nozzle would
 	# otherwise sit buried inside the hull with its ring hidden.
 	if _booster_ring:
-		var bell := MeshInstance3D.new()
+		bell = MeshInstance3D.new()
 		var bmesh := CylinderMesh.new()
 		bmesh.top_radius = radius * 1.5       # wide opening at the back
 		bmesh.bottom_radius = radius * 1.1    # narrows toward the hull
@@ -1234,7 +1305,7 @@ func _make_booster(mount: Vector3, radius: float, length: float) -> Dictionary:
 	# Optional glowing engine-ring framing the nozzle — a bit of design at the tail so
 	# the hull isn't just a bare metal blob. Hole faces back (the pivot's 90° tilt).
 	if _booster_ring:
-		var ring := MeshInstance3D.new()
+		ring = MeshInstance3D.new()
 		var torus := TorusMesh.new()
 		torus.inner_radius = radius * 1.5    # frames the bell's wide back opening
 		torus.outer_radius = radius * 1.95
@@ -1274,6 +1345,8 @@ func _make_booster(mount: Vector3, radius: float, length: float) -> Dictionary:
 		"plume_mat": plume_mat,
 		"core": core,
 		"core_mat": core_mat,
+		"bell": bell,   # may be null (ring-less hulls)
+		"ring": ring,   # may be null
 	}
 
 

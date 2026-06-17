@@ -150,6 +150,9 @@ func _ready() -> void:
 
 	# Fixed star backdrop on the world root (never rotates with the ship).
 	add_child(Starfield.new())
+	# The Milky Way as a real textured model (CC-BY, assets/galaxy.glb) placed toward the real
+	# Sgr A* direction as a glowing backdrop.
+	add_child(GalaxyModel.new())
 
 	# Player ship (visual + flight). Pinned at origin; we move the universe.
 	ship = Ship.new()

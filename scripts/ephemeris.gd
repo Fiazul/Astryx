@@ -21,7 +21,7 @@ extends Node
 # then sit millions of units away, so they render as a direction-only backdrop
 # shell (see PlanetSystem) — exactly how a real sky behaves.
 
-const AU_TO_UNITS := 100.0   # 1 unit = 0.01 AU — the system is spread ~10× wide and real
+const AU_TO_UNITS := 130.0   # 1 unit ≈ 0.0077 AU — mild bump: orbits spread ~30% wider so close planets clear the ship/star
 const STAR_SHELL_RADIUS := 30000.0   # backdrop shell (well inside cam.far) — scaled with the system
 
 # Visual radii are EXAGGERATED (a real planet is sub-pixel) — the one non-real
@@ -34,15 +34,15 @@ const PLANETS := [
 	# Bigger now, with REAL masses (Earth = 1) so gravity is mass-based: the giants and
 	# the Sun grab hard, Mercury/Mars barely tug. Radii follow real size order, gently
 	# compressed so they read as dominant without engulfing neighbours.
-	{ "name": "Earth",   "id": "399", "eq": Vector3(0, 0, 0),               "radius": 5.6,  "mass": 1.0,      "color": Color(0.20, 0.45, 1.0), "model": "res://assets/earth.glb", "glow": 0.12, "fixed": true },
+	{ "name": "Earth",   "id": "399", "eq": Vector3(0, 0, 0),               "radius": 5.6,  "mass": 1.0,      "color": Color(0.169, 0.510, 0.788), "model": "res://assets/earth.glb", "glow": 0.12, "fixed": true },
 	{ "name": "Sun",     "id": "10",  "eq": Vector3( 0.1640,  0.9194,  0.3985), "radius": 14.0, "mass": 333000.0, "color": Color(1.00, 0.85, 0.30), "star": true, "model": "res://assets/sol.obj", "glow": 2.0 },
-	{ "name": "Mercury", "id": "199", "eq": Vector3(-0.2269,  0.7801,  0.3646), "radius": 2.2,  "mass": 0.055,    "color": Color(0.70, 0.62, 0.52) },
-	{ "name": "Venus",   "id": "299", "eq": Vector3(-0.5535,  0.9404,  0.4534), "radius": 5.3,  "mass": 0.815,    "color": Color(0.95, 0.85, 0.55) },
-	{ "name": "Mars",    "id": "499", "eq": Vector3( 1.4583,  1.4672,  0.6149), "radius": 3.0,  "mass": 0.107,    "color": Color(0.90, 0.40, 0.20) },
-	{ "name": "Jupiter", "id": "599", "eq": Vector3(-2.6447,  4.9896,  2.2115), "radius": 20.0, "mass": 317.8,    "color": Color(0.85, 0.72, 0.52) },
-	{ "name": "Saturn",  "id": "699", "eq": Vector3( 9.5512,  2.1483,  0.5020), "radius": 17.0, "mass": 95.2,     "color": Color(0.88, 0.78, 0.55), "ring": true },
-	{ "name": "Uranus",  "id": "799", "eq": Vector3( 9.4808, 16.6122,  7.1397), "radius": 8.4,  "mass": 14.5,     "color": Color(0.55, 0.82, 0.88) },
-	{ "name": "Neptune", "id": "899", "eq": Vector3(30.0174,  2.1421,  0.1558), "radius": 8.0,  "mass": 17.1,     "color": Color(0.30, 0.50, 0.95) },
+	{ "name": "Mercury", "id": "199", "eq": Vector3(-0.2269,  0.7801,  0.3646), "radius": 2.2,  "mass": 0.055,    "color": Color(0.533, 0.533, 0.533) },
+	{ "name": "Venus",   "id": "299", "eq": Vector3(-0.5535,  0.9404,  0.4534), "radius": 5.3,  "mass": 0.815,    "color": Color(0.890, 0.831, 0.714) },
+	{ "name": "Mars",    "id": "499", "eq": Vector3( 1.4583,  1.4672,  0.6149), "radius": 3.0,  "mass": 0.107,    "color": Color(0.737, 0.353, 0.263) },
+	{ "name": "Jupiter", "id": "599", "eq": Vector3(-2.6447,  4.9896,  2.2115), "radius": 20.0, "mass": 317.8,    "color": Color(0.690, 0.498, 0.208) },
+	{ "name": "Saturn",  "id": "699", "eq": Vector3( 9.5512,  2.1483,  0.5020), "radius": 17.0, "mass": 95.2,     "color": Color(0.886, 0.749, 0.490), "ring": true },
+	{ "name": "Uranus",  "id": "799", "eq": Vector3( 9.4808, 16.6122,  7.1397), "radius": 8.4,  "mass": 14.5,     "color": Color(0.294, 0.439, 0.867) },
+	{ "name": "Neptune", "id": "899", "eq": Vector3(30.0174,  2.1421,  0.1558), "radius": 8.0,  "mass": 17.1,     "color": Color(0.153, 0.275, 0.529) },
 	# The Voyagers — real interstellar probes, fetched LIVE from Horizons (spacecraft
 	# IDs -31 / -32, same geocentric frame as the planets). The eq fallbacks are their
 	# approximate 2026 positions (~160 / ~136 AU out) so they appear even offline. We
@@ -58,6 +58,11 @@ const PLANETS := [
 # (true lunar distances are sub-planet-radius at this scale). orbit_speed = rad/s.
 const MOONS := [
 	{ "name": "Moon",     "parent": "Earth",   "radius": 1.6, "mass": 0.0123, "orbit_r": 16.0, "orbit_speed": 0.45, "color": Color(0.78, 0.78, 0.80) },
+	# Mars's two tiny captured-asteroid moons. Real radii are ~11 km / ~6 km — invisible at
+	# true scale, so radius is artistic (clearly smaller than the Moon). Phobos orbits faster
+	# than Mars spins (7.6 h), so it gets the higher orbit_speed; masses are real (≈0, no pull).
+	{ "name": "Phobos",   "parent": "Mars",    "radius": 0.5, "mass": 0.0000000018,  "orbit_r": 7.0,  "orbit_speed": 1.10, "color": Color(0.42, 0.40, 0.38) },
+	{ "name": "Deimos",   "parent": "Mars",    "radius": 0.35,"mass": 0.00000000025, "orbit_r": 11.0, "orbit_speed": 0.55, "color": Color(0.46, 0.44, 0.41) },
 	{ "name": "Io",       "parent": "Jupiter", "radius": 1.4, "mass": 0.015,  "orbit_r": 34.0, "orbit_speed": 0.80, "color": Color(0.95, 0.90, 0.50) },
 	{ "name": "Europa",   "parent": "Jupiter", "radius": 1.3, "mass": 0.008,  "orbit_r": 45.0, "orbit_speed": 0.62, "color": Color(0.90, 0.88, 0.82) },
 	{ "name": "Ganymede", "parent": "Jupiter", "radius": 1.8, "mass": 0.025,  "orbit_r": 57.0, "orbit_speed": 0.46, "color": Color(0.70, 0.64, 0.56) },

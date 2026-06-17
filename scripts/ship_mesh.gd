@@ -164,6 +164,67 @@ static func metal_split(root: Node3D, mesh_root: Node3D, gold_y: float) -> void:
 			mi.mesh = new_mesh
 
 
+# Split a single-surface "atlas palette" mesh (e.g. Stella's Spaceship.glb) into TWO
+# surfaces by which palette swatch each triangle samples on the texture U axis. The
+# model has no separate body parts — every face just reads a tiny colour cell — so we
+# group faces by nearest swatch-U and emit surface 0 = BODY (the rest) + surface 1 =
+# ACCENT (the swatches in `accent_us`). The two surfaces then flow through the normal
+# color_pick/pbr recolor path as independently dyeable "body" + "wing" roles.
+# Classify by NEAREST of `swatch_us` (robust to spacing) rather than a tolerance window.
+static func split_by_swatch(root: Node3D, swatch_us: Array, accent_us: Array) -> void:
+	for mi in gather_mesh_instances(root):
+		if mi.mesh == null:
+			continue
+		var orig_mat := mi.get_active_material(0)
+		var src := mi.mesh
+		var st_body := SurfaceTool.new(); st_body.begin(Mesh.PRIMITIVE_TRIANGLES)
+		var st_acc := SurfaceTool.new(); st_acc.begin(Mesh.PRIMITIVE_TRIANGLES)
+		var wrote_body := false
+		var wrote_acc := false
+		for si in src.get_surface_count():
+			var a := src.surface_get_arrays(si)
+			var verts: PackedVector3Array = a[Mesh.ARRAY_VERTEX]
+			if verts.is_empty():
+				continue
+			var norms: PackedVector3Array = a[Mesh.ARRAY_NORMAL] if a[Mesh.ARRAY_NORMAL] != null else PackedVector3Array()
+			var uvs: PackedVector2Array = a[Mesh.ARRAY_TEX_UV] if a[Mesh.ARRAY_TEX_UV] != null else PackedVector2Array()
+			var idx: PackedInt32Array = a[Mesh.ARRAY_INDEX] if a[Mesh.ARRAY_INDEX] != null else PackedInt32Array()
+			var has_n := norms.size() == verts.size()
+			var has_uv := uvs.size() == verts.size()
+			var count := idx.size() if not idx.is_empty() else verts.size()
+			var t := 0
+			while t < count - 2:
+				var i0 := idx[t] if not idx.is_empty() else t
+				var i1 := idx[t + 1] if not idx.is_empty() else t + 1
+				var i2 := idx[t + 2] if not idx.is_empty() else t + 2
+				# Centroid U → nearest known swatch → accent group or not.
+				var cu := (uvs[i0].x + uvs[i1].x + uvs[i2].x) / 3.0 if has_uv else 0.0
+				var nearest: float = swatch_us[0]
+				for s in swatch_us:
+					if absf(float(s) - cu) < absf(nearest - cu):
+						nearest = float(s)
+				var is_acc := accent_us.has(nearest)
+				var st: SurfaceTool = st_acc if is_acc else st_body
+				for ii in [i0, i1, i2]:
+					if has_n: st.set_normal(norms[ii])
+					if has_uv: st.set_uv(uvs[ii])
+					st.add_vertex(verts[ii])
+				if is_acc: wrote_acc = true
+				else: wrote_body = true
+				t += 3
+		# recolor() overrides these per-surface, but keep the atlas material so any
+		# non-recolor path still renders textured. Body first (surface 0), accent second.
+		var new_mesh := ArrayMesh.new()
+		if wrote_body:
+			if orig_mat: st_body.set_material(orig_mat.duplicate())
+			st_body.commit(new_mesh)
+		if wrote_acc:
+			if orig_mat: st_acc.set_material(orig_mat.duplicate())
+			st_acc.commit(new_mesh)
+		if new_mesh.get_surface_count() > 0:
+			mi.mesh = new_mesh
+
+
 # --- Materials -------------------------------------------------------------
 
 # Glassy finish: REAL see-through tinted glass — the body colour as a translucent,

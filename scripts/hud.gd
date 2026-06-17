@@ -7,8 +7,8 @@ extends Node3D
 # Layout is authored against the 1280x720 reference (project stretch = canvas_items),
 # so it scales to fullscreen. refresh() is called by main.gd each frame.
 
-# Scale conversions for the readouts. 1 unit = 0.01 AU (see ephemeris.gd, AU_TO_UNITS=100).
-const AU_PER_UNIT := 0.01
+# Scale conversions for the readouts. Must match ephemeris.gd AU_TO_UNITS (130 → 1u ≈ 0.00769 AU).
+const AU_PER_UNIT := 1.0 / 130.0
 const LY_PER_AU := 1.0 / 63241.077
 
 # --- palette -----------------------------------------------------------------

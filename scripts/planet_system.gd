@@ -23,6 +23,16 @@ const STAR_ZONE_MULT := 120.0    # star slow-zone radius = star radius × this (
 const STAR_EDGE_SPEED := 64.0    # speed cap at a STAR's zone edge — lower than planets, so you
                                  # notice the drag the moment you enter a star's range
 const PLANET_ZONE_MULT := 45.0   # planet/moon slow-zone radius = radius × this
+# VISUAL size boost: planets/moons (and their moon-orbit spacing + LOD + capture range) are
+# rendered this much bigger so they read as substantial worlds, not specks dwarfed by the ship.
+# Heliocentric DISTANCES (real JPL positions) and gravity/slow-zones are NOT scaled — only the
+# look. Relative geometry is preserved (moons scale with their parent, so they stay outside it).
+const VISUAL_SCALE := 2.7   # mild bump: bodies a touch bigger so Mercury isn't dwarfed by the ship (stars stay unscaled)
+# Visual orbital revolution: planets circle the Sun for life (they START at their real JPL
+# position, then drift). Kepler-ordered: inner planets visibly orbit, outer ones crawl.
+# Speeds are accelerated (real motion is invisible over a play session). Sun + Earth stay put.
+const ORBIT_ENABLED := true
+const ORBIT_K := 16.0      # bigger = faster orbits (angular speed = ORBIT_K / r^1.5)
 # NOTE units: 1u = 0.01 AU, so 100 u/s = 1 AU/s. These are deliberately LOW so flight
 # near Sol/any body is a slow crawl (fractions of an AU per second), never "a few AU
 # per press". You only get warp-fast out in the deep, beyond every zone.
@@ -170,18 +180,37 @@ func _build_planet(p: Dictionary) -> void:
 	if model == null:
 		sphere = MeshInstance3D.new()
 		var mesh := SphereMesh.new()
-		mesh.radius = p.radius
-		mesh.height = p.radius * 2.0
+		# Stars are NOT enlarged (already huge — scaling them swallowed close planets);
+		# only planets/moons get the visual boost.
+		var vis: float = 1.0 if is_star else VISUAL_SCALE
+		mesh.radius = p.radius * vis
+		mesh.height = p.radius * 2.0 * vis
 		mesh.radial_segments = 24
 		mesh.rings = 12
 		sphere.mesh = mesh
 		mat = StandardMaterial3D.new()
-		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED if is_star else BaseMaterial3D.SHADING_MODE_PER_PIXEL
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA   # alpha is animated for the far->near LOD fade
+		# Write depth even though transparent, so the ring's far half is properly occluded by
+		# the planet (no more per-frame sort flip / flicker between ring and body).
+		mat.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_ALWAYS
 		mat.emission_enabled = true
+		# Albedo RGB = the body's real colour; alpha starts 0 and is ramped up by the
+		# LOD crossfade in refresh(). (Same alpha-fade for stars and planets.)
 		mat.albedo_color = Color(p.color.r, p.color.g, p.color.b, 0.0)
-		mat.emission = p.color
-		mat.emission_energy_multiplier = 2.5 if is_star else 1.1
+		if is_star:
+			# A star is its own light source — stays fully self-lit.
+			mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+			mat.emission = p.color
+			mat.emission_energy_multiplier = 2.5
+		else:
+			# A real planet REFLECTS the Sun — matte surface lit by the Sun key light, so it
+			# shows a day/night terminator instead of glowing as a flat disc. Only a faint
+			# emission floor so the night side isn't pure black.
+			mat.shading_mode = BaseMaterial3D.SHADING_MODE_PER_PIXEL
+			mat.metallic = 0.0
+			mat.roughness = 0.92
+			mat.emission = p.color
+			mat.emission_energy_multiplier = 0.05
 		sphere.material_override = mat
 		sphere.visible = false
 		add_child(sphere)
@@ -191,11 +220,12 @@ func _build_planet(p: Dictionary) -> void:
 	var ring: MeshInstance3D = null
 	if p.get("ring", false):
 		ring = MeshInstance3D.new()
-		ring.mesh = _make_ring_mesh(float(p.radius) * 1.28, float(p.radius) * 2.35, 72)
+		ring.mesh = _make_ring_mesh(float(p.radius) * 1.28 * VISUAL_SCALE, float(p.radius) * 2.35 * VISUAL_SCALE, 72)
 		var rmat := StandardMaterial3D.new()
 		rmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		rmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 		rmat.cull_mode = BaseMaterial3D.CULL_DISABLED      # visible from both faces
+		rmat.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_ALWAYS   # depth-write -> ring & planet occlude correctly (no flicker)
 		rmat.albedo_color = Color(0.86, 0.79, 0.60, 0.6)   # pale tan, semi-transparent
 		ring.material_override = rmat
 		ring.rotation = Vector3(deg_to_rad(26.7), 0.0, deg_to_rad(7.0))   # Saturn's tilt
@@ -233,7 +263,10 @@ func _build_planet(p: Dictionary) -> void:
 		"parent": p.get("parent", ""),        # non-empty => a moon orbiting that body
 		"orbit_r": float(p.get("orbit_r", 0.0)),
 		"orbit_speed": float(p.get("orbit_speed", 0.0)),
-		"orbit_a": randf() * TAU,             # current orbital phase
+		"fixed": p.get("fixed", false),       # Earth: stays put (geocentric origin), no sun-orbit
+		# Moons get a random start phase (spread them); planets start at 0 so they begin at
+		# their real JPL position, then revolve.
+		"orbit_a": (randf() * TAU if String(p.get("parent", "")) != "" else 0.0),
 		"dot": dot, "sphere": sphere, "mat": mat, "model": model, "label": label,
 		"ring": ring,
 		"spin": randf_range(0.05, 0.2),
@@ -276,7 +309,9 @@ func _make_glb_body(p: Dictionary) -> Node3D:
 	var holder := Node3D.new()
 	add_child(holder)
 	holder.add_child(inst)
-	_fit(holder, inst, float(p.radius) * 2.0)   # longest axis == diameter
+	# Stars keep their real size; only planets/moons are visually enlarged.
+	var vis: float = 1.0 if p.get("star", false) else VISUAL_SCALE
+	_fit(holder, inst, float(p.radius) * 2.0 * vis)   # longest axis == diameter
 	_self_light(inst, p.color, float(p.get("glow", 1.0)), p.get("star", false))
 	holder.visible = false
 	return holder
@@ -338,8 +373,14 @@ func refresh(ship_pos: Vector3, delta: float) -> void:
 	star_dist = INF
 	nearest_radius = 1.0
 
+	# Render positions computed THIS frame, by name. Moons read their parent from here so
+	# they track the planet's visually-revolved position, not its raw Horizons spot (planets
+	# are built before moons in _sol(), so a parent is always present by the time a moon needs
+	# it). Without this, fast inner planets (Mars) drift off and their moons orbit empty space.
+	var frame_pos := {}
 	for b in _bodies:
 		var rad: float = b.radius
+		var vrad: float = rad * (1.0 if b.star else VISUAL_SCALE)   # rendered radius (stars unscaled); for visuals/LOD/capture, NOT gravity
 		# Moons orbit their (live) parent; Sol bodies read live Horizons positions; others static.
 		var bpos: Vector3
 		if b.get("craft", false):
@@ -348,12 +389,26 @@ func refresh(ship_pos: Vector3, delta: float) -> void:
 		elif b.parent != "":
 			b.orbit_a += float(b.orbit_speed) * delta
 			var oa: float = b.orbit_a
-			var off: Vector3 = Vector3(cos(oa), 0.18 * sin(oa * 0.5), sin(oa)) * float(b.orbit_r)
-			bpos = eph.scene_pos(b.parent) + off
+			var off: Vector3 = Vector3(cos(oa), 0.18 * sin(oa * 0.5), sin(oa)) * float(b.orbit_r) * VISUAL_SCALE
+			# Follow the parent's revolved render position (this frame), falling back to its raw
+			# Horizons spot if for some reason it wasn't computed yet.
+			bpos = frame_pos.get(b.parent, eph.scene_pos(b.parent)) + off
 		elif b.live:
 			bpos = eph.scene_pos(b.name)
+			# Visual revolution around the Sun (planets only). Advance the phase and rotate the
+			# real heliocentric vector about the ecliptic-ish up axis.
+			if ORBIT_ENABLED and not b.star and not b.fixed:
+				var sunp: Vector3 = eph.scene_pos("Sun")
+				var h: Vector3 = bpos - sunp
+				var r := h.length()
+				if r > 0.01:
+					b.orbit_a += (ORBIT_K / pow(r, 1.5)) * delta
+					bpos = sunp + h.rotated(Vector3.UP, b.orbit_a)
 		else:
-			bpos = b.pos
+			# Authored systems: spread the static planet layout by the same factor the planets
+			# grew, so bigger bodies don't end up inside their (unscaled) star. Star sits at origin.
+			bpos = b.pos * (1.0 if b.star else VISUAL_SCALE)
+		frame_pos[b.name] = bpos   # parents are computed before their moons (see _sol order)
 		var rel: Vector3 = bpos - ship_pos  # floating origin
 		var dist := rel.length()
 
@@ -370,19 +425,19 @@ func refresh(ship_pos: Vector3, delta: float) -> void:
 			speed_limit = minf(speed_limit, lerpf(_slow_min(float(b.mass)), edge, zt))
 
 		b.dot.position = rel
-		b.label.position = rel + Vector3(0.0, rad * 1.5 + 0.5, 0.0)
+		b.label.position = rel + Vector3(0.0, vrad * 1.5 + 0.5, 0.0)
 		_rel[b.name] = rel        # for the navigator (render-space position)
 
 		if dist < nearest_dist:
 			nearest_dist = dist
 			nearest_name = b.name
-			nearest_radius = rad
+			nearest_radius = vrad
 		if b.get("star", false) and dist < star_dist:
 			star_dist = dist   # how far we are from this system's sun (FTL gate)
 
-		# crossfade: dot (far) -> body (near), scaled to body size
-		var far_d := rad * 70.0
-		var near_d := rad * 18.0
+		# crossfade: dot (far) -> body (near), scaled to the RENDERED body size
+		var far_d := vrad * 70.0
+		var near_d := vrad * 18.0
 		var frac := clampf((dist - near_d) / maxf(far_d - near_d, 0.001), 0.0, 1.0)
 		var sphere_a := 1.0 - frac
 
@@ -419,7 +474,7 @@ func refresh(ship_pos: Vector3, delta: float) -> void:
 			b.dot.modulate = dc
 			b.dot.pixel_size = clampf(dist * 0.0008, 0.02, 2.0)
 
-		var label_range := maxf(rad * 130.0, 500.0)
+		var label_range := maxf(vrad * 130.0, 500.0)
 		var la := clampf((label_range - dist) / (label_range * 0.3), 0.0, 1.0)
 		b.label.visible = la > 0.02
 		if b.label.visible:
@@ -491,16 +546,23 @@ func gravity_at(pos: Vector3) -> Vector3:
 	var g := Vector3.ZERO
 	if not GRAVITY_ENABLED:
 		return g
+	var frame_pos := {}   # parent render positions this call (planets precede moons in _sol)
 	for b in _bodies:
 		var bpos: Vector3
 		if b.parent != "":
 			var oa: float = b.orbit_a
-			var off: Vector3 = Vector3(cos(oa), 0.18 * sin(oa * 0.5), sin(oa)) * float(b.orbit_r)
-			bpos = eph.scene_pos(b.parent) + off
+			var off: Vector3 = Vector3(cos(oa), 0.18 * sin(oa * 0.5), sin(oa)) * float(b.orbit_r) * VISUAL_SCALE
+			bpos = frame_pos.get(b.parent, eph.scene_pos(b.parent)) + off
 		elif b.live:
 			bpos = eph.scene_pos(b.name)
+			if ORBIT_ENABLED and not b.star and not b.fixed:
+				var sunp: Vector3 = eph.scene_pos("Sun")
+				var h: Vector3 = bpos - sunp
+				if h.length() > 0.01:
+					bpos = sunp + h.rotated(Vector3.UP, b.orbit_a)   # read-only (refresh advances the phase)
 		else:
-			bpos = b.pos
+			bpos = b.pos * (1.0 if b.star else VISUAL_SCALE)   # match refresh's authored-system spread
+		frame_pos[b.name] = bpos
 		var rel: Vector3 = bpos - pos
 		var d := rel.length()
 		if d > 0.001 and d < float(b.radius) * GRAVITY_RANGE_MULT:

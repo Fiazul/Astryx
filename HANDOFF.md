@@ -1,13 +1,29 @@
-# Astryx — Session Handoff (v0.11.3 · current)
+# Astryx — Session Handoff (v0.11.4 · current)
 
 > Pick-up doc for the next session. Project: `/home/fiazul/Desktop/Astryx`
 > Godot 4.6.2 / GDScript · repo `git@github.com:Fiazul/Astryx.git` (main).
 > The game is **all code-spawned** — `Main.tscn` is a one-node stub; `main.gd` builds the
 > world, ship, camera, lights, and UI at runtime.
-> ✅ **Everything through v0.11.3 is committed + pushed** to `main`.
+> ✅ **Everything through v0.11.4 is committed + pushed** to `main`.
 > ~12k lines of GDScript · ~35 modules · 7 ships · ~50 real star systems · Android APK + CI.
 
-## What changed in v0.11.1 → v0.11.3 (latest)
+## What changed in v0.11.4 (latest)
+
+- **Realistic star field** — background sky is now a **baked real-catalogue points-mesh**
+  (`scripts/starfield.gd` + `tools/build_starfield.gd`): default **Tycho-2, 355,360 real
+  stars** (mag ≤ 10), real sky positions, real B-V→RGB colour, magnitude-driven size/glow.
+  Tiers `tycho` / `high` / `low`. Full report: [`STARFIELD.md`](STARFIELD.md).
+- **The galactic core** — the Milky Way is now visible as a textured **galaxy backdrop**
+  (`scripts/galaxy_model.gd`, `assets/galaxy.glb`, CC-BY): placed toward the **real Sgr A\***
+  direction, laid edge-on in the real galactic plane, additive glow + a radial-fade disc
+  shader (no hard polygon edge), no occlusion of the starfield. Backdrop only — not a
+  destination (~26k ly is past float32's reach). See [`STARFIELD.md`](STARFIELD.md).
+- **Mars's moons** — added **Phobos & Deimos** (`ephemeris.gd`) with codex fact-sheets
+  (`planet_data.gd`) and missions (`missions.gd`); fixed a **moon-detachment bug** where
+  moons orbited their parent's raw Horizons position instead of its revolved scene position
+  (`planet_system.gd` `frame_pos` cache, in both `refresh()` and `gravity_at()`).
+
+## What changed in v0.11.1 → v0.11.3
 
 - **v0.11.1** — dark, dramatic **wormhole transit visual** (the *style* pass promised in the
   v0.11.0 next-plan: ship holds facing the portal, slight shake, dark + cinematic).
