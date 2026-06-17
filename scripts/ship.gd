@@ -407,13 +407,14 @@ func fly(delta: float) -> void:
 		_look_yaw = 0.0
 		_look_pitch = 0.0
 		# Face the nose INTO the tunnel (the tunnel renders ahead at local -Z). Flip 180°
-		# so the ship dives forward instead of riding through tail-first. A subtle roll +
-		# wobble keeps it alive under the camera shake. (Reset to 0 on the normal path.)
+		# so the ship dives forward instead of riding through tail-first. The hull holds
+		# STABLE facing the portal — only a faint breathing roll/pitch so it isn't dead
+		# (yaw stays exactly PI so the nose points dead-on). (Reset to 0 on normal path.)
 		var wob := Time.get_ticks_msec() * 0.001
 		_mesh_root.rotation = Vector3(
-			sin(wob * 2.3) * 0.06, PI + sin(wob * 1.7) * 0.05, sin(wob * 3.1) * 0.10)
-		_update_boosters(1.0, delta)
-		_update_streaks(MAX_SPEED)   # full streaks during wormhole transit
+			sin(wob * 0.7) * 0.012, PI, sin(wob * 0.5) * 0.018)
+		_update_boosters(0.4, delta)            # engines low — calm, not hypersonic
+		_update_streaks(SUBLIGHT_MAX * 0.7)     # restrained streaks — dark, not warp-busy
 		_update_camera(delta)
 		if audio:
 			audio.engine_off()   # silent in the wormhole
@@ -706,17 +707,17 @@ func _update_camera(delta: float) -> void:
 	_look_pitch_s = lerpf(_look_pitch_s, _look_pitch, lk)
 	var basis := _cam_basis * (Basis(Vector3.UP, _look_yaw_s) * Basis(Vector3.RIGHT, _look_pitch_s))
 	var cam_pos := basis * (CAM_OFFSET * _cam_zoom_smooth)  # ship at origin -> global
-	# Wormhole transit: violent hand-held shake (position jitter + camera roll/pitch buffeting)
-	# and a wide FOV punch → the tunnel feels hypersonic and stormy, not static.
+	# Wormhole transit: only a SLIGHT, slow buffet (gentle position drift + a touch of
+	# roll/pitch) and a restrained FOV lean → the dive feels tense and dark, not stormy.
 	if transiting:
 		var t := Time.get_ticks_msec() * 0.001
-		var pj := 0.22
-		cam_pos += basis * Vector3(sin(t * 53.0) * pj, cos(t * 61.0) * pj, sin(t * 71.0) * pj * 0.5)
-		var jr := 0.016
+		var pj := 0.05
+		cam_pos += basis * Vector3(sin(t * 7.0) * pj, cos(t * 9.0) * pj, sin(t * 11.0) * pj * 0.5)
+		var jr := 0.004
 		basis = basis * Basis.from_euler(Vector3(
-			sin(t * 47.0) * jr, cos(t * 41.0) * jr, sin(t * 67.0) * jr * 2.2))
+			sin(t * 5.0) * jr, cos(t * 6.0) * jr, sin(t * 8.0) * jr * 2.0))
 		camera.global_transform = Transform3D(basis, cam_pos)
-		camera.fov = lerpf(camera.fov, FOV_BASE + FOV_KICK * 1.7, clampf(6.0 * delta, 0.0, 1.0))
+		camera.fov = lerpf(camera.fov, FOV_BASE + FOV_KICK * 0.8, clampf(3.0 * delta, 0.0, 1.0))
 		return
 	camera.global_transform = Transform3D(basis, cam_pos)
 	# Clamp the fraction so warp speeds don't blow the FOV out into a fisheye.

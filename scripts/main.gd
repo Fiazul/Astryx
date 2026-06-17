@@ -113,8 +113,8 @@ const TELEPORT_PLATFORM_TIME := 8.0   # platform-network jump
 const TELEPORT_SFX_DB := -5.0   # peak volume of the whoosh at the middle of its fade bell
 const TELEPORT_ZOOM := 3.0      # pull the camera BACK so it views the light-ball from OUTSIDE
 const TP_ORB_BASE := 1.6        # base radius of the light-ball wrapping the ship (must stay
-                                # well under the camera distance ≈ 1.05 × TELEPORT_ZOOM, or the
-                                # camera ends up inside the additive shell and the screen goes white)
+								# well under the camera distance ≈ 1.05 × TELEPORT_ZOOM, or the
+								# camera ends up inside the additive shell and the screen goes white)
 var _tp_active := false
 var _tp_t := 0.0
 var _tp_dur := TELEPORT_TIME

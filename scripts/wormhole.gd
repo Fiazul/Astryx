@@ -253,17 +253,18 @@ func transit_remaining() -> float:
 func update(ship_pos: Vector3, delta: float) -> bool:
 	if transiting:
 		_t += delta
-		# Rings rush past hard and accelerate over the dive; the whole tube swirls and the
-		# colour storms through a cold→violet→white-hot band for a hypersonic, stormy feel.
-		var rush: float = 9.0 + 6.0 * sin(_t * 1.3)             # surging, not constant
+		# Rings glide past at a measured pace and the tube swirls slowly — dark + ominous,
+		# not a hypersonic storm. The glow pulses for drama but stays restrained; the colour
+		# drifts through a deep cold-blue → violet band (low value so it reads dark).
+		var rush: float = 5.0 + 2.0 * sin(_t * 0.9)            # measured glide, not a surge
 		_tunnel_mat.uv1_offset += Vector3(0.0, -rush * delta, 0.0)
-		_tunnel.rotate_object_local(Vector3.UP, 1.4 * delta)   # swirl around the tube axis
-		var storm: float = 0.6 + 0.4 * sin(_t * 9.0) + 0.2 * sin(_t * 23.0)
-		_tunnel_mat.emission_energy_multiplier = 3.2 * storm
-		var hue: float = fmod(0.62 + _t * 0.15, 1.0)           # drift cold-blue → violet
-		var col := Color.from_hsv(hue, 0.55, 1.0)
+		_tunnel.rotate_object_local(Vector3.UP, 0.6 * delta)   # slow swirl around the axis
+		var storm: float = 0.75 + 0.25 * sin(_t * 4.0)         # gentle, slow pulse
+		_tunnel_mat.emission_energy_multiplier = 1.8 * storm
+		var hue: float = fmod(0.64 + _t * 0.07, 1.0)           # slow drift cold-blue → violet
+		var col := Color.from_hsv(hue, 0.7, 0.75)              # deep, low-value -> dark
 		_tunnel_mat.emission = col
-		var s: float = 1.0 + 0.08 * sin(_t * 11.0)             # tube breathes/buffets
+		var s: float = 1.0 + 0.03 * sin(_t * 5.0)              # subtle breathe only
 		_tunnel.scale = Vector3(s, 1.0, s)
 		if _t >= _duration:
 			transiting = false
@@ -484,10 +485,13 @@ func _build_tunnel() -> void:
 	_tunnel_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_tunnel_mat.cull_mode = BaseMaterial3D.CULL_DISABLED      # we view it from inside
 	_tunnel_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	_tunnel_mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	# ALPHA (not ADD): additive can only brighten the starfield — it can't read "dark".
+	# Alpha-blended near-black walls ENCLOSE the ship in a dark tube; the emissive rings
+	# punch through against it for the dramatic contrast.
+	_tunnel_mat.blend_mode = BaseMaterial3D.BLEND_MODE_MIX
 	_tunnel_mat.emission_enabled = true
-	_tunnel_mat.emission = Color(0.6, 0.5, 1.0)
-	_tunnel_mat.emission_energy_multiplier = 2.0
+	_tunnel_mat.emission = Color(0.35, 0.28, 0.7)
+	_tunnel_mat.emission_energy_multiplier = 1.6
 	_tunnel_mat.albedo_texture = _make_tunnel_texture()
 	_tunnel_mat.emission_texture = _tunnel_mat.albedo_texture
 	_tunnel_mat.uv1_scale = Vector3(6.0, 12.0, 1.0)          # repeat rings down the tube
@@ -496,14 +500,20 @@ func _build_tunnel() -> void:
 	ship.add_child(_tunnel)
 
 
-# Bright rings on a dark band that scroll past — a cheap "wormhole" wall.
+# Sharp glowing rings on near-black walls that scroll past — a dark "wormhole" wall.
+# Walls are dark + fairly opaque so the alpha-blended tube ENCLOSES the ship; the rings
+# are sharp (high power) for punchy contrast so "dark" never reads as flat/dull.
 func _make_tunnel_texture() -> Texture2D:
 	var h := 64
 	var img := Image.create(4, h, false, Image.FORMAT_RGBA8)
 	for y in h:
 		var v := float(y) / float(h)
-		var band := pow(0.5 + 0.5 * sin(v * TAU * 3.0), 4.0)   # periodic bright rings
-		var c := Color(0.6 + 0.4 * band, 0.5 + 0.3 * band, 1.0, 0.15 + 0.85 * band)
+		var band := pow(0.5 + 0.5 * sin(v * TAU * 3.0), 7.0)   # sharper -> punchier rings
+		var c := Color(
+			0.02 + 0.55 * band,        # near-black walls, electric-violet rings
+			0.015 + 0.35 * band,
+			0.06 + 0.95 * band,
+			0.55 + 0.45 * band)        # walls fairly opaque -> dark enclosure
 		for x in 4:
 			img.set_pixel(x, y, c)
 	return ImageTexture.create_from_image(img)
