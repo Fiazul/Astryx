@@ -9,9 +9,24 @@ The **3D ship & prop models** are free assets, sourced mainly from:
 - **Poly Pizza** — https://poly.pizza/
 - **Free3D** — https://free3d.com/
 
+**Vela Iron Pulse** ship (`assets/jl_7_low.glb`):
+
+- *"jl 7 low"* (https://skfb.ly/oJBFS) by **ztrztr**, licensed under
+  **Creative Commons Attribution 4.0** (http://creativecommons.org/licenses/by/4.0/).
+
 **Galaxy model** (`assets/galaxy.glb`):
 
 - *"Galaxy"* (https://skfb.ly/6xEsD) by **991519166**, licensed under
+  **Creative Commons Attribution 4.0** (http://creativecommons.org/licenses/by/4.0/).
+
+**Black hole** (`assets/blackhole_skyball.glb`) — Sagittarius A\* at the galactic core:
+
+- *"blackhole skyball"* (https://skfb.ly/oPrGD) by **CatLoveCheese**, licensed under
+  **Creative Commons Attribution 4.0** (http://creativecommons.org/licenses/by/4.0/).
+
+Earlier black-hole model (`assets/blackhole.glb`, no longer used):
+
+- *"Blackhole"* (https://skfb.ly/owKUR) by **shikoooooooo**, licensed under
   **Creative Commons Attribution 4.0** (http://creativecommons.org/licenses/by/4.0/).
 
 > Note: honestly, I grabbed these models at like 5 a.m. half-asleep and didn't write

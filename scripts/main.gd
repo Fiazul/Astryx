@@ -13,6 +13,7 @@ extends Node3D
 # motion first, then the planet system reads the fresh true_pos, then the HUD.
 
 var ship: Ship
+var galaxy: GalaxyModel              # the Milky Way backdrop; loomed toward the core on the voyage
 var planets: PlanetSystem
 var props: Props
 var hud: HUD
@@ -121,6 +122,16 @@ const TP_ORB_BASE := 1.6        # base radius of the light-ball wrapping the shi
 								# well under the camera distance ≈ 1.05 × TELEPORT_ZOOM, or the
 								# camera ends up inside the additive shell and the screen goes white)
 var _tp_active := false
+# Galactic-core death hazard (Vela Iron Pulse voyage only). The core is a one-way grave: cross
+# into it and gravitational shear shreds the hull, then the failsafe drive hurls you home.
+const CORE_DANGER_LY := 600.0   # inside this distance the core turns lethal (warnings + damage)
+const CORE_KILL_LY := 150.0     # the hole CAPTURES you here — you never get deeper; it takes you
+const CORE_MAX_DPS := 90.0      # hull damage/sec at the kill line (ramps from 0 at the danger edge)
+const CORE_PULL_GRAB := 2.6     # how hard Sgr A* redirects your heading inward (per sec × depth)
+const CORE_MIN_PULL := 6_000_000.0  # min inward reel-in speed (u/s) at full depth — no escaping
+var _core_dmg_accum := 0.0      # fractional hull damage carried between frames (player_hp is int)
+var _core_dying := false        # true during the death kick, so the hazard doesn't re-fire mid-ritual
+var _core_warned := false       # true while the danger overlay is up, so we clear it once on exit
 var _tp_t := 0.0
 var _tp_dur := TELEPORT_TIME
 var _tp_dest := ""
@@ -141,6 +152,11 @@ const MUSIC_FADE := 1.2    # fade speed (per second) for the gentle in/out
 # you open looking at Earth up close with the Sun a bright disc in the distance
 # beyond it (~13u). (Sun direction in scene ≈ (0.16, 0.39, 0.91).)
 const START_POS := Vector3(-0.81, -1.97, -4.53)
+# Largest sane true_pos magnitude (units). In-system play keeps true_pos to ~1e5 units at most
+# (it resets to a small local coord on every arrival), and the galactic drive no longer moves it.
+# ~1e10 (≈1200 ly) is far above anything legitimate yet far below a corrupt ~8.7e11; a saved
+# position beyond it is discarded on load. See _restore_location.
+const MAX_SANE_POS := 1.0e10
 
 
 func _ready() -> void:
@@ -151,8 +167,10 @@ func _ready() -> void:
 	# Fixed star backdrop on the world root (never rotates with the ship).
 	add_child(Starfield.new())
 	# The Milky Way as a real textured model (CC-BY, assets/galaxy.glb) placed toward the real
-	# Sgr A* direction as a glowing backdrop.
-	add_child(GalaxyModel.new())
+	# Sgr A* direction as a glowing backdrop. Stored so _process can loom it in toward the core
+	# as the Vela Iron Pulse flies the galactic drive (see the galactic-drive block below).
+	galaxy = GalaxyModel.new()
+	add_child(galaxy)
 
 	# Player ship (visual + flight). Pinned at origin; we move the universe.
 	ship = Ship.new()
@@ -358,6 +376,12 @@ func _ready() -> void:
 func _restore_location() -> void:
 	if _saved_system != "" and _saved_system != current_system:
 		_arrive(_saved_system)
+	# Guard against a corrupt save (the old galactic-drive bug could leave an astronomical
+	# coordinate, ~8.7e11 units). true_pos is ALWAYS a small local coord by design, so anything
+	# this enormous is garbage — drop it and keep the arrival/START position instead of restoring
+	# nonsense (which would re-show the piled-up "From Earth" number and look unfixed).
+	if _has_saved_pos and _saved_pos.length() > MAX_SANE_POS:
+		_has_saved_pos = false
 	if _has_saved_pos and _saved_pos.length() > 0.001:
 		ship.true_pos = _saved_pos
 		ship.face_toward(-_saved_pos)
@@ -385,6 +409,15 @@ func _process(delta: float) -> void:
 	ship.nearest_dist = planets.nearest_dist # warp ships ease out of warp on arrival
 	ship.star_field_dist = planets.star_dist # FTL only unlocks beyond the star's gravity field
 	ship.gravity = planets.gravity           # gentle pull toward bodies
+	# Galactic drive: feed the Iron Pulse's live core-distance scanner, and loom the Milky Way in
+	# at the fixed voyage pace scaled by how directly she's flying coreward (galactic_loom_rate is
+	# signed: toward Sgr A* approaches, flying back out recedes). This is DECOUPLED from her real
+	# velocity, so the ~26,000 ly haul is a bounded illusion that never balloons true_pos.
+	if ship.has_galactic_drive:
+		ship.core_total_ly = galaxy.total()
+		ship.core_dist_ly = galaxy.remaining()
+		galaxy.advance_ly(ship.galactic_loom_rate() * delta)
+		_update_core_hazard(galaxy.remaining(), delta)
 	props.update(ship.true_pos, delta)
 	# Harbour speed-cap: ease down near stations/probes AND near wormholes (so you can line
 	# up and dive in instead of rocketing past) — whichever zone is slowing you most wins.
@@ -1433,6 +1466,7 @@ func cancel_teleport() -> void:
 	if not _tp_active:
 		return
 	_tp_active = false
+	_core_dying = false              # if this was the core's death kick, aborting just lets it re-grab you
 	if _tp_ring != null:
 		_tp_ring.visible = false
 	hud.tp_cancel_button.visible = false
@@ -1521,9 +1555,58 @@ func _build_teleport_vfx() -> void:
 	ship.add_child(_tp_ring)
 
 
+# The galactic core as a lethal dead-end. Inside CORE_DANGER_LY the hull takes escalating
+# gravitational-shear damage AND Sgr A*'s gravity drags you inward (you can fight it at the edge,
+# but the deeper you go the more it overpowers your drive). It CAPTURES you at CORE_KILL_LY —
+# while it still fills your view, before you ever reach the deep cloud — and the failsafe drive
+# hurls you home, hull wrecked. Only runs on the Iron Pulse voyage (nothing else gets this close).
+func _update_core_hazard(rem: float, delta: float) -> void:
+	if _core_dying or _tp_active or ship.transiting:
+		return
+	if rem >= CORE_DANGER_LY:
+		if _core_warned:                 # just fled the danger zone → clear the overlay once
+			hud.set_menu("")
+			_core_warned = false
+			_core_dmg_accum = 0.0
+		return
+	# 0 at the danger edge → 1 at the kill/capture line.
+	var depth := clampf((CORE_DANGER_LY - rem) / (CORE_DANGER_LY - CORE_KILL_LY), 0.0, 1.0)
+	_core_warned = true
+	hud.set_menu("⚠   SAGITTARIUS A*   ⚠\nEVENT HORIZON   ·   %d ly\nIT HAS YOU — THE CORE DOES NOT FORGIVE" % int(rem))
+	hud.flash(0.18 + 0.55 * depth)       # rising red pulse the deeper you push
+	# Gravitational pull: redirect the ship inward and reel it in, harder the deeper you are.
+	# At the edge it's a tug you can still escape; near the line it overpowers your drive entirely
+	# — the hole takes you, you don't choose to dive. This is what kills you before the deep cloud.
+	var dir_in := GalaxyModel.DIR.normalized()
+	var target_v := dir_in * maxf(ship.velocity.length(), CORE_MIN_PULL * depth)
+	ship.velocity = ship.velocity.lerp(target_v, clampf(CORE_PULL_GRAB * depth * delta, 0.0, 1.0))
+	# Hull shred ramps with depth (player_hp is int, so carry the fraction between frames).
+	_core_dmg_accum += CORE_MAX_DPS * depth * delta
+	var dmg := int(_core_dmg_accum)
+	if dmg > 0:
+		_core_dmg_accum -= dmg
+		combat.player_hp = maxi(combat.player_hp - dmg, 0)
+	# Captured at the horizon line (or hull gone) → the hole takes you.
+	if rem <= CORE_KILL_LY or combat.player_hp <= 0:
+		_core_kill()
+
+
+func _core_kill() -> void:
+	_core_dying = true
+	_core_dmg_accum = 0.0
+	hud.set_menu("")
+	hud.flash(1.0)                                       # hard white-hot/red kick in the teeth
+	combat.player_hp = maxi(1, int(combat.player_max * 0.08))   # spat back out near-dead
+	hud.show_lore("THE CORE DOES NOT FORGIVE\n\nSagittarius A* seized the ship and dragged it toward the horizon. The failsafe drive tore you back across the galaxy at the last instant. Nothing returns from there whole.")
+	teleport_home()                                      # the violent kick — emergency ritual to Earth
+
+
 # Emerge from a wormhole in a new system: swap bodies, hard-reset the ship to a
 # small LOCAL coord (so float precision is never stressed), re-aim the portal.
 func _arrive(system_id: String) -> void:
+	_core_dying = false              # landed home → the core's grip is broken
+	_core_warned = false
+	_core_dmg_accum = 0.0
 	var first_visit := not _visited.has(system_id)
 	_visited[system_id] = true       # now a KNOWN system → instant map fast-travel hereafter
 	_nav_unlocked.erase(system_id)   # discovered → no longer just a "nav-unlocked" lane
@@ -1532,6 +1615,7 @@ func _arrive(system_id: String) -> void:
 	planets.speed_zones = (system_id == SystemDB.SOL)   # planet safe-zone limits: Sol only
 	ship.true_pos = SystemDB.arrival_pos(system_id)
 	ship.transiting = false
+	galaxy.reset_distance()                   # back in a normal system → core is ~26,000 ly away again
 	ship.face_toward(-ship.true_pos)          # look back toward the system's star
 	# Show this system's neighbour wormholes that the player KNOWS — fly through any to
 	# transit straight to that neighbour (no central hub in the loop anymore).

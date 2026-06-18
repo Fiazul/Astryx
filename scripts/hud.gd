@@ -52,6 +52,8 @@ var _speed_label: Label
 var _near_label: Label
 var _prompt: Label    # "Press F to dock" near the station
 var _menu: Label      # centered overlay text (wormhole-transit countdown)
+var _flash: ColorRect # full-screen colour flash (core damage / death kick); alpha eased down
+var _flash_a := 0.0   # current flash strength 0..1 (decays each frame in refresh)
 var _tip: Label       # first-run onboarding tip line (just under the crosshair)
 var _debug_label: Label   # F3 perf readout (object/RAM/render counters)
 var _quest_label: Label   # active-quest tracker (top-center)
@@ -174,6 +176,14 @@ func _ready() -> void:
 	_menu.size = Vector2(1280, 300)
 	_menu.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_menu.visible = false
+
+	# Full-screen colour flash — driven by the galactic core's damage + death kick. Sits over
+	# the play area (under the panels would be fine too, but on top makes the hit read harder).
+	_flash = ColorRect.new()
+	_flash.color = Color(1.0, 0.12, 0.10, 0.0)
+	_flash.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_flash.mouse_filter = Control.MOUSE_FILTER_IGNORE   # never eat clicks
+	_canvas.add_child(_flash)
 
 	# Cancel button shown only during a teleport ritual (main toggles + connects it).
 	tp_cancel_button = Button.new()
@@ -1262,9 +1272,18 @@ func _draw_capture_ring() -> void:
 		_capture_ring.draw_arc(c, r, 0.0, TAU, 72, Color(0.9, 1.0, 0.95, 1.0), 7.0, true)
 
 
+# Punch the screen with a colour flash (0..1). The core uses a steady low value for the
+# damage-zone pulse and a hard 1.0 for the death kick; it eases back down on its own.
+func flash(amount: float, col: Color = Color(1.0, 0.12, 0.10)) -> void:
+	_flash_a = maxf(_flash_a, clampf(amount, 0.0, 1.0))
+	_flash.color = Color(col.r, col.g, col.b, _flash.color.a)
+
 func refresh() -> void:
 	if ship == null:
 		return
+	# Ease the core flash back toward zero (set fresh each frame by main while in the danger zone).
+	_flash_a = maxf(_flash_a - 2.0 * get_process_delta_time(), 0.0)
+	_flash.color.a = _flash_a * 0.55
 	# Hide the crosshair when Vela is hypersonic — combat is disabled then.
 	var hyper := ship.is_hypersonic()
 	var armed := ship.can_fire and not hyper   # utility hulls show no crosshair
@@ -1286,10 +1305,21 @@ func refresh() -> void:
 	# Distance from Earth (the scene origin). Astronomical distances span a huge
 	# range, so show AU in-system and switch to ly once it's large.
 	var dist_au := float(ship.true_pos.length()) * AU_PER_UNIT
+	# On the galactic voyage the authoritative distance is the core scanner, not true_pos (which
+	# only creeps at her ordinary warp while the galaxy looms the real 26,000 ly). Once she's made
+	# any progress toward the core, show travelled = total − remaining; flying back out winds it to
+	# ~0, and a fresh system arrival resets remaining to total, handing the readout back to true_pos.
+	if ship.has_galactic_drive and (ship.core_total_ly - ship.core_dist_ly) > 0.5:
+		dist_au = (ship.core_total_ly - ship.core_dist_ly) / LY_PER_AU
 	_dist_label.text = "From %s   %s" % [origin_name, _fmt_dist(dist_au)]
 	var spd := ship.velocity.length()
 	var spd_ly := spd * AU_PER_UNIT * LY_PER_AU
-	if spd_ly >= 0.001:
+	if ship.galactic_cruising():
+		# On the galactic drive the REAL speed is the looming pace (ly/s the core distance is
+		# burning down), not her tiny translation velocity — that's why the readout looked like a
+		# lie. Show the actual rate so it matches the distance flying past each second.
+		_speed_label.text = "Speed   %.1f ly/s  ⚡GALACTIC" % absf(ship.galactic_loom_rate())
+	elif spd_ly >= 0.001:
 		_speed_label.text = "Speed   %.3f ly/s  ⚡FTL" % spd_ly
 	elif ship.warp > 1.0:
 		# Sublight cruise: tell the pilot whether FTL is available yet.

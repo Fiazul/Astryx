@@ -61,6 +61,20 @@ const SHIP_MODELS := [
 		"surf_roles": ["vbody", "vred", "vbody"], "color_pick": true, "body_role": "vbody", "wing_surfs": [1],
 		"default_color": "graphite", "default_wing": "burgundy",
 		"light_accent": Color(0.72, 0.85, 1.0), "light_energy": 0.8 },
+	# Vela Iron Pulse — a UTILITY + SPEED hull: no weapons (can_fire false — you just pick her
+	# and drive). She carries the GALACTIC DRIVE (0.08 s/ly ≈ 12.5 ly/s): the only hull that can
+	# make the ~34-min haul to the Milky Way's core. In local space she obeys the same slow-zone
+	# speed cap as every ship; only out in interstellar deep space does she open up to the fastest
+	# drive in the game. She also runs a live CORE-DISTANCE SCANNER (core_total_ly / core_dist_ly),
+	# so the HUD always reads how far the core is and how far remains.
+	# Model: "jl 7 low" by ztrztr (CC-BY 4.0, see CREDITS.md) — one untextured surface, so the
+	# WHOLE hull dyes as the body colour (surf_roles ["body"] + body_role "body", pbr path). The
+	# model's long axis is X, so yaw 90 points the nose down -Z. Twin boosters at her tail (see
+	# BOOSTER_LAYOUTS / BOOSTER_BACK_OVERRIDE / *_SCALE entries below).
+	{ "name": "Vela Iron Pulse", "path": "res://assets/jl_7_low.glb", "tint": Color(0.48, 0.66, 0.92), "length": 0.6, "yaw": 90.0, "pitch": 0.0, "glow": 0.0, "energy_max": 100.0, "energy_use": 1.2, "warp": 150.0, "engine_pitch": 1.14, "brake": true, "hp": 90, "pbr": true, "galactic_drive": true, "can_fire": false,
+		"surf_roles": ["body"], "color_pick": true, "body_role": "body",
+		"default_color": "graphite",
+		"light_accent": Color(0.72, 0.85, 1.0), "light_energy": 0.8 },
 	# HaniStar — a slow, pretty support hull that CAN fight: fires a touch faster than
 	# Lyra, hits a bit harder than Stella, 125 HP. Three light-blue boosters.
 	# surf_roles indexes the GLB's 9 surfaces: gold = shiny rose-gold (7 = wings), glass =
@@ -118,7 +132,7 @@ const BOOSTER_COLOR := Color(0.35, 0.8, 1.0)
 # to snap the plumes onto Lyra's actual engines.
 const BOOSTER_BACK := 0.40          # how far back (0 = center, 0.5 = tail). Lower = closer to hull.
 # Per-ship override of BOOSTER_BACK (fraction back toward the tail).
-const BOOSTER_BACK_OVERRIDE := {}
+const BOOSTER_BACK_OVERRIDE := { "Vela Iron Pulse": 0.46 }   # push her plumes right to the tail
 const BOOSTER_RISE := 0.0           # vertical nudge for the whole cluster (+ up, - down)
 # Per-ship nozzle layout: each engine is (x, y) as fractions of the ship's WIDTH
 # (x = left/right, y = up/down). Each ship has a different engine count/pattern;
@@ -149,6 +163,12 @@ const BOOSTER_LAYOUTS := {
 		Vector2(-0.05, -0.01),   # twin engines, tight on the central block
 		Vector2( 0.05, -0.01),
 	],
+	"Vela Iron Pulse": [
+		# Twin thrusters at her tail with a clear gap between them (her two rear nozzles),
+		# nudged down to line up with the exhaust ports.
+		Vector2(-0.13, -0.10),
+		Vector2( 0.13, -0.10),
+	],
 	"HaniNebula": [
 		# 2 big top-side mains (Reactor_Cylinder), highest up
 		Vector2(-0.074, 0.107), Vector2( 0.074, 0.107),
@@ -162,21 +182,25 @@ const BOOSTER_LAYOUTS := {
 }
 const BOOSTER_FALLBACK := [Vector2(-0.08, 0.0), Vector2(0.08, 0.0)]  # if a name isn't listed
 # Per-ship plume shaping. Raptor: long/thin/small. Vela: long, thin, golden.
-const BOOSTER_RADIUS_SCALE := { "Lyra": 0.9, "Raptor": 0.62, "Vela": 0.45, "Stella": 0.40, "HaniStar": 0.6, "Raptor 2 Neo": 0.6, "HaniNebula": 0.82 }   # thinner = sharper flame
-const BOOSTER_LENGTH_SCALE := { "Raptor": 1.0, "Vela": 1.4,  "Stella": 0.8, "Lyra": 0.8, "HaniStar": 0.9, "Raptor 2 Neo": 1.3, "HaniNebula": 1 }  # long, dramatic near-ship-length trails
+const BOOSTER_RADIUS_SCALE := { "Lyra": 0.9, "Raptor": 0.62, "Vela": 0.45, "Vela Iron Pulse": 0.34, "Stella": 0.40, "HaniStar": 0.6, "Raptor 2 Neo": 0.6, "HaniNebula": 0.82 }   # thinner = sharper flame
+const BOOSTER_LENGTH_SCALE := { "Raptor": 1.0, "Vela": 1.4, "Vela Iron Pulse": 0.95, "Stella": 0.8, "Lyra": 0.8, "HaniStar": 0.9, "Raptor 2 Neo": 1.3, "HaniNebula": 1 }  # long, dramatic near-ship-length trails
 const BOOSTER_COLOR_OVERRIDE := {
 	"HaniStar": Color(0.62, 0.82, 1.0),    # very light blue exhaust
 	"HaniNebula": Color(0.925, 0.612, 0.894, 0.851),  # soft pink exhaust (matches her silver+pink look)
 	"Lyra": Color(0.55, 0.90, 1.0),    # pretty bright aqua-cyan
 	"Raptor 2 Neo": Color(0.35, 0.65, 1.0),  # strong electric blue
 	"Vela": Color(1.0, 0.82, 0.32),    # transparent gold
+	"Vela Iron Pulse": Color(0.66, 0.10, 1.0),  # pure burning purple (hot white-violet core)
 	"Stella": Color(1.0, 0.26, 0.20),  # sharp transparent red
 	"Raptor": Color(0.85, 0.72, 0.45), # champagne gold (small + powerful; deploys in warp)
 }
 const BOOSTER_FADE_FLIP := false    # if the plume fades at the wrong end, flip this
 # Hulls that skip the metal bell + nozzle ring (their model already has real nozzles, so we
 # just drop a bare fire plume into each existing hole).
-const BOOSTER_NO_RING := { "HaniNebula": true, "HaniStar": true }
+const BOOSTER_NO_RING := { "HaniNebula": true, "HaniStar": true, "Vela Iron Pulse": true }
+# Hulls whose thrusters trail SMOKE behind the flame (a dark exhaust haze). Off for everyone
+# except where listed. Vela Iron Pulse: burning-purple jet + a purple-grey smoke trail.
+const BOOSTER_SMOKE := { "Vela Iron Pulse": true }
 # Per-mount size multipliers (same order as BOOSTER_LAYOUTS). HaniStar: big main + smaller supports.
 const BOOSTER_MOUNT_SCALE := { "HaniStar": [1.3, 0.65, 0.65],
 	# Sized to each hole's real radius: 2 big mains, 4 bottom, then 10 tiny sub-layer holes.
@@ -279,6 +303,11 @@ var camera: Camera3D           # assigned by main; driven from fly()
 var audio: GameAudio           # assigned by main; the engine voice is driven from fly()
 var mouse_sens := MOUSE_SENS   # live mouse sensitivity (Settings menu adjusts this)
 var warp := 1.0                # per-ship MAX speed multiplier; >1 = breaks physics (Vela)
+var has_galactic_drive := false  # this hull can run the galactic drive (Vela Iron Pulse)
+# Live core-distance scanner (only meaningful on the Iron Pulse). main feeds these from the
+# GalaxyModel each frame so the HUD can read total + remaining distance to the core in real time.
+var core_total_ly := 0.0       # full distance of the voyage (≈ 26,000 ly)
+var core_dist_ly := 0.0        # distance still to go right now (shrinks as you fly the drive)
 var _warp_charge := 0.0        # 0..1 spool-up; ramps while thrusting forward
 var fire_cooldown := 0.22      # seconds between shots (combat reads this)
 var max_hp := 100              # this hull's defence / hull integrity (combat reads this)
@@ -326,6 +355,17 @@ const SOL_FIELD_RADIUS := 2200.0
 const WARP_CHARGE_TIME := 9.0  # seconds of thrust to reach full warp
 const WARP_DECAY_TIME := 3.5   # seconds to spool back down when you ease off
 
+# --- Galactic drive (Vela Iron Pulse only) ---
+# The pilgrimage to the Milky Way's core (~26,000 ly). It is NOT a translation speed tier — flying
+# the real distance at that speed shatters float precision and piles up across saves. Instead the
+# galaxy backdrop LOOMS in toward the core at a fixed pace (galactic_loom_rate → main → galaxy),
+# decoupled from how fast the ship actually moves. She still flies normal space at her own warp;
+# this just advances the bounded voyage. Only while in deep space (warp_ready) and spooled up.
+const GALACTIC_SEC_PER_LY := 0.08      # LOCKED voyage pace — the tuned 0.08 s/ly (do not drift)
+const GALACTIC_LOOM_LY_PER_S := 1.0 / GALACTIC_SEC_PER_LY   # = 12.5 ly/s → ~26,000 ly in ~34.7 min
+const GALACTIC_TEST_MULT := 10.0  # ⚠ TEST ONLY — set back to 1.0 before shipping. 10× the loom
+								  # → core run in ~3.5 min instead of ~35, so the voyage is testable.
+
 # Station landing zone: speed is force-reduced as you near the pad so you can
 # actually land — applies to ALL ships, warp included. Fed by main via dock_approach.
 const DOCK_EDGE_SPEED := 1000.0    # speed cap at the outer edge of the zone (gentle entry)
@@ -360,6 +400,22 @@ func toggle_warp_mode() -> String:
 func is_warp_mode() -> bool:
 	return _dual and warp > 1.0
 
+# True while the galactic drive is carrying us — the drive hull, spooled up, in clear deep space.
+# main uses it to loom the core; the HUD uses it for the drive readout; streaks use it for the blur.
+func galactic_cruising() -> bool:
+	return has_galactic_drive and warp_ready() and _warp_charge > 0.02
+
+# Signed ly/s the galactic core looms this frame: the LOCKED voyage pace (0.08 s/ly × test mult),
+# its sign set by whether she's heading toward the core (+ = approach) or away (− = recede). It is
+# NOT scaled by spool/throttle — once she's cruising the drive, the pace is the locked 0.08 s/ly,
+# full stop. DECOUPLED from her real translation speed, so the ~26,000 ly haul is a bounded illusion
+# that never moves true_pos. main feeds this to galaxy.advance_ly each frame.
+func galactic_loom_rate() -> float:
+	if not galactic_cruising() or velocity.length() < 1.0:
+		return 0.0
+	var heading := signf(velocity.normalized().dot(GalaxyModel.DIR.normalized()))
+	return GALACTIC_LOOM_LY_PER_S * GALACTIC_TEST_MULT * heading
+
 # True only in Raptor's actual WARP form (not his combat mode) — drives the deployed,
 # flared booster.
 func is_warp_form() -> bool:
@@ -375,6 +431,7 @@ var _glow_tex: Texture2D
 var _plume_grad: Texture2D
 var _booster_color := BOOSTER_COLOR   # per-ship plume tint, set in _build_boosters
 var _booster_ring := false            # add a glowing engine-ring at the nozzle (the HaniStar)
+var _booster_smoke := false           # trail dark smoke behind the flame (Vela Iron Pulse)
 var _plume_len_s := 0.6               # smoothed plume length (live flicker layered on top)
 var _plume_a_s := 0.0                 # smoothed plume alpha
 var _core_a_s := 0.0                  # smoothed core-glow alpha
@@ -563,6 +620,10 @@ func fly(delta: float) -> void:
 		lift = 0.0
 		braking = false
 	var eff_warp := 1.0
+	# Every hull (the Iron Pulse included) translates at its OWN warp here — fast, but a sane,
+	# bounded coordinate rate. Her dramatic galactic SPEED is not a translation tier; it's the
+	# core-voyage looming (see galactic_loom_rate + main), which is decoupled from true_pos so the
+	# ~26,000 ly haul can never balloon the floating-origin coordinate the way it used to.
 	if warp > 1.0 and not combat_lock:
 		if Input.is_physical_key_pressed(KEY_W) or auto_cruise or autopilot:   # auto-cruise/autopilot spool warp too
 			_warp_charge = minf(_warp_charge + delta / WARP_CHARGE_TIME, 1.0)
@@ -651,6 +712,8 @@ func fly(delta: float) -> void:
 		velocity = velocity.limit_length(land_cap)
 
 	# --- Floating origin: never move the node; accumulate the true position ---
+	# Safe now: every hull translates at its own warp (bounded coordinate rate), and the core
+	# voyage looms separately instead of flying real distance — so this never balloons.
 	true_pos += velocity * delta
 
 	# --- Cosmetic banking (on the mesh only, so the camera stays steady) ---
@@ -907,6 +970,16 @@ func _update_streaks(speed: float) -> void:
 	_streaks.speed_scale = 1.0 + t * 1.6
 	var a: Color = _streak_mat.albedo_color
 	a.a = t * 0.8
+	# Galactic drive only: at her absolute top speed the normal ramp is already maxed out, so
+	# push the streaks PAST it — a much faster, denser hyperspace blur. Eased by the spool charge
+	# so it swells in with the drive; ONLY this hull while actually cruising, so regular flight
+	# (and every other ship) keeps the exact streak feel above.
+	if galactic_cruising():
+		var g := _warp_charge   # 0..1 drive spool
+		_streaks.emitting = true
+		_streaks.amount_ratio = 1.0
+		_streaks.speed_scale = lerpf(2.6, 9.0, g)   # far faster flow than the warp max (2.6)
+		a.a = lerpf(0.8, 0.95, g)
 	_streak_mat.albedo_color = a
 
 
@@ -940,6 +1013,7 @@ func _build_ship_model(idx: int) -> void:
 	_raptor_warp_form = false      # Raptor always loads in its (faster) Combat form
 	_engine_pitch = float(info.get("engine_pitch", 1.0))
 	_can_brake = info.get("brake", false)
+	has_galactic_drive = bool(info.get("galactic_drive", false))
 	_warp_charge = 0.0
 	# Loads a PackedScene (.glb/.gltf/.fbx/.dae) OR a bare Mesh (.obj) — wrap a Mesh
 	# in a MeshInstance3D so both paths produce a model Node3D.
@@ -1221,6 +1295,7 @@ func _build_boosters(box: AABB, ship_name: String) -> void:
 	# (HaniNebula) default to none. _bell_for() honours the player's hangar toggle — it
 	# falls back to BOOSTER_NO_RING the first time, then tracks add/remove choices.
 	_booster_ring = _bell_for(ship_name)
+	_booster_smoke = bool(BOOSTER_SMOKE.get(ship_name, false))
 	# Fewer engines read better a touch larger; scale radius down as count grows.
 	var rscale: float = BOOSTER_RADIUS_SCALE.get(ship_name, 1.0)
 	var lscale: float = BOOSTER_LENGTH_SCALE.get(ship_name, 1.0)
@@ -1338,6 +1413,48 @@ func _make_booster(mount: Vector3, radius: float, length: float) -> Dictionary:
 	core.material_override = core_mat
 	core.position = mount
 	_mesh_root.add_child(core)
+
+	# Optional smoke trail: dark purple-grey puffs billowing out behind the flame. Left in WORLD
+	# space (local_coords off) so they linger as a trail rather than rigidly following the nozzle.
+	# MIX blend (not additive) so the smoke actually reads as dark haze against the void.
+	if _booster_smoke:
+		var smoke := GPUParticles3D.new()
+		pivot.add_child(smoke)
+		smoke.amount = 22
+		smoke.lifetime = 1.5
+		smoke.local_coords = false
+		smoke.visibility_aabb = AABB(Vector3(-120, -120, -120), Vector3(240, 240, 240))
+		var sp := ParticleProcessMaterial.new()
+		sp.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
+		sp.emission_sphere_radius = radius * 0.7
+		sp.direction = Vector3(0.0, 1.0, 0.0)   # pivot +Y = +Z = straight out the tail
+		sp.spread = 16.0
+		sp.initial_velocity_min = length * 0.7
+		sp.initial_velocity_max = length * 1.2
+		sp.damping_min = length * 0.6           # billow + slow as it drifts back
+		sp.damping_max = length * 0.9
+		sp.gravity = Vector3.ZERO
+		sp.scale_min = radius * 1.4
+		sp.scale_max = radius * 2.6
+		var ramp := Gradient.new()
+		ramp.set_color(0, Color(0.42, 0.16, 0.58, 0.40))   # purple-grey, semi-opaque at birth
+		ramp.set_color(1, Color(0.18, 0.07, 0.28, 0.0))    # fades to nothing
+		var gtex := GradientTexture1D.new()
+		gtex.gradient = ramp
+		sp.color_ramp = gtex
+		smoke.process_material = sp
+		var smesh := QuadMesh.new()
+		smesh.size = Vector2(radius * 3.0, radius * 3.0)
+		var smat := StandardMaterial3D.new()
+		smat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		smat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		smat.blend_mode = BaseMaterial3D.BLEND_MODE_MIX
+		smat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+		smat.billboard_keep_scale = true
+		smat.albedo_texture = _glow_tex          # soft round puff (reused soft-glow sprite)
+		smat.vertex_color_use_as_albedo = true   # let the colour-ramp tint + fade each puff
+		smesh.material = smat
+		smoke.draw_pass_1 = smesh
 
 	return {
 		"pivot": pivot,
