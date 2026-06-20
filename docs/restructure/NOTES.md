@@ -129,6 +129,28 @@ File name ≠ class it holds — fixable:
 - Future cleanup (low priority): the kept `audio`/`eph`/`codex`/`data` aliases could migrate to direct
   `GameAudio.x()` / `Ephemeris.x()` global calls; redundant `if audio != null` guards can go.
 
+## Phase 2 — extract GameState (autoload), INCREMENTAL slices
+
+Decision: GameState is an **autoload**. Bite size = **incremental slices** (safer; only boot +
+manual playtest as checks). **Refinement:** persistence stays the SINGLE writer in
+main._save_profile/_load_profile (reading/writing GameState fields) until the FINAL slice, when
+it moves into GameState.save()/load() — avoids profile.cfg clobber mid-transition.
+
+- **2a ✅ DONE** (`2185434`) — economy: `coins`, `claimed` + consts (CAPTURE/ARRIVAL_REWARD,
+  NAV_COST, NAV_UNLOCK_*) + pure `can_claim`/`claim_reward`/`add_coins` → GameState. main keeps thin
+  `can_claim`/`claim_reward` wrappers (onboarding note + save side-effects). External callers untouched.
+  Clean boot; completeness grep clean. NOTE: `CAPTURE_REWARD` is defined-but-unused (was already
+  unused in main) — leave for now.
+- **2b TODO** — `visited` + `nav_unlocked` + `wormholes_found` + `is_visited`/`unlock_nav`/
+  `grant_nav_location`/`star_state` queries.
+- **2c TODO** — onboarding flags (`onboarding_step`, `ob`, `ob_done_toast`, `map_seen`, `fresh_game`);
+  onboarding UPDATE loop stays in main (controller, not state).
+- **2d TODO** — `loaded_custom` (ship customization) + **move persistence into GameState.save()/load()**
+  + `reset_progress`.
+- **Playtest checklist for 2a:** claim a capture reward (G panel), buy a navigator / chart a lane
+  (coin spend), arrive at a NEW system (+150 bonus), and confirm **coins persist across a restart**
+  (the save/load path now round-trips through GameState).
+
 ## Confusions / things to flag (owner asked me to surface these)
 
 - `CLAUDE.FILE` at repo root — unusual name; purpose unknown. (low priority)
