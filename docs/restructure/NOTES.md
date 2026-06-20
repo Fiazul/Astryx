@@ -141,8 +141,13 @@ it moves into GameState.save()/load() — avoids profile.cfg clobber mid-transit
   `can_claim`/`claim_reward` wrappers (onboarding note + save side-effects). External callers untouched.
   Clean boot; completeness grep clean. NOTE: `CAPTURE_REWARD` is defined-but-unused (was already
   unused in main) — leave for now.
-- **2b TODO** — `visited` + `nav_unlocked` + `wormholes_found` + `is_visited`/`unlock_nav`/
-  `grant_nav_location`/`star_state` queries.
+- **2b ✅ DONE** (`<next>`) — `visited`/`nav_unlocked`/`wormholes_found` dicts → GameState. main's
+  query/mutation methods (`is_visited`, `star_state`, `unlock_nav`, `grant_nav_location`,
+  `is_teleport_unlocked`) kept in main, now reading `GameState.visited` etc. No external refs to the
+  vars; external method callers (star_map/map_chart/quest_log/platform_teleport) untouched. Clean boot.
+  **LESSON:** `replace_all` is literal substring, NOT word-boundary — `_visited` is a substring of
+  `is_visited`, so the bulk rename mangled `func is_visited` → `func isGameState.visited` (caught +
+  fixed). Always grep for `[a-zA-Z]GameState\.` after a token replace_all.
 - **2c TODO** — onboarding flags (`onboarding_step`, `ob`, `ob_done_toast`, `map_seen`, `fresh_game`);
   onboarding UPDATE loop stays in main (controller, not state).
 - **2d TODO** — `loaded_custom` (ship customization) + **move persistence into GameState.save()/load()**

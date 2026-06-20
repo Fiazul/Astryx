@@ -11,6 +11,11 @@ extends Node
 var coins := 0                 # player currency
 var claimed := {}              # body name -> true once its capture reward is claimed
 
+# --- Discovery / navigation (Phase 2b) ---
+var visited := {}              # system id -> true once reached (= DISCOVERED → free fast-travel)
+var nav_unlocked := {}         # star id -> true: navigation unlocked (paid / chest-dropped)
+var wormholes_found := {}      # star id -> true: this star's wormhole found by radar in the hub
+
 const CAPTURE_REWARD := 100
 const ARRIVAL_REWARD := 150    # coins granted the FIRST time you reach a new system
 const NAV_COST := 40           # coins to buy a navigator (map Navigate / Auto-pilot)

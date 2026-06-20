@@ -58,10 +58,8 @@ const QUEST_COL := Color(0.78, 0.50, 1.00)   # purple — the tracked-quest mark
 # coins + claimed moved to the GameState autoload (Phase 2a). main reads GameState.coins /
 # GameState.claimed; persistence below still reads/writes them (single writer for now).
 var _loaded_custom := {}      # saved per-ship colour/bell/finish, applied to the ship in _ready
-var _visited := {}            # system id -> true once reached (= DISCOVERED → free fast-travel)
-var _nav_unlocked := {}       # star id -> true: navigation unlocked (paid or chest-dropped) →
-							  #   its imaginary wormhole is known. Once visited it's discovered.
-var _wormholes_found := {}    # star id -> true: this star's wormhole found by radar in the hub
+# visited / nav_unlocked / wormholes_found moved to the GameState autoload (Phase 2b).
+# main reads GameState.visited / .nav_unlocked / .wormholes_found.
 var _nav_goal := ""           # star the map asked to guide to (orange waypoint). The guide
 							  #   resolves the next hop each frame: in the hub → that star's
 							  #   wormhole; in a system → the exit gate. Session-only (not saved).
@@ -835,16 +833,16 @@ func _load_profile() -> void:
 		# Saved per-ship colour/bell/finish choices — applied to the ship once it exists.
 		_loaded_custom = cfg.get_value("player", "customization", {})
 		# Which systems the player has already reached (= discovered → instant fast-travel).
-		_visited.clear()
+		GameState.visited.clear()
 		for s in cfg.get_value("player", "visited", []):
-			_visited[s] = true
+			GameState.visited[s] = true
 		# Stars you've unlocked navigation to (paid / chest-dropped) but not yet discovered.
-		_nav_unlocked.clear()
+		GameState.nav_unlocked.clear()
 		for s in cfg.get_value("player", "nav_unlocked", []):
-			_nav_unlocked[s] = true
-		_wormholes_found.clear()
+			GameState.nav_unlocked[s] = true
+		GameState.wormholes_found.clear()
 		for s in cfg.get_value("player", "wormholes_found", []):
-			_wormholes_found[s] = true
+			GameState.wormholes_found[s] = true
 		_onboarding_step = int(cfg.get_value("player", "onboarding_step", 0))
 		_ob.clear()
 		for k in cfg.get_value("player", "onboarding_done", []):
@@ -860,16 +858,16 @@ func _load_profile() -> void:
 	else:
 		_fresh_game = true   # no save on disk → a brand-new game (drives the tutorial)
 	# Home (Sol) is always known — you start there, so it's instant-travel from frame one.
-	_visited[SystemDB.SOL] = true
+	GameState.visited[SystemDB.SOL] = true
 
 func _save_profile() -> void:
 	var cfg := ConfigFile.new()
 	cfg.load(PROFILE_PATH)            # keep any other keys we add later
 	cfg.set_value("player", "coins", GameState.coins)
 	cfg.set_value("player", "claimed", GameState.claimed.keys())
-	cfg.set_value("player", "visited", _visited.keys())
-	cfg.set_value("player", "nav_unlocked", _nav_unlocked.keys())
-	cfg.set_value("player", "wormholes_found", _wormholes_found.keys())
+	cfg.set_value("player", "visited", GameState.visited.keys())
+	cfg.set_value("player", "nav_unlocked", GameState.nav_unlocked.keys())
+	cfg.set_value("player", "wormholes_found", GameState.wormholes_found.keys())
 	cfg.set_value("player", "onboarding_step", _onboarding_step)
 	cfg.set_value("player", "onboarding_done", _ob.keys())
 	cfg.set_value("player", "active_quest", _active_quest)
@@ -887,7 +885,7 @@ func _save_profile() -> void:
 # True once the player has reached this system at least once (the map only
 # fast-travels to KNOWN systems; unknown ones must be flown via the wormhole first).
 func is_visited(id: String) -> bool:
-	return _visited.has(id)
+	return GameState.visited.has(id)
 
 # --- Star travel states (read by the map) ---------------------------------------
 # "here" | "discovered" (visited → free instant fast-travel) | "nav" (navigation unlocked,
@@ -895,7 +893,7 @@ func is_visited(id: String) -> bool:
 func star_state(id: String) -> String:
 	if id == current_system:
 		return "here"
-	if _visited.has(id):
+	if GameState.visited.has(id):
 		return "discovered"
 	if is_wormhole_known(id):          # nav unlocked (paid/chest) OR wormhole found by radar
 		return "nav"
@@ -917,7 +915,7 @@ func unlock_nav(id: String) -> bool:
 		hud.toast_t = 2.5
 		return false
 	GameState.coins -= cost
-	_nav_unlocked[id] = true
+	GameState.nav_unlocked[id] = true
 	_save_profile()
 	hud.toast = "◇  Navigation unlocked — %s  (-%d coins)" % [SystemDB.display_name(id), cost]
 	hud.toast_t = 3.0
@@ -926,9 +924,9 @@ func unlock_nav(id: String) -> bool:
 # Free nav-unlock from a treasure-chest "star location" drop (Stage 4). No-op if already
 # reachable. Returns true if it actually revealed a new lane.
 func grant_nav_location(id: String) -> bool:
-	if id == "" or _visited.has(id) or _nav_unlocked.has(id):
+	if id == "" or GameState.visited.has(id) or GameState.nav_unlocked.has(id):
 		return false
-	_nav_unlocked[id] = true
+	GameState.nav_unlocked[id] = true
 	_save_profile()
 	return true
 
@@ -936,7 +934,7 @@ func grant_nav_location(id: String) -> bool:
 # charted/gifted. This auto-produces "go to Proxima first, then Alpha": the Sol→Alpha link
 # doesn't exist in the graph, and Proxima→Alpha only becomes known once you've REACHED Proxima.
 func is_edge_known(a: String, b: String) -> bool:
-	return _visited.has(a) or _visited.has(b) or _nav_unlocked.has(a) or _nav_unlocked.has(b)
+	return GameState.visited.has(a) or GameState.visited.has(b) or GameState.nav_unlocked.has(a) or GameState.nav_unlocked.has(b)
 
 # This system's portals filtered to the links the player knows (what set_portals shows).
 # Star systems: arriving in a system reveals all its exit wormholes (is_edge_known is true
@@ -948,7 +946,7 @@ func _known_portals(id: String) -> Array:
 	var out := []
 	var hub := id == SystemDB.INTERSTELLAR
 	for p in SystemDB.portals(id):
-		var known: bool = (_visited.has(p.dest) or _nav_unlocked.has(p.dest)) if hub \
+		var known: bool = (GameState.visited.has(p.dest) or GameState.nav_unlocked.has(p.dest)) if hub \
 			else is_edge_known(id, p.dest)
 		if known:
 			out.append(p)
@@ -981,7 +979,7 @@ func navigate_to(id: String) -> void:
 # Survey rank = how many distinct systems you've reached. Cheap, derived stat — no
 # separate counter to keep in sync. Sol counts, so a fresh player is rank 1.
 func survey_rank() -> int:
-	return _visited.size()
+	return GameState.visited.size()
 
 # The Survey's rank titles (lore.md): the count climbs toward a name, not a gate.
 func survey_rank_title() -> String:
@@ -1536,7 +1534,7 @@ func _unlocked_platforms() -> Array:
 	for id in SystemDB.all():
 		if id == current_system or id == SystemDB.INTERSTELLAR:
 			continue
-		if SystemDB.is_teleport_platform(id) and _visited.has(id):
+		if SystemDB.is_teleport_platform(id) and GameState.visited.has(id):
 			out.append({ "id": id, "name": SystemDB.display_name(id) })
 	out.sort_custom(func(a, b): return String(a.name) < String(b.name))
 	return out
@@ -1546,7 +1544,7 @@ func _unlocked_platforms() -> Array:
 # not where you are now. Used by the teleport-mode map to decide whether to offer "confirm".
 func is_teleport_unlocked(id: String) -> bool:
 	return id != current_system and id != SystemDB.INTERSTELLAR \
-		and SystemDB.is_teleport_platform(id) and _visited.has(id)
+		and SystemDB.is_teleport_platform(id) and GameState.visited.has(id)
 
 
 # Dock → "TELEPORT NETWORK" button: open the ISOLATED platform console (its own screen, not
@@ -1742,9 +1740,9 @@ func _arrive(system_id: String, at_pos := Vector3(INF, INF, INF)) -> void:
 	_core_dying = false              # landed home → the core's grip is broken
 	_core_warned = false
 	_core_dmg_accum = 0.0
-	var first_visit := not _visited.has(system_id)
-	_visited[system_id] = true       # now a KNOWN system → instant map fast-travel hereafter
-	_nav_unlocked.erase(system_id)   # discovered → no longer just a "nav-unlocked" lane
+	var first_visit := not GameState.visited.has(system_id)
+	GameState.visited[system_id] = true       # now a KNOWN system → instant map fast-travel hereafter
+	GameState.nav_unlocked.erase(system_id)   # discovered → no longer just a "nav-unlocked" lane
 	current_system = system_id
 	planets.load_system(SystemDB.bodies(system_id))
 	planets.speed_zones = (system_id == SystemDB.SOL)   # planet safe-zone limits: Sol only
