@@ -16,6 +16,10 @@ var visited := {}              # system id -> true once reached (= DISCOVERED â†
 var nav_unlocked := {}         # star id -> true: navigation unlocked (paid / chest-dropped)
 var wormholes_found := {}      # star id -> true: this star's wormhole found by radar in the hub
 
+# --- Onboarding progress (Phase 2c) â€” persisted; the UPDATE loop stays in main ---
+var onboarding_step := 0       # first-run guided tips: which step the player is on
+var onboarding_done := {}      # set of completed beginner-quest step ids (event-latched)
+
 const CAPTURE_REWARD := 100
 const ARRIVAL_REWARD := 150    # coins granted the FIRST time you reach a new system
 const NAV_COST := 40           # coins to buy a navigator (map Navigate / Auto-pilot)

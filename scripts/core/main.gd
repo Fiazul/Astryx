@@ -63,8 +63,8 @@ var _loaded_custom := {}      # saved per-ship colour/bell/finish, applied to th
 var _nav_goal := ""           # star the map asked to guide to (orange waypoint). The guide
 							  #   resolves the next hop each frame: in the hub → that star's
 							  #   wormhole; in a system → the exit gate. Session-only (not saved).
-var _onboarding_step := 0     # first-run guided tips: which step the player is on (see _onboarding)
-var _ob := {}                 # beginner quest: set of completed step ids (event-latched, re-doable)
+# onboarding_step + the onboarding-done set moved to GameState (Phase 2c) as
+# GameState.onboarding_step / GameState.onboarding_done.
 var _ob_kills_base := 0       # combat.kills snapshot when the quest (re)started → "clear swarm"
 var _ob_boss_base := 0        # guardian-bosses-beaten snapshot when (re)started → "beat a guardian"
 var _ob_done_toast := false   # so the "quest complete" toast fires only once
@@ -78,7 +78,7 @@ const WORMHOLE_RADAR := 750.0 # hub range at which your radar finds an undiscove
 # First-run guided tips. Each step pairs its on-screen tip with the predicate that
 # completes it, so the text and its advance-condition live together and can't drift
 # apart (insert/reorder freely). Built once in _ready (predicates read live state at
-# call time). Persisted as _onboarding_step so the guide runs once, in order, forever.
+# call time). Persisted as GameState.onboarding_step so the guide runs once, in order, forever.
 var _onboard: Array = []
 # Missions are per-body now (MissionDB + QuestLog, key J): every star/planet/moon is a
 # mission you complete by surveying it. The top-center tracker shows the nearest unsurveyed
@@ -342,7 +342,7 @@ func _ready() -> void:
 	hud.cancel_nav_button.pressed.connect(cancel_locked_nav)
 
 	# Beginner quest "GETTING STARTED" — the staged first-run guide, now an event-latched
-	# questline (see _ob / _ob_note): each step completes when the player performs its action,
+	# questline (see GameState.onboarding_done / _ob_note): each step completes when the player acts,
 	# so it can be RESTARTED and re-walked. Surfaced as the pinned top quest in the J log and
 	# as the on-screen tip. Order: core loop → travel → combat.
 	_onboard = [
@@ -843,11 +843,11 @@ func _load_profile() -> void:
 		GameState.wormholes_found.clear()
 		for s in cfg.get_value("player", "wormholes_found", []):
 			GameState.wormholes_found[s] = true
-		_onboarding_step = int(cfg.get_value("player", "onboarding_step", 0))
-		_ob.clear()
+		GameState.onboarding_step = int(cfg.get_value("player", "onboarding_step", 0))
+		GameState.onboarding_done.clear()
 		for k in cfg.get_value("player", "onboarding_done", []):
-			_ob[str(k)] = true
-		_ob_done_toast = _ob.has("boss")   # already finished once → don't re-toast on boot
+			GameState.onboarding_done[str(k)] = true
+		_ob_done_toast = GameState.onboarding_done.has("boss")   # already finished once → don't re-toast on boot
 		_active_quest = str(cfg.get_value("player", "active_quest", ""))
 		# Where you left off last session (restored after the world is built — see
 		# _restore_location). Position is only ever saved from a STABLE state.
@@ -868,8 +868,8 @@ func _save_profile() -> void:
 	cfg.set_value("player", "visited", GameState.visited.keys())
 	cfg.set_value("player", "nav_unlocked", GameState.nav_unlocked.keys())
 	cfg.set_value("player", "wormholes_found", GameState.wormholes_found.keys())
-	cfg.set_value("player", "onboarding_step", _onboarding_step)
-	cfg.set_value("player", "onboarding_done", _ob.keys())
+	cfg.set_value("player", "onboarding_step", GameState.onboarding_step)
+	cfg.set_value("player", "onboarding_done", GameState.onboarding_done.keys())
 	cfg.set_value("player", "active_quest", _active_quest)
 	if ship != null:
 		cfg.set_value("player", "customization", ship.customization_state())
@@ -1367,7 +1367,7 @@ func _current_objective() -> Dictionary:
 	# Initial phase: onboarding's final step asks the player to reach the wormhole, so
 	# point the guide arrow straight at the gate (overriding nearby-star targeting) — they
 	# can't miss where to go.
-	if _onboarding_step < _onboard.size() and _onboard[_onboarding_step].id == "wormhole":
+	if GameState.onboarding_step < _onboard.size() and _onboard[GameState.onboarding_step].id == "wormhole":
 		return _nearest_gate_objective()
 	# The hub has no bodies — guide to the nearest gate to dive into.
 	if current_system == SystemDB.INTERSTELLAR:
@@ -1426,13 +1426,13 @@ func notify_log_opened() -> void:
 
 # Latch a beginner-quest step done (event-driven, so a restart can re-arm each one).
 func _ob_note(id: String) -> void:
-	_ob[id] = true
+	GameState.onboarding_done[id] = true
 
 
 # Restart the GETTING STARTED quest from step 1 — re-arms every step (counters re-baseline).
 func restart_onboarding() -> void:
-	_ob.clear()
-	_onboarding_step = 0
+	GameState.onboarding_done.clear()
+	GameState.onboarding_step = 0
 	_ob_done_toast = false
 	_ob_kills_base = combat.kills
 	_ob_boss_base = combat.guardian_bosses_beaten
@@ -1447,9 +1447,9 @@ func onboarding_state() -> Dictionary:
 	for i in _onboard.size():
 		var s = _onboard[i]
 		steps.append({ "title": s.title, "tip": s.tip,
-			"done": _ob.get(s.id, false), "current": i == _onboarding_step })
-	return { "steps": steps, "step": _onboarding_step, "total": _onboard.size(),
-		"complete": _onboarding_step >= _onboard.size() }
+			"done": GameState.onboarding_done.get(s.id, false), "current": i == GameState.onboarding_step })
+	return { "steps": steps, "step": GameState.onboarding_step, "total": _onboard.size(),
+		"complete": GameState.onboarding_step >= _onboard.size() }
 
 
 func _update_onboarding() -> void:
@@ -1465,19 +1465,19 @@ func _update_onboarding() -> void:
 		_ob_note("boss")
 	# Advance past every completed step (persist as it moves).
 	var advanced := false
-	while _onboarding_step < _onboard.size() and _ob.get(_onboard[_onboarding_step].id, false):
-		_onboarding_step += 1
+	while GameState.onboarding_step < _onboard.size() and GameState.onboarding_done.get(_onboard[GameState.onboarding_step].id, false):
+		GameState.onboarding_step += 1
 		advanced = true
 	if advanced:
 		_save_profile()
-	if _onboarding_step >= _onboard.size():
+	if GameState.onboarding_step >= _onboard.size():
 		if not _ob_done_toast:
 			_ob_done_toast = true
 			hud.toast = "✦  GETTING STARTED complete. The dark is yours to chart, pilot."
 			hud.toast_t = 4.0
 		hud.set_tip("")
 		return
-	hud.set_tip("◈  GETTING STARTED  ·  " + _onboard[_onboarding_step].tip)
+	hud.set_tip("◈  GETTING STARTED  ·  " + _onboard[GameState.onboarding_step].tip)
 
 
 # The top-center quest tracker. A TRACKED quest (chosen in the J log) takes priority and shows
