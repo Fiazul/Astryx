@@ -178,9 +178,19 @@ Order: pilot with the cleanest self-contained seam, then bigger ones. Verify eac
   (−171 lines)** — the first real size win (Phase 1+2 barely moved it). Clean boot.
   - Folder note: put in `core/` (spawned by main). Audio is now split `autoload/game_audio` (SFX) +
     `core/music_director` (music) — could justify a future `scripts/audio/` grouping.
-- **Candidate next seams** (from the main.gd map): Nav/Tab-targeting controller (~400 lines, higher
-  coupling), onboarding controller (~80 lines, state already in GameState), teleport ritual. Plus the
-  other big files: ship.gd (1626), hud.gd (1449), combat.gd (1352).
+- **3b ✅ DONE — Onboarding controller** (`<next>`). Lifted the GETTING STARTED beginner quest out of
+  main.gd into `core/onboarding.gd` (128 lines, `class_name Onboarding`, Node spawned by main, holds a
+  `main` ref). Owns the `_onboard` step list + transient vars + the update loop; persisted progress
+  stays in GameState. main keeps 6 one-line wrappers (`notify_map_opened`, `notify_log_opened`,
+  `_ob_note`, `restart_onboarding`, `onboarding_state`, `_update_onboarding`) so all call sites
+  (StarMap/QuestLog external + gameplay-event internal) are untouched; exposed `current_step_id()` for
+  main's objective arrow. The `_ob_done_toast` boot-init moved into `Onboarding._ready()` (runs after
+  the profile loads). **main.gd 1878 → 1780 (−98).** Clean boot.
+  - Found vestigial: `_map_seen` / `_log_seen` were write-only (moved into controller, kept for safety);
+    `_fresh_game` in main is now write-only/dead too — candidate removal later.
+- **Cumulative: main.gd 2093 → 1780** (−313) across MusicDirector (163) + Onboarding (128) + GameState (90).
+- **Candidate next seams:** Nav/Tab-targeting controller (~400 lines, higher coupling — the big one),
+  teleport ritual. Plus the other big files: ship.gd (1626), hud.gd (1449), combat.gd (1352).
 - **Playtest (3a):** music still cross-fades lobby⇄ship when flying out to open space / back; HaniNebula
   & Raptor 2 Neo still get the dedicated theme; engine ducks under the ship track.
 

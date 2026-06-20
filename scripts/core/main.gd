@@ -65,26 +65,16 @@ var _nav_goal := ""           # star the map asked to guide to (orange waypoint)
 							  #   wormhole; in a system → the exit gate. Session-only (not saved).
 # onboarding_step + the onboarding-done set moved to GameState (Phase 2c) as
 # GameState.onboarding_step / GameState.onboarding_done.
-var _ob_kills_base := 0       # combat.kills snapshot when the quest (re)started → "clear swarm"
-var _ob_boss_base := 0        # guardian-bosses-beaten snapshot when (re)started → "beat a guardian"
-var _ob_done_toast := false   # so the "quest complete" toast fires only once
-var _map_seen := false        # latched true by StarMap when first opened (the map pauses the tree,
-							  #   so _process can't poll map._open — the map notifies us instead)
+# GETTING STARTED beginner quest extracted to the Onboarding controller (Phase 3).
+var onboarding: Onboarding
 const PROFILE_PATH := "user://profile.cfg"
 # Economy consts moved to GameState (Phase 2a): CAPTURE_REWARD, ARRIVAL_REWARD, NAV_COST,
 # NAV_UNLOCK_BASE, NAV_UNLOCK_PER_LY — reference as GameState.NAV_COST etc.
 const WORMHOLE_RADAR := 750.0 # hub range at which your radar finds an undiscovered wormhole
 
-# First-run guided tips. Each step pairs its on-screen tip with the predicate that
-# completes it, so the text and its advance-condition live together and can't drift
-# apart (insert/reorder freely). Built once in _ready (predicates read live state at
-# call time). Persisted as GameState.onboarding_step so the guide runs once, in order, forever.
-var _onboard: Array = []
 # Missions are per-body now (MissionDB + QuestLog, key J): every star/planet/moon is a
 # mission you complete by surveying it. The top-center tracker shows the nearest unsurveyed
-# body in the current system; the full board is the J log. _log_seen latches when first opened
-# (drives the last onboarding step, like _map_seen).
-var _log_seen := false
+# body in the current system; the full board is the J log.
 # The TRACKED quest: a body name you chose to chase from the Mission Log (J). It's the single
 # source of truth for quest guidance — the nav arrow routes to it (cross-system via wormholes,
 # then to the body in-system) until you survey it, then it auto-advances to the next unsurveyed
@@ -315,34 +305,10 @@ func _ready() -> void:
 	hud.nav_button.pressed.connect(toggle_nav)
 	hud.cancel_nav_button.pressed.connect(cancel_locked_nav)
 
-	# Beginner quest "GETTING STARTED" — the staged first-run guide, now an event-latched
-	# questline (see GameState.onboarding_done / _ob_note): each step completes when the player acts,
-	# so it can be RESTARTED and re-walked. Surfaced as the pinned top quest in the J log and
-	# as the on-screen tip. Order: core loop → travel → combat.
-	_onboard = [
-		{ "id": "thrust", "title": "Take the helm",
-			"tip": "Hold  W  to thrust  ·  steer with the mouse, A/D strafe, Space/Ctrl up·down" },
-		{ "id": "scan", "title": "Scan a world",
-			"tip": "Aim at a planet or star and hold  V  to survey it" },
-		{ "id": "claim", "title": "Claim your coins",
-			"tip": "Press  G  to claim your reward coins" },
-		{ "id": "map", "title": "Read the star map",
-			"tip": "Press  M  for the Star Map — the wormhole network · pick a star, Navigate" },
-		{ "id": "log", "title": "Open the mission log",
-			"tip": "Press  J  for the MISSION LOG — every star, planet & moon is a mission" },
-		{ "id": "wormhole", "title": "Ride a wormhole",
-			"tip": "Fly into a glowing  wormhole  and press  F  — it links to a neighbouring star" },
-		{ "id": "dock", "title": "Dock at a station",
-			"tip": "Approach a platform/station and press  F  to dock (swap & customise ships)" },
-		{ "id": "teleport_net", "title": "Use the teleport network",
-			"tip": "While docked, open the  TELEPORT NETWORK  (bottom-centre) to fast-travel" },
-		{ "id": "fire", "title": "Open fire",
-			"tip": "Left-click to fire — line a hostile up in the crosshair" },
-		{ "id": "swarm", "title": "Clear the hostiles",
-			"tip": "Destroy enemy ships — thin out a swarm (3 kills)" },
-		{ "id": "boss", "title": "Beat a guardian",
-			"tip": "A guarded world's boss is SHIELDED until its swarm is dead — clear them, then beat the boss to capture the world" },
-	]
+	# Beginner quest "GETTING STARTED" — the staged first-run guide (Onboarding controller).
+	onboarding = Onboarding.new()
+	onboarding.main = self
+	add_child(onboarding)
 
 	# Touch / mobile controls overlay (on a phone, or force on desktop with --touch to test).
 	# Desktop keyboard+mouse play is completely unaffected when this is off.
@@ -703,7 +669,6 @@ func _load_profile() -> void:
 	var cfg := ConfigFile.new()
 	if cfg.load(PROFILE_PATH) == OK:
 		GameState.load_from(cfg)   # all persisted profile fields (coins/visited/onboarding/customization…)
-		_ob_done_toast = GameState.onboarding_done.has("boss")   # already finished once → don't re-toast on boot
 		_active_quest = str(cfg.get_value("player", "active_quest", ""))
 		# Where you left off last session (restored after the world is built — see
 		# _restore_location). Position is only ever saved from a STABLE state.
@@ -1219,7 +1184,7 @@ func _current_objective() -> Dictionary:
 	# Initial phase: onboarding's final step asks the player to reach the wormhole, so
 	# point the guide arrow straight at the gate (overriding nearby-star targeting) — they
 	# can't miss where to go.
-	if GameState.onboarding_step < _onboard.size() and _onboard[GameState.onboarding_step].id == "wormhole":
+	if onboarding.current_step_id() == "wormhole":
 		return _nearest_gate_objective()
 	# The hub has no bodies — guide to the nearest gate to dive into.
 	if current_system == SystemDB.INTERSTELLAR:
@@ -1259,77 +1224,14 @@ func _fmt_nav_dist(u: float) -> String:
 
 
 # --- First-run onboarding -----------------------------------------------------
-# A tiny staged guide that teaches the core loop using actions the player already
-# performs. Each step shows one tip; doing the thing advances to the next. Once past
-# the last tip it never shows again (persisted in the profile). Hidden while docked
-# or mid-transit so it doesn't clutter those screens.
-# Called by StarMap when the map is first opened. The map pauses the scene tree, so
-# main._process can't observe map._open itself — the map notifies us instead.
-func notify_map_opened() -> void:
-	_map_seen = true
-	_ob_note("map")
-
-# Latched by QuestLog the first time the mission log is opened (drives the final onboarding
-# tip — the log pauses the tree, so _process can't observe its open flag directly).
-func notify_log_opened() -> void:
-	_log_seen = true
-	_ob_note("log")
-
-
-# Latch a beginner-quest step done (event-driven, so a restart can re-arm each one).
-func _ob_note(id: String) -> void:
-	GameState.onboarding_done[id] = true
-
-
-# Restart the GETTING STARTED quest from step 1 — re-arms every step (counters re-baseline).
-func restart_onboarding() -> void:
-	GameState.onboarding_done.clear()
-	GameState.onboarding_step = 0
-	_ob_done_toast = false
-	_ob_kills_base = combat.kills
-	_ob_boss_base = combat.guardian_bosses_beaten
-	_save_profile()
-	hud.toast = "✦  GETTING STARTED — quest restarted."
-	hud.toast_t = 2.5
-
-
-# Snapshot for the J-log questline: each step's title/tip/done plus the current index.
-func onboarding_state() -> Dictionary:
-	var steps := []
-	for i in _onboard.size():
-		var s = _onboard[i]
-		steps.append({ "title": s.title, "tip": s.tip,
-			"done": GameState.onboarding_done.get(s.id, false), "current": i == GameState.onboarding_step })
-	return { "steps": steps, "step": GameState.onboarding_step, "total": _onboard.size(),
-		"complete": GameState.onboarding_step >= _onboard.size() }
-
-
-func _update_onboarding() -> void:
-	if ship.transiting:
-		hud.set_tip("")
-		return
-	# Live latches for the action-counted steps (re-armed on restart via the baselines).
-	if ship.velocity.length() > 30.0:
-		_ob_note("thrust")
-	if combat.kills - _ob_kills_base >= 3:
-		_ob_note("swarm")
-	if combat.guardian_bosses_beaten - _ob_boss_base >= 1:
-		_ob_note("boss")
-	# Advance past every completed step (persist as it moves).
-	var advanced := false
-	while GameState.onboarding_step < _onboard.size() and GameState.onboarding_done.get(_onboard[GameState.onboarding_step].id, false):
-		GameState.onboarding_step += 1
-		advanced = true
-	if advanced:
-		_save_profile()
-	if GameState.onboarding_step >= _onboard.size():
-		if not _ob_done_toast:
-			_ob_done_toast = true
-			hud.toast = "✦  GETTING STARTED complete. The dark is yours to chart, pilot."
-			hud.toast_t = 4.0
-		hud.set_tip("")
-		return
-	hud.set_tip("◈  GETTING STARTED  ·  " + _onboard[GameState.onboarding_step].tip)
+# Onboarding API — thin wrappers over the Onboarding controller (Phase 3). External callers
+# (StarMap, QuestLog) and internal gameplay-event sites keep calling these on main unchanged.
+func notify_map_opened() -> void: onboarding.notify_map_opened()
+func notify_log_opened() -> void: onboarding.notify_log_opened()
+func _ob_note(id: String) -> void: onboarding.note(id)
+func restart_onboarding() -> void: onboarding.restart()
+func onboarding_state() -> Dictionary: return onboarding.state()
+func _update_onboarding() -> void: onboarding.update()
 
 
 # The top-center quest tracker. A TRACKED quest (chosen in the J log) takes priority and shows
