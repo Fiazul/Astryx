@@ -152,7 +152,7 @@ var _bolt_mesh: CapsuleMesh
 var _laser_bolt_mesh: CapsuleMesh
 var _strong_bolt_mesh: CapsuleMesh   # compact, round, "filled" bullet (HaniStar)
 var _trail_mesh: CylinderMesh
-var _trail_grad: Texture2D
+var fx: CombatFX                # transient VFX + bolt/flash materials (Phase 3)
 var _bolt_trail_mat: StandardMaterial3D
 var _abolt_trail_mat: StandardMaterial3D
 var _laser_trail_mat: StandardMaterial3D
@@ -162,17 +162,11 @@ var _bolt_mat_strong: StandardMaterial3D   # extra-bright bolts (HaniStar)
 var _smg_mat: StandardMaterial3D           # super-bright glow for the trail-less SMG bullet
 var _abolt_mat: StandardMaterial3D
 var _laser_bolt_mat: StandardMaterial3D   # Lyra's red laser bolts
-var _glow_tex: Texture2D
-var _splatters: Array[Texture2D] = []    # irregular hit-spark shapes, picked at random
 
 
 func _ready() -> void:
-	_glow_tex = _make_glow()
-	# Bake a few random irregular spark shapes once; _hit_flash picks one per hit.
-	var rng := RandomNumberGenerator.new()
-	rng.seed = 9137
-	for i in 5:
-		_splatters.append(_make_splatter(rng))
+	fx = CombatFX.new()   # owns the baked glow/splatter/plume textures + builds them in its _ready
+	add_child(fx)
 	# Slim tracer capsules (stretched along travel), shared by all bolts. Small world
 	# size -> perspective shrinks them downrange instead of them filling the lens.
 	_bolt_mesh = CapsuleMesh.new()
@@ -192,26 +186,25 @@ func _ready() -> void:
 	_strong_bolt_mesh.height = 0.7
 	_strong_bolt_mesh.radial_segments = 20
 	_strong_bolt_mesh.rings = 8
-	_bolt_mat = _bolt_material(Color(0.5, 0.9, 1.0))     # your bolts: cyan
+	_bolt_mat = fx.bolt_material(Color(0.5, 0.9, 1.0))     # your bolts: cyan
 	# Super-bright glow for the SMG player bullet (no trail) — a white-hot core that reads as
 	# a brilliant tracer against the dark. High emission, but it's tiny + trail-less so it
 	# blooms as a tight halo, not a fat bar.
-	_smg_mat = _bolt_material(Color(0.7, 0.95, 1.0))
+	_smg_mat = fx.bolt_material(Color(0.7, 0.95, 1.0))
 	_smg_mat.emission_energy_multiplier = 16.0
 	_smg_mat.albedo_color = Color(1.0, 1.0, 1.0)
 	# HaniStar's bolts: hot PINK to match her hull, much brighter + whiter-hot core so they
 	# read as strong as she is.
-	_bolt_mat_strong = _bolt_material(HANI_PINK)
+	_bolt_mat_strong = fx.bolt_material(HANI_PINK)
 	_bolt_mat_strong.emission_energy_multiplier = 8.0   # brighter than standard, still bloom-safe (was 36)
 	_bolt_mat_strong.albedo_color = HANI_PINK.lerp(Color.WHITE, 0.7)
-	_abolt_mat = _bolt_material(Color(1.0, 0.4, 0.3))    # alien bolts: red
-	_laser_bolt_mat = _bolt_material(Color(1.0, 0.12, 0.08))   # Lyra: red laser bolts
-	# Same gradient the ship's boosters use, so the bullet's tail fades like a plume.
-	_trail_grad = ShipMesh.make_plume_gradient(true)     # bright at the head (+Y), clear at the tail
-	_bolt_trail_mat = _trail_material(Color(0.5, 0.9, 1.0))
-	_abolt_trail_mat = _trail_material(Color(1.0, 0.4, 0.3))
-	_laser_trail_mat = _trail_material(Color(1.0, 0.12, 0.08))
-	_strong_trail_mat = _trail_material(HANI_PINK)
+	_abolt_mat = fx.bolt_material(Color(1.0, 0.4, 0.3))    # alien bolts: red
+	_laser_bolt_mat = fx.bolt_material(Color(1.0, 0.12, 0.08))   # Lyra: red laser bolts
+	# Tail materials use the plume gradient CombatFX owns.
+	_bolt_trail_mat = fx.trail_material(Color(0.5, 0.9, 1.0))
+	_abolt_trail_mat = fx.trail_material(Color(1.0, 0.4, 0.3))
+	_laser_trail_mat = fx.trail_material(Color(1.0, 0.12, 0.08))
+	_strong_trail_mat = fx.trail_material(HANI_PINK)
 	# A smooth cone (not a boxy prism): wide at the head, tapering to a SHARP point at
 	# the tail. Length lives on Y (height=1), scaled per-frame. Enough sides to read round.
 	_trail_mesh = CylinderMesh.new()
@@ -450,8 +443,8 @@ func _fire_ray(ship: Node3D, origin: Vector3, fwd: Vector3, col: Color, dmg: int
 	var beam_len := best_t            # on a hit, the tracer connects exactly to the target
 	if best_alien != null:
 		_damage_alien(best_alien, ship.true_pos, dmg)
-		_hit_flash(best_alien.pos - ship.true_pos)
-		_enemy_flash(best_alien.pos - ship.true_pos, best_alien.size)
+		fx.hit_flash(best_alien.pos - ship.true_pos)
+		fx.enemy_flash(best_alien.pos - ship.true_pos, best_alien.size)
 		hitmarker = 0.18
 	else:
 		beam_len = SHOT_TRACER_MISS_LEN   # a miss streaks a bullet-length tracer, not a full beam
@@ -561,8 +554,8 @@ func _step_bolts(list: Array, sp: Vector3, delta: float, player: bool, muzzle :=
 			for a in _aliens:
 				if a.alive and _seg_point_dist(prev, b.pos, a.pos) < a.size * HIT_RADIUS_MULT + b.r:
 					_damage_alien(a, sp, int(b.dmg))
-					_hit_flash(b.pos - sp)            # impact pop
-					_enemy_flash(a.pos - sp, a.size)  # the enemy lights up
+					fx.hit_flash(b.pos - sp)            # impact pop
+					fx.enemy_flash(a.pos - sp, a.size)  # the enemy lights up
 					hitmarker = 0.18                  # HUD crosshair confirms the hit
 					hit = true
 					break
@@ -621,7 +614,7 @@ func _damage_alien(a: Dictionary, sp: Vector3, dmg := 1) -> void:
 
 		if a.get("guardian", false):
 			zone_kills += 1     # track hostiles defeated in this star zone
-		_boom(a.pos - sp, a.size)
+		fx.boom(a.pos - sp, a.size)
 		if audio != null:
 			audio.play_explosion()
 		# Boss down → its summoned army vanishes and the body becomes capturable.
@@ -900,7 +893,7 @@ func _step_pickups(ship: Node3D, sp: Vector3, fwd: Vector3, delta: float) -> voi
 			energy = minf(energy + PICKUP_REFILL, e_max)
 			boost_energy = minf(boost_energy + PICKUP_REFILL, e_max)
 			player_hp = mini(player_hp + PICKUP_HEAL, player_max)
-			_boom(p.pos - sp, 9.0)
+			fx.boom(p.pos - sp, 9.0)
 			if audio != null:
 				audio.play_pickup()
 			p.node.queue_free()
@@ -1182,96 +1175,9 @@ func _seg_point_dist(a: Vector3, b: Vector3, p: Vector3) -> float:
 # semi-transparent (and a random IRREGULAR shape, not a bright clean circle, that
 # fades out to a ragged edge) so it confirms the hit WITHOUT washing out the
 # crosshair hitmarker. No shockwave ring — that circle was the worst offender.
-func _hit_flash(at: Vector3, scale := 1.0) -> void:
-	var tex: Texture2D = _splatters[randi() % _splatters.size()]
-	var layers := [
-		{ "size": 2.4, "grow": 1.7, "col": Color(1.0, 0.95, 0.8, 0.45),  "t": 0.18 },
-		{ "size": 4.0, "grow": 2.0, "col": Color(1.0, 0.55, 0.2, 0.28),  "t": 0.22 },
-	]
-	for L in layers:
-		var mi := MeshInstance3D.new()
-		var q := QuadMesh.new(); q.size = Vector2(L.size, L.size) * scale
-		mi.mesh = q
-		mi.material_override = _flash_mat(tex, L.col)
-		mi.position = at
-		mi.scale = Vector3(0.3, 0.3, 0.3)
-		add_child(mi)
-		var tw := create_tween()
-		tw.tween_property(mi, "scale", Vector3(L.grow, L.grow, L.grow), L.t)\
-			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-		tw.parallel().tween_property(mi.material_override, "albedo_color:a", 0.0, L.t)
-		tw.tween_callback(mi.queue_free)
-
-
-# A quick white flash sized to the enemy — it visibly reacts to being hit.
-func _enemy_flash(at: Vector3, size: float) -> void:
-	var mi := MeshInstance3D.new()
-	var q := QuadMesh.new(); q.size = Vector2(size * 1.5, size * 1.5)
-	mi.mesh = q
-	mi.material_override = _flash_mat(_glow_tex, Color(1.0, 1.0, 1.0, 0.9))
-	mi.position = at
-	add_child(mi)
-	var tw := create_tween()
-	tw.tween_property(mi.material_override, "albedo_color:a", 0.0, 0.14)
-	tw.tween_callback(mi.queue_free)
-
-
-func _flash_mat(tex: Texture2D, col: Color) -> StandardMaterial3D:
-	var mat := StandardMaterial3D.new()
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
-	mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
-	mat.albedo_texture = tex
-	mat.albedo_color = col
-	return mat
-
-
-func _boom(at: Vector3, size := ALIEN_SIZE) -> void:
-	var mi := MeshInstance3D.new()
-	var q := QuadMesh.new(); q.size = Vector2(size * 2.2, size * 2.2)
-	mi.mesh = q
-	var mat := StandardMaterial3D.new()
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
-	mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
-	mat.albedo_texture = _glow_tex
-	mat.albedo_color = Color(1.0, 0.7, 0.3, 1.0)
-	mi.material_override = mat
-	mi.position = at
-	add_child(mi)
-	var tw := create_tween()
-	tw.tween_property(mi, "scale", Vector3(2.5, 2.5, 2.5), 0.4)
-	tw.parallel().tween_property(mat, "albedo_color:a", 0.0, 0.4)
-	tw.tween_callback(mi.queue_free)
-
-
-# ---------------------------------------------------------------------------
-func _bolt_material(c: Color) -> StandardMaterial3D:
-	var m := StandardMaterial3D.new()
-	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	m.emission_enabled = true
-	m.emission = c
-	m.albedo_color = c.lerp(Color.WHITE, 0.6)    # white-hot core reads brighter
-	# Kept LOW (was 20) so the HDR bloom can't balloon a bolt into a fat blob near the close
-	# chase-cam — the same bounded-brightness trick that keeps Raptor 2's laser clean.
-	m.emission_energy_multiplier = 4.0
-	return m
-
-
-# A mini engine-plume tail for a bolt — built exactly like the ship's boosters: an
-# additive, double-sided cone whose alpha is driven by the plume gradient so it fades
-# smoothly from a bright nozzle (at the bolt) to a clear point behind it.
-func _trail_material(c: Color) -> StandardMaterial3D:
-	var m := StandardMaterial3D.new()
-	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	m.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
-	m.cull_mode = BaseMaterial3D.CULL_DISABLED   # both sides -> a full plume, not a half curve
-	m.albedo_texture = _trail_grad               # gradient drives the nozzle->tail fade
-	m.albedo_color = Color(c.r, c.g, c.b, 0.85)  # tint; gradient handles the falloff
-	return m
+# Transient combat VFX + bolt/flash materials extracted to CombatFX (Phase 3): fx.boom /
+# hit_flash / enemy_flash / bolt_material / trail_material. _glow_tex/_splatters/_trail_grad
+# + _make_glow/_make_splatter/_flash_mat moved there too.
 
 
 func _rand_dir() -> Vector3:
@@ -1316,37 +1222,4 @@ func _meshes(n: Node) -> Array:
 	return out
 
 
-func _make_glow() -> Texture2D:
-	var s := 64
-	var img := Image.create(s, s, false, Image.FORMAT_RGBA8)
-	var c := Vector2(s, s) * 0.5
-	for y in s:
-		for x in s:
-			var d := Vector2(x + 0.5, y + 0.5).distance_to(c) / (s * 0.5)
-			img.set_pixel(x, y, Color(1, 1, 1, pow(clampf(1.0 - d, 0.0, 1.0), 1.6)))
-	return ImageTexture.create_from_image(img)
-
-
-# A random irregular spark "splatter": a bright core whose alpha fades out to a
-# ragged, NON-circular edge — the edge radius wobbles per-angle with a few random
-# harmonics. We bake a handful of these and pick one per hit so impacts vary.
-func _make_splatter(rng: RandomNumberGenerator) -> Texture2D:
-	var s := 64
-	var img := Image.create(s, s, false, Image.FORMAT_RGBA8)
-	var c := Vector2(s, s) * 0.5
-	# a few random angular harmonics define the ragged outline: [freq, amp, phase]
-	var terms := []
-	for i in rng.randi_range(3, 5):
-		terms.append([float(rng.randi_range(3, 9)), rng.randf_range(0.08, 0.20), rng.randf_range(0.0, TAU)])
-	for y in s:
-		for x in s:
-			var d := Vector2(x + 0.5, y + 0.5) - c
-			var r := d.length() / (s * 0.5)
-			var ang := atan2(d.y, d.x)
-			var edge := 0.52
-			for t in terms:
-				edge += t[1] * sin(ang * t[0] + t[2])
-			edge = clampf(edge, 0.16, 0.96)
-			var a := pow(clampf(1.0 - r / edge, 0.0, 1.0), 1.7)   # bright core, soft ragged fade
-			img.set_pixel(x, y, Color(1, 1, 1, a))
-	return ImageTexture.create_from_image(img)
+# (_make_glow / _make_splatter moved to CombatFX)

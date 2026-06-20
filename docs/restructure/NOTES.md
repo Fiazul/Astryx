@@ -187,7 +187,7 @@ Order: pilot with the cleanest self-contained seam, then bigger ones. Verify eac
   main's objective arrow. The `_ob_done_toast` boot-init moved into `Onboarding._ready()` (runs after
   the profile loads). **main.gd 1878 → 1780 (−98).** Clean boot.
   - Found vestigial: `_map_seen` / `_log_seen` were write-only (moved into controller, kept for safety);
-    `_fresh_game` in main is now write-only/dead too — candidate removal later.
+	`_fresh_game` in main is now write-only/dead too — candidate removal later.
 - **Cumulative: main.gd 2093 → 1780** (−313) across MusicDirector (163) + Onboarding (128) + GameState (90).
 - **Nav/Tab-targeting — REJECTED as a seam (2026-06-20).** Mapped it: the state is cross-cutting, NOT
   self-contained — `_active_quest` 23 refs, `_nav_target` 17, `_marks` 16, `_nav_goal` 13, `_nav_locked`
@@ -198,7 +198,7 @@ Order: pilot with the cleanest self-contained seam, then bigger ones. Verify eac
 - **ARCHITECTURE.md** added at repo root — one-line purpose for every file (contributor map).
 - **Candidate next seams (each needs careful per-file work):**
   - `combat.gd`: FX/asset builders (materials/_menace_paint pure + _boom/_hit_flash/_load_*_model
-    spawners) → `combat/combat_fx.gd` — clean-ish but MANY internal call sites. ~250 lines.
+	spawners) → `combat/combat_fx.gd` — clean-ish but MANY internal call sites. ~250 lines.
   - `combat.gd`: guardian-waves/boss cluster (~250 lines) — shares combat state.
   - `combat.gd`: Raptor-2 laser (_update_laser/_build_laser/_show_shot_beam/_step_shot_beam) ~150.
   - `ship.gd` (1626) / `hud.gd` (1449): not yet mapped.
@@ -216,15 +216,25 @@ Order: pilot with the cleanest self-contained seam, then bigger ones. Verify eac
   thread those deps (pass `_trail_grad` / `ALIEN_SIZE` as params). Doable but fiddly — a careful job,
   not a tail-of-session lift. `_bolt_material` and `_rand_dir` ARE pure.
 
+- **3c ✅ DONE — CombatFX** (combat.gd). Extracted transient VFX + bolt/flash materials
+  (`boom`/`hit_flash`/`enemy_flash`/`bolt_material`/`trail_material` + the private `_flash_mat`/
+  `_make_glow`/`_make_splatter` + the glow/splatter/plume textures) into `combat/combat_fx.gd`
+  (149 lines, `class_name CombatFX`, Node spawned by combat). combat calls `fx.boom(...)` etc. and
+  `fx.bolt_material(...)` to build its shared bolt mats. Threaded the deps by giving CombatFX its own
+  textures (built in its `_ready`); `boom`'s `ALIEN_SIZE` default → `CombatFX.DEFAULT_BOOM_SIZE`.
+  **combat.gd 1352 → 1225 (−127).** Clean boot. **Playtest: fire bolts (cyan/pink), get hit (sparks),
+  kill enemies (boom), Lyra red lasers, HaniStar pink bolts — all VFX should look identical.**
+
 ## ▶ NEXT SESSION — start here
 
-Verified base: branch `restructure`, all green (P0/P1/P2/P3a/P3b playtested OK). main.gd 2093→1780.
+Verified base: branch `restructure`, all green (P0/P1/P2/P3a/P3b playtested; P3c boot-verified).
+main.gd 2093→1780, combat.gd 1352→1225.
 Recommended next steps, in order:
 1. **(optional) Merge or keep `restructure`** — decide whether to merge into `main` now (it's a solid,
    verified improvement) or keep stacking Phase 3 first.
-2. **combat.gd design pass** — first easy win: `combat/combat_fx.gd` static helper for the pure-ish
-   builders (`_bolt_material`, `_rand_dir`, + `_trail_material`/`_menace_paint`/`_flash_mat` with their
-   deps threaded). Then tackle the bigger clusters (guardian-waves, laser weapon-vs-VFX split).
+2. **More combat.gd:** next clusters — `enemy_factory.gd` (model loaders + make_alien/boss/enemy +
+   menace_paint + geometry helpers), then the guardian-waves/boss cluster, then the laser
+   weapon-vs-VFX split (tracer is pure, nose-laser does damage).
 3. **Then** ship.gd (1626) and hud.gd (1449) — map them first.
 4. **Separately from the restructure:** the pre-existing bugs (scan, planet-positions, buy-navigation)
    and the **#1 save/load "needs rework"** item (get specifics from owner first).
