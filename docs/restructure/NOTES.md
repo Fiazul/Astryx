@@ -207,6 +207,19 @@ Order: pilot with the cleanest self-contained seam, then bigger ones. Verify eac
 - **Playtest (3a):** music still cross-fades lobby⇄ship when flying out to open space / back; HaniNebula
   & Raptor 2 Neo still get the dedicated theme; engine ducks under the ship track.
 
+## Playtest results — 2026-06-20 (owner)
+
+- ✅ **Reset Progress** (P2d autoload-reset path) — works.
+- ✅ **Music crossfade** (P3a MusicDirector) — works.
+- ✅ **Onboarding / GETTING STARTED** (P3b) — works.
+- ✅ **Audio** (P1 GameAudio autoload) — works.
+- ⚠ **#1 Save/load round-trip** (P2 GameState) — "needs rework, leaving for now." UNCHARACTERIZED —
+  could be a P2 persistence regression OR a design rework. **TODO: get specifics from owner** (what
+  field didn't persist?). Deferred.
+- 🟢 **Confirmed PRE-EXISTING (not refactor regressions):** scan bug (#6), planet-positions oddity
+  (#7), "buy navigation missing" (#8). Owner: "old bug, we continue." → the refactor did NOT introduce
+  these; safe to keep decomposing. (Still worth fixing eventually, separate from the restructure.)
+
 ## ⚠ KNOWN ISSUES / regressions to investigate (do NOT lose these)
 
 - **"Buying navigation option seems missing"** (reported by owner after 2a playtest, 2026-06-20).
