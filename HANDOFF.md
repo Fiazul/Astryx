@@ -1,13 +1,25 @@
-# Astryx — Session Handoff (v0.11.4 · current)
+# Astryx — Session Handoff (v0.11.5 · current)
 
 > Pick-up doc for the next session. Project: `/home/fiazul/Desktop/Astryx`
 > Godot 4.6.2 / GDScript · repo `git@github.com:Fiazul/Astryx.git` (main).
 > The game is **all code-spawned** — `Main.tscn` is a one-node stub; `main.gd` builds the
 > world, ship, camera, lights, and UI at runtime.
-> ✅ **Everything through v0.11.4 is committed + pushed** to `main`.
+> ✅ **Everything through v0.11.5 is committed + pushed** to `main`.
 > ~12k lines of GDScript · ~35 modules · 7 ships · ~50 real star systems · Android APK + CI.
 
-## What changed in v0.11.4 (latest)
+## What changed in v0.11.5 (latest)
+
+- **Codebase modularization** — split the god-files into domain folders
+  (`core/flight/world/travel/combat/ui` + `autoload/`) behind autoload singletons
+  (`GameState`/`Ephemeris`/`Codex`/`PlanetData`/`GameAudio`); `main.gd` 2093→1780,
+  `combat.gd` 1352→1031 (CombatFX + EnemyFactory split out). Map in
+  [`ARCHITECTURE.md`](ARCHITECTURE.md), rationale in `docs/adr/0001-*`.
+- **Galactic core cleanup** — removed the experimental Sgr A\* black-hole visual; the
+  Milky Way galaxy backdrop + looming approach remain (`scripts/world/galaxy_model.gd`).
+- **Ship music** — **Vela Iron Pulse** & **Lyra** now fly to the dedicated interstellar
+  theme (`bgm_hani.ogg`), alongside HaniNebula & Raptor 2 Neo.
+
+## What changed in v0.11.4
 
 - **Realistic star field** — background sky is now a **baked real-catalogue points-mesh**
   (`scripts/starfield.gd` + `tools/build_starfield.gd`): default **Tycho-2, 355,360 real
