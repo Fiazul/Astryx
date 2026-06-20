@@ -57,7 +57,7 @@ const MARK_COLS := [           # one colour per X-mark slot, by order placed
 const QUEST_COL := Color(0.78, 0.50, 1.00)   # purple — the tracked-quest marker
 # coins + claimed moved to the GameState autoload (Phase 2a). main reads GameState.coins /
 # GameState.claimed; persistence below still reads/writes them (single writer for now).
-var _loaded_custom := {}      # saved per-ship colour/bell/finish, applied to the ship in _ready
+# customization moved to GameState (Phase 2d): GameState.customization, applied to the ship in _ready.
 # visited / nav_unlocked / wormholes_found moved to the GameState autoload (Phase 2b).
 # main reads GameState.visited / .nav_unlocked / .wormholes_found.
 var _nav_goal := ""           # star the map asked to guide to (orange waypoint). The guide
@@ -208,7 +208,7 @@ func _ready() -> void:
 	add_child(ship)
 	ship.true_pos = START_POS
 	ship.face_toward(-START_POS)   # open looking at Earth (the origin)
-	ship.load_customization(_loaded_custom)   # restore saved per-ship colours/bell/finish
+	ship.load_customization(GameState.customization)   # restore saved per-ship colours/bell/finish
 
 	# Chase camera lives on the world root; the ship drives its transform each
 	# frame (with a little lag) so it isn't rigidly bolted to the hull.
@@ -826,27 +826,7 @@ func reset_progress() -> void:
 func _load_profile() -> void:
 	var cfg := ConfigFile.new()
 	if cfg.load(PROFILE_PATH) == OK:
-		GameState.coins = int(cfg.get_value("player", "coins", 0))
-		GameState.claimed.clear()
-		for n in cfg.get_value("player", "claimed", []):
-			GameState.claimed[n] = true
-		# Saved per-ship colour/bell/finish choices — applied to the ship once it exists.
-		_loaded_custom = cfg.get_value("player", "customization", {})
-		# Which systems the player has already reached (= discovered → instant fast-travel).
-		GameState.visited.clear()
-		for s in cfg.get_value("player", "visited", []):
-			GameState.visited[s] = true
-		# Stars you've unlocked navigation to (paid / chest-dropped) but not yet discovered.
-		GameState.nav_unlocked.clear()
-		for s in cfg.get_value("player", "nav_unlocked", []):
-			GameState.nav_unlocked[s] = true
-		GameState.wormholes_found.clear()
-		for s in cfg.get_value("player", "wormholes_found", []):
-			GameState.wormholes_found[s] = true
-		GameState.onboarding_step = int(cfg.get_value("player", "onboarding_step", 0))
-		GameState.onboarding_done.clear()
-		for k in cfg.get_value("player", "onboarding_done", []):
-			GameState.onboarding_done[str(k)] = true
+		GameState.load_from(cfg)   # all persisted profile fields (coins/visited/onboarding/customization…)
 		_ob_done_toast = GameState.onboarding_done.has("boss")   # already finished once → don't re-toast on boot
 		_active_quest = str(cfg.get_value("player", "active_quest", ""))
 		# Where you left off last session (restored after the world is built — see
@@ -856,6 +836,7 @@ func _load_profile() -> void:
 		_saved_pos = cfg.get_value("player", "pos", Vector3.ZERO)
 		_saved_ship_index = int(cfg.get_value("player", "ship_index", -1))
 	else:
+		GameState.reset()    # autoload survives scene reload — clear stale memory on a fresh/reset game
 		_fresh_game = true   # no save on disk → a brand-new game (drives the tutorial)
 	# Home (Sol) is always known — you start there, so it's instant-travel from frame one.
 	GameState.visited[SystemDB.SOL] = true
@@ -863,16 +844,11 @@ func _load_profile() -> void:
 func _save_profile() -> void:
 	var cfg := ConfigFile.new()
 	cfg.load(PROFILE_PATH)            # keep any other keys we add later
-	cfg.set_value("player", "coins", GameState.coins)
-	cfg.set_value("player", "claimed", GameState.claimed.keys())
-	cfg.set_value("player", "visited", GameState.visited.keys())
-	cfg.set_value("player", "nav_unlocked", GameState.nav_unlocked.keys())
-	cfg.set_value("player", "wormholes_found", GameState.wormholes_found.keys())
-	cfg.set_value("player", "onboarding_step", GameState.onboarding_step)
-	cfg.set_value("player", "onboarding_done", GameState.onboarding_done.keys())
+	if ship != null:
+		GameState.customization = ship.customization_state()   # capture live ship look before saving
+	GameState.save_into(cfg)   # all persisted profile fields
 	cfg.set_value("player", "active_quest", _active_quest)
 	if ship != null:
-		cfg.set_value("player", "customization", ship.customization_state())
 		# Persist your location + active hull — but ONLY from a stable state. Mid-wormhole
 		# or mid-teleport we leave the last good values so a restore can't wedge the ship.
 		if not ship.transiting and not _tp_active:

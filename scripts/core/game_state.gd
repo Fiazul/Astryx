@@ -20,6 +20,9 @@ var wormholes_found := {}      # star id -> true: this star's wormhole found by 
 var onboarding_step := 0       # first-run guided tips: which step the player is on
 var onboarding_done := {}      # set of completed beginner-quest step ids (event-latched)
 
+# --- Ship customization (Phase 2d) — saved per-ship colour/bell/finish, applied in main._ready ---
+var customization := {}
+
 const CAPTURE_REWARD := 100
 const ARRIVAL_REWARD := 150    # coins granted the FIRST time you reach a new system
 const NAV_COST := 40           # coins to buy a navigator (map Navigate / Auto-pilot)
@@ -42,3 +45,46 @@ func claim_reward(body_name: String) -> int:
 	coins += bounty
 	claimed[body_name] = true
 	return bounty
+
+
+# --- Persistence (Phase 2d) -------------------------------------------------------------
+# GameState owns the (de)serialization of its OWN profile fields. main keeps the ConfigFile
+# orchestration (it also persists ship/session keys it owns: active_quest, system, pos, ship_index).
+
+func load_from(cfg: ConfigFile) -> void:
+	coins = int(cfg.get_value("player", "coins", 0))
+	claimed = _key_set(cfg.get_value("player", "claimed", []))
+	visited = _key_set(cfg.get_value("player", "visited", []))
+	nav_unlocked = _key_set(cfg.get_value("player", "nav_unlocked", []))
+	wormholes_found = _key_set(cfg.get_value("player", "wormholes_found", []))
+	onboarding_step = int(cfg.get_value("player", "onboarding_step", 0))
+	onboarding_done = _key_set(cfg.get_value("player", "onboarding_done", []))
+	customization = cfg.get_value("player", "customization", {})
+
+func save_into(cfg: ConfigFile) -> void:
+	cfg.set_value("player", "coins", coins)
+	cfg.set_value("player", "claimed", claimed.keys())
+	cfg.set_value("player", "visited", visited.keys())
+	cfg.set_value("player", "nav_unlocked", nav_unlocked.keys())
+	cfg.set_value("player", "wormholes_found", wormholes_found.keys())
+	cfg.set_value("player", "onboarding_step", onboarding_step)
+	cfg.set_value("player", "onboarding_done", onboarding_done.keys())
+	cfg.set_value("player", "customization", customization)
+
+# Clear to a brand-new-game state. REQUIRED on the no-save / Reset Progress path because this
+# autoload SURVIVES reload_current_scene() — its memory would otherwise keep stale values.
+func reset() -> void:
+	coins = 0
+	claimed = {}
+	visited = {}
+	nav_unlocked = {}
+	wormholes_found = {}
+	onboarding_step = 0
+	onboarding_done = {}
+	customization = {}
+
+static func _key_set(keys) -> Dictionary:
+	var d := {}
+	for k in keys:
+		d[str(k)] = true
+	return d

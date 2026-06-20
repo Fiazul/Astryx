@@ -148,10 +148,21 @@ it moves into GameState.save()/load() — avoids profile.cfg clobber mid-transit
   **LESSON:** `replace_all` is literal substring, NOT word-boundary — `_visited` is a substring of
   `is_visited`, so the bulk rename mangled `func is_visited` → `func isGameState.visited` (caught +
   fixed). Always grep for `[a-zA-Z]GameState\.` after a token replace_all.
-- **2c TODO** — onboarding flags (`onboarding_step`, `ob`, `ob_done_toast`, `map_seen`, `fresh_game`);
-  onboarding UPDATE loop stays in main (controller, not state).
-- **2d TODO** — `loaded_custom` (ship customization) + **move persistence into GameState.save()/load()**
-  + `reset_progress`.
+- **2c ✅ DONE** — persisted onboarding fields (`onboarding_step`, `_ob`→`onboarding_done`) → GameState.
+  Transient controller vars (`_ob_done_toast`, `_ob_kills_base/_boss_base`, `_onboard` steps array,
+  `_fresh_game`, `_map_seen`) stay in main. Used `_ob.` / `_ob[` scoped replaces to dodge the `_ob_*`
+  substring trap.
+- **2d ✅ DONE** — `_loaded_custom`→`GameState.customization`; persistence consolidated: GameState owns
+  `load_from(cfg)`/`save_into(cfg)`/`reset()`, main keeps the ConfigFile orchestration + its session keys
+  (active_quest, system, pos, ship_index). **CATCH:** autoloads SURVIVE `reload_current_scene()`, so
+  `reset_progress`/no-save now calls `GameState.reset()` to clear stale in-memory state (the old code
+  relied on main being recreated). Clean boot.
+- **PHASE 2 COMPLETE.** GameState autoload owns all persisted profile state. main.gd 2079 → 2049.
+  Reminder: state-extraction gives small line savings; **Phase 3 (decompose by responsibility seam)** is
+  the real main.gd/file-size relief.
+- **Playtest checklist (2c/2d):** ship customization persists across restart; onboarding/beginner-quest
+  progress persists & doesn't re-trigger; **Reset Progress** (Settings) truly wipes coins/visited/codex
+  (the autoload-reset path); plus the 2a coin checks.
 - **Playtest checklist for 2a:** claim a capture reward (G panel), buy a navigator / chart a lane
   (coin spend), arrive at a NEW system (+150 bonus), and confirm **coins persist across a restart**
   (the save/load path now round-trips through GameState).
