@@ -4,6 +4,13 @@
 > v0.11.5 working tree, base commit `d07f23e`). Updated as decisions land. Decisions that are
 > hard to reverse graduate into `docs/adr/`. This file is the scratch/everything log.
 
+> **✅ LANDED 2026-06-20 — merged into `main` (ff to `26aaafe`), clean boot.** Delivered: domain
+> folders + autoloads + `ARCHITECTURE.md`; `main.gd` 2093→1780; `combat.gd` 1352→1031 (CombatFX 149
+> + EnemyFactory 218 split out). **Stopped Phase 3 at the guardian-waves cluster on purpose** — it
+> shares combat's central `_aliens`/`_abolts`/`_spawn_bolt` and is read by main in 9 spots, so a
+> split would be a leaky bidirectional interface (same reason Nav/Tab was left in main). ship.gd
+> (1626) / hud.gd (1449) deferred — "need lots of work anyway," not the current focus.
+
 ## Why we're doing this (the actual pain)
 
 Stated by the owner, verbatim intent:
