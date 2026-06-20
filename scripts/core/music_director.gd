@@ -21,8 +21,8 @@ const MUSIC_FADE_OUT := 0.6  # lobby-track fade-out
 const SHIP_FADE_OUT := 0.6   # ship-track fade-out
 const MUSIC_FADE_IN := 0.7   # incoming fade speed — slow, cinematic swell
 const SHIP_ENGINE_DUCK_DB := 10.0  # dB the engine recedes once the interstellar ship music is up
-# The T2 hulls (HaniNebula + Raptor 2 Neo) share the dedicated theme; every other ship the default.
-const T2_HULLS := ["HaniNebula", "Raptor 2 Neo"]
+# These hulls share the dedicated interstellar theme (bgm_hani.ogg); every other ship the default.
+const THEMED_HULLS := ["HaniNebula", "Raptor 2 Neo", "Vela Iron Pulse", "Lyra"]
 
 var _cur_track := "lobby"          # "lobby" | "ship"
 var _xfade_phase := "fadein"       # start by swelling the lobby track in at launch
@@ -123,7 +123,7 @@ func update(delta: float, interstellar: bool, hull_name: String) -> void:
 
 # Which bgm the equipped hull should fly to (falls back to default if the hani track is missing).
 func _desired_track(hull_name: String) -> String:
-	return "hani" if (_music_hani != null and hull_name in T2_HULLS) else "default"
+	return "hani" if (_music_hani != null and hull_name in THEMED_HULLS) else "default"
 
 
 func _player_for(track: String) -> AudioStreamPlayer:
