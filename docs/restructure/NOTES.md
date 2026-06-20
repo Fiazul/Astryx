@@ -167,6 +167,23 @@ it moves into GameState.save()/load() — avoids profile.cfg clobber mid-transit
   (coin spend), arrive at a NEW system (+150 bonus), and confirm **coins persist across a restart**
   (the save/load path now round-trips through GameState).
 
+## Phase 3 — decompose big files by responsibility seam (the real size relief)
+
+Order: pilot with the cleanest self-contained seam, then bigger ones. Verify each by headless boot.
+
+- **3a ✅ DONE — MusicDirector** (`<next>`). Lifted the two-track lobby⇄ship music state machine out of
+  main.gd into `core/music_director.gd` (163 lines, `class_name MusicDirector`, spawned by main).
+  Narrow interface: `update(delta, interstellar, hull_name)`; main keeps `_is_interstellar()` and calls
+  it each frame. Director ducks the engine via the GameAudio autoload directly. **main.gd 2049 → 1878
+  (−171 lines)** — the first real size win (Phase 1+2 barely moved it). Clean boot.
+  - Folder note: put in `core/` (spawned by main). Audio is now split `autoload/game_audio` (SFX) +
+    `core/music_director` (music) — could justify a future `scripts/audio/` grouping.
+- **Candidate next seams** (from the main.gd map): Nav/Tab-targeting controller (~400 lines, higher
+  coupling), onboarding controller (~80 lines, state already in GameState), teleport ritual. Plus the
+  other big files: ship.gd (1626), hud.gd (1449), combat.gd (1352).
+- **Playtest (3a):** music still cross-fades lobby⇄ship when flying out to open space / back; HaniNebula
+  & Raptor 2 Neo still get the dedicated theme; engine ducks under the ship track.
+
 ## ⚠ KNOWN ISSUES / regressions to investigate (do NOT lose these)
 
 - **"Buying navigation option seems missing"** (reported by owner after 2a playtest, 2026-06-20).

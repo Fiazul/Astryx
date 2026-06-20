@@ -147,36 +147,9 @@ var _tp_label := ""
 var _tp_platform := false              # this jump came from the platform network → land beside the dock
 var _tp_ring: MeshInstance3D          # shiny light-ball that wraps the ship
 var _tp_ring_mat: StandardMaterial3D  # additive glowing-orb material (pulses in a light wave)
-# --- Music: a two-track state machine (lobby ⇄ interstellar) ---
-# Two players that cross-fade with an engine-only GAP between them. Which one is "up"
-# depends purely on game state, not on a drive clock:
-#   LOCAL  (in a star system: docked, hangar, or flying inside the speed-limited zone)
-#          -> the LOBBY track (bgm_lobby.ogg) plays continuously.
-#   INTERSTELLAR (flown OUT of the limited-speed area into open/FTL space)
-#          -> the SHIP track (bgm.ogg / bgm_hani.ogg) plays.
-# Crossing the boundary either way: fade the outgoing track out, hold a brief gap where
-# only the engine is heard, then slowly fade the incoming track in. The engine never
-# ducks under the music (see audio.gd) — it just layers beneath whichever track is up.
-var _music: AudioStreamPlayer          # the SHIP / interstellar track
-var _music_default: AudioStream   # the shared bgm every hull flies to
-var _music_hani: AudioStream      # HaniNebula's dedicated theme (null if missing)
-var _music_track := ""            # which ship stream is loaded: "default" | "hani"
-var _music_lobby: AudioStreamPlayer    # the LOBBY / local track (bgm_lobby.ogg)
-const MUSIC_DB := -13.0    # ship-track level once faded in
-const LOBBY_DB := -18.0    # lobby-track level — a comfortable backdrop the engine sits over
-const MUSIC_OFF_DB := -60.0  # silent end of either fade
-const MUSIC_GAP := 1.8       # engine-only silence between the two tracks (seconds)
-const WANT_DWELL := 0.4      # boundary debounce before committing a track switch
-const MUSIC_FADE_OUT := 0.6  # lobby-track fade-out — longer & smoother (~6s)
-const SHIP_FADE_OUT := 0.6   # ship-track fade-out — longer & smoother (~6s)
-const MUSIC_FADE_IN := 0.7   # incoming fade speed — slow, cinematic swell
-const SHIP_ENGINE_DUCK_DB := 10.0  # dB the engine recedes once the interstellar ship music is up
-# State-machine bookkeeping. _cur_track is the track that's up (or coming up); _xfade_phase
-# walks steady -> fadeout -> gap -> fadein -> steady when the wanted track changes.
-var _cur_track := "lobby"          # "lobby" | "ship"
-var _xfade_phase := "fadein"       # start by swelling the lobby track in at launch
-var _gap_t := 0.0                  # remaining engine-only gap (seconds)
-var _want_dwell := 0.0             # how long the wanted track has differed from _cur_track
+# --- Music: a two-track lobby⇄ship state machine — extracted to MusicDirector (Phase 3).
+# main keeps _is_interstellar() and feeds the director each frame via music.update(...).
+var music: MusicDirector
 
 # Where the player starts, in absolute scene units (1u = 0.1 AU). You launch
 # FROM Earth (the origin), parked just off it on the side away from the Sun, so
@@ -193,7 +166,8 @@ const MAX_SANE_POS := 1.0e10
 func _ready() -> void:
 	_load_profile()
 	_setup_environment()
-	_setup_music()
+	music = MusicDirector.new()
+	add_child(music)
 
 	# Fixed star backdrop on the world root (never rotates with the ship).
 	add_child(Starfield.new())
@@ -492,7 +466,7 @@ func _process(delta: float) -> void:
 	_update_minimap()
 	_update_wormhole_radar()
 	_update_scan(delta)
-	_update_music(delta)
+	music.update(delta, _is_interstellar(), ship.ship_name_at(ship.current_index()))
 	_update_onboarding()
 	_update_quests()
 	hud.lore_t = maxf(hud.lore_t - delta, 0.0)
@@ -512,104 +486,6 @@ func _process(delta: float) -> void:
 # speed cap lifted). Local play (in-system, docked, hangar) returns false -> lobby track.
 func _is_interstellar() -> bool:
 	return not docked and not ship.transiting and ship.in_open_space()
-
-
-# Music state machine: cross-fades the lobby and ship tracks with an engine-only gap.
-# Driven from _process; the players are PROCESS_MODE_ALWAYS so a paused overlay (map,
-# quest log, settings…) never cuts the audio — the fade just holds until the tree resumes.
-func _update_music(delta: float) -> void:
-	if _music == null or _music_lobby == null:
-		return
-	# Keep the ship track on the equipped hull's stream, but only swap while it's silent so
-	# the change is never an audible cut (HaniNebula flies to her own theme, others share bgm).
-	var track := _desired_music_track()
-	if track != _music_track \
-		and (_music.stream_paused or _music.volume_db <= MUSIC_OFF_DB + 1.0):
-		_music_track = track
-		_music.stream = _music_hani if track == "hani" else _music_default
-
-	var want := "ship" if _is_interstellar() else "lobby"
-	# Debounce the zone boundary: is_inf(speed_limit) can flicker right at a zone edge, so
-	# only treat a differing want as real once it has persisted for WANT_DWELL.
-	if want != _cur_track:
-		_want_dwell += delta
-	else:
-		_want_dwell = 0.0
-
-	match _xfade_phase:
-		"steady":
-			_fade_track(_cur_track, _target_db_for(_cur_track), MUSIC_FADE_IN, delta)
-			if want != _cur_track and _want_dwell >= WANT_DWELL:
-				_xfade_phase = "fadeout"
-		"fadeout":
-			# If the player ducked back before we finished, just swell the current track again.
-			if want == _cur_track:
-				_xfade_phase = "fadein"
-			else:
-				var out_rate := SHIP_FADE_OUT if _cur_track == "ship" else MUSIC_FADE_OUT
-				_fade_track(_cur_track, MUSIC_OFF_DB, out_rate, delta)
-				if _player_for(_cur_track).volume_db <= MUSIC_OFF_DB + 1.0:
-					_player_for(_cur_track).stream_paused = true
-					_gap_t = MUSIC_GAP
-					_xfade_phase = "gap"
-		"gap":
-			# Both tracks silent — only the engine is heard across this brief window.
-			_gap_t -= delta
-			if _gap_t <= 0.0:
-				_cur_track = want   # commit to whatever's wanted now (handles a flip mid-gap)
-				_ready_track(_cur_track)
-				_xfade_phase = "fadein"
-		"fadein":
-			if want != _cur_track and _want_dwell >= WANT_DWELL:
-				_xfade_phase = "fadeout"
-			else:
-				_fade_track(_cur_track, _target_db_for(_cur_track), MUSIC_FADE_IN, delta)
-				if _player_for(_cur_track).volume_db >= _target_db_for(_cur_track) - 0.5:
-					_xfade_phase = "steady"
-
-	# Duck the engine under the interstellar ship music, scaled by how present that track
-	# is (0 when silent — incl. the engine-only gap — full once it's faded in).
-	if audio != null:
-		var ship_presence := clampf(inverse_lerp(MUSIC_OFF_DB, MUSIC_DB, _music.volume_db), 0.0, 1.0)
-		audio.set_engine_duck(SHIP_ENGINE_DUCK_DB * ship_presence)
-
-
-func _player_for(track: String) -> AudioStreamPlayer:
-	return _music if track == "ship" else _music_lobby
-
-
-func _target_db_for(track: String) -> float:
-	return MUSIC_DB if track == "ship" else LOBBY_DB
-
-
-# Unpause/restart a track from silence so it can fade in cleanly.
-func _ready_track(track: String) -> void:
-	var p := _player_for(track)
-	p.volume_db = MUSIC_OFF_DB
-	if not p.playing:
-		p.play()
-	p.stream_paused = false
-
-
-# Ease a track's volume toward a target; unpause it if it needs to be heard.
-func _fade_track(track: String, target_db: float, rate: float, delta: float) -> void:
-	var p := _player_for(track)
-	if target_db > MUSIC_OFF_DB and p.stream_paused:
-		p.stream_paused = false
-		if not p.playing:
-			p.play()
-	p.volume_db = lerpf(p.volume_db, target_db, clampf(rate * delta, 0.0, 1.0))
-
-
-# Which bgm the equipped hull should fly to: the T2 hulls (HaniNebula + Raptor 2 Neo)
-# share the dedicated theme; every other ship shares the default bgm. Falls back to
-# default if the track failed to load.
-const T2_HULLS := ["HaniNebula", "Raptor 2 Neo"]
-func _desired_music_track() -> String:
-	if _music_hani != null and ship != null \
-		and ship.ship_name_at(ship.current_index()) in T2_HULLS:
-		return "hani"
-	return "default"
 
 
 # Jump straight to a system from the star map (fast-travel, no tunnel).
@@ -1959,54 +1835,7 @@ func _on_ship_finish_pick(key: String) -> void:
 		_save_profile()
 
 
-# Looping background music, spawned from code like everything else.
-# Mix hierarchy (loudest/most present first): gunfire/SFX > engine > music.
-# Two tracks crossfade by game state (see _update_music): the LOBBY track is the local /
-# in-system theme, the SHIP track (bgm/hani) is the interstellar theme. The engine layers
-# beneath whichever is up; SFX punch over both.
-func _setup_music() -> void:
-	# OGG Vorbis, not MP3: MP3 carries encoder padding that leaves an audible gap at
-	# the loop point. Vorbis loops seamlessly, so the track repeats cleanly.
-	_music_default = _load_music("res://assets/bgm.ogg")
-	if _music_default == null:
-		return
-	# HaniNebula gets her own dedicated interstellar theme; everyone else shares bgm.ogg.
-	_music_hani = _load_music("res://assets/bgm_hani.ogg")
-	_music = AudioStreamPlayer.new()
-	_music.stream = _music_default
-	_music_track = "default"
-	_music.volume_db = MUSIC_OFF_DB
-	_music.bus = "Master"
-	# PROCESS_MODE_ALWAYS: keep playing through a paused tree (map / quest log / settings /
-	# codex all pause the tree) so opening an overlay never cuts the music.
-	_music.process_mode = Node.PROCESS_MODE_ALWAYS
-	add_child(_music)
-	_music.play()
-	_music.stream_paused = true
-
-	# Lobby / local track — same seamless-loop + always-process treatment.
-	var lobby := _load_music("res://assets/bgm_lobby.ogg")
-	if lobby != null:
-		_music_lobby = AudioStreamPlayer.new()
-		_music_lobby.stream = lobby
-		_music_lobby.volume_db = MUSIC_OFF_DB
-		_music_lobby.bus = "Master"
-		_music_lobby.process_mode = Node.PROCESS_MODE_ALWAYS
-		add_child(_music_lobby)
-		_music_lobby.play()
-		# You start LOCAL (in-system) -> the state machine swells the lobby track in (its
-		# _xfade_phase begins at "fadein" with _cur_track = "lobby").
-		_music_lobby.stream_paused = false
-
-
-# Load a bgm track and flag it as a seamless loop (null if the file is missing).
-func _load_music(path: String) -> AudioStream:
-	var stream := load(path)
-	if stream == null:
-		return null
-	if stream is AudioStreamOggVorbis:
-		(stream as AudioStreamOggVorbis).loop = true   # seamless loop, no gap
-	return stream
+# Background music (mix hierarchy: gunfire/SFX > engine > music) lives in MusicDirector now.
 
 
 func _setup_environment() -> void:
