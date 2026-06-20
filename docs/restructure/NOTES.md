@@ -202,6 +202,15 @@ Order: pilot with the cleanest self-contained seam, then bigger ones. Verify eac
   - `combat.gd`: guardian-waves/boss cluster (~250 lines) — shares combat state.
   - `combat.gd`: Raptor-2 laser (_update_laser/_build_laser/_show_shot_beam/_step_shot_beam) ~150.
   - `ship.gd` (1626) / `hud.gd` (1449): not yet mapped.
+- **Laser — mapped, partially clean (2026-06-20).** The **shot-beam tracer** (`_show_shot_beam`/
+  `_step_shot_beam` + `_shot_beam*` vars, 2 call sites) is pure VFX → cleanly liftable (~50 lines).
+  BUT the **nose laser** (`_update_laser`) is a WEAPON: it iterates aliens + applies damage along the
+  beam (LASER_RADIUS), so it interweaves VFX with gameplay — not a pure-FX lift. Beam state vars are
+  otherwise confined to lines 352-504 (no leaks).
+- **Conclusion for the remaining god-files:** the cheap self-contained lifts (music, onboarding) are
+  done. `combat.gd` (and likely `ship.gd`/`hud.gd`) interweave VFX + gameplay + shared mutable state,
+  so they need a **deliberate per-file design pass** (decide the VFX/gameplay boundary, maybe a damage
+  callback or an FX node that combat drives) — NOT quick lifts. Best done fresh, file by file.
 - **REMINDER:** the "buy navigation missing" bug is still open and lives in the nav-economy area —
   worth bisecting vs `407e32c` before more nav-adjacent work.
 - **Playtest (3a):** music still cross-fades lobby⇄ship when flying out to open space / back; HaniNebula
