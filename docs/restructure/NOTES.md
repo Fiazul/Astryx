@@ -151,6 +151,22 @@ it moves into GameState.save()/load() — avoids profile.cfg clobber mid-transit
   (coin spend), arrive at a NEW system (+150 bonus), and confirm **coins persist across a restart**
   (the save/load path now round-trips through GameState).
 
+## ⚠ KNOWN ISSUES / regressions to investigate (do NOT lose these)
+
+- **"Buying navigation option seems missing"** (reported by owner after 2a playtest, 2026-06-20).
+  The buy/chart-a-lane nav option appears absent. **SUSPECT: possibly introduced by Phase 2a** —
+  2a edited the exact nav-economy path (`nav_cost`, `unlock_nav`, `buy_navigator` now read
+  `GameState.coins`/`GameState.NAV_*`). Could also be pre-existing (the restored v0.11.5 baseline
+  was WIP).
+  - **Where to look:** the "CHART LANE — %d coins" button in `ui/star_map.gd` (~line 345, calls
+    `main.nav_cost(sys)`); the button only shows when `main.star_state(id) == "locked"`
+    (`core/main.gd`), which depends on `_nav_unlocked` / `is_visited` / wormhole-found state.
+    Also `main.buy_navigator()` (map Navigate / autopilot) and `start_autopilot`.
+  - **Bisect:** compare against `407e32c` (pre-2a) — `git stash` then
+    `git checkout 407e32c` and see if the option is present there. If yes → 2a caused it; if no →
+    pre-existing in the v0.11.5 baseline.
+  - **Status:** deferred per owner ("keep a note and move on"). Verify before merging `restructure`.
+
 ## Confusions / things to flag (owner asked me to surface these)
 
 - `CLAUDE.FILE` at repo root — unusual name; purpose unknown. (low priority)
