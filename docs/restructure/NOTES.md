@@ -189,8 +189,21 @@ Order: pilot with the cleanest self-contained seam, then bigger ones. Verify eac
   - Found vestigial: `_map_seen` / `_log_seen` were write-only (moved into controller, kept for safety);
     `_fresh_game` in main is now write-only/dead too — candidate removal later.
 - **Cumulative: main.gd 2093 → 1780** (−313) across MusicDirector (163) + Onboarding (128) + GameState (90).
-- **Candidate next seams:** Nav/Tab-targeting controller (~400 lines, higher coupling — the big one),
-  teleport ritual. Plus the other big files: ship.gd (1626), hud.gd (1449), combat.gd (1352).
+- **Nav/Tab-targeting — REJECTED as a seam (2026-06-20).** Mapped it: the state is cross-cutting, NOT
+  self-contained — `_active_quest` 23 refs, `_nav_target` 17, `_marks` 16, `_nav_goal` 13, `_nav_locked`
+  11, woven through _process / input / scan / travel-arrival. Extracting it would rewrite 100+ scattered
+  refs and leave a LEAKY interface (main reaching into `nav._active_quest` everywhere) — violates D5
+  (responsibility seams, not line count). Left in main on purpose. The easy self-contained seams
+  (music, onboarding) are now exhausted; remaining seams are more entangled and need per-file care.
+- **ARCHITECTURE.md** added at repo root — one-line purpose for every file (contributor map).
+- **Candidate next seams (each needs careful per-file work):**
+  - `combat.gd`: FX/asset builders (materials/_menace_paint pure + _boom/_hit_flash/_load_*_model
+    spawners) → `combat/combat_fx.gd` — clean-ish but MANY internal call sites. ~250 lines.
+  - `combat.gd`: guardian-waves/boss cluster (~250 lines) — shares combat state.
+  - `combat.gd`: Raptor-2 laser (_update_laser/_build_laser/_show_shot_beam/_step_shot_beam) ~150.
+  - `ship.gd` (1626) / `hud.gd` (1449): not yet mapped.
+- **REMINDER:** the "buy navigation missing" bug is still open and lives in the nav-economy area —
+  worth bisecting vs `407e32c` before more nav-adjacent work.
 - **Playtest (3a):** music still cross-fades lobby⇄ship when flying out to open space / back; HaniNebula
   & Raptor 2 Neo still get the dedicated theme; engine ducks under the ship track.
 
