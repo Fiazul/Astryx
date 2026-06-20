@@ -55,8 +55,8 @@ const MARK_COLS := [           # one colour per X-mark slot, by order placed
 	Color(0.45, 1.00, 0.50),   # green
 ]
 const QUEST_COL := Color(0.78, 0.50, 1.00)   # purple — the tracked-quest marker
-var coins := 0                # player currency; persisted to the profile
-var _claimed := {}            # body name -> true once its capture reward is claimed
+# coins + claimed moved to the GameState autoload (Phase 2a). main reads GameState.coins /
+# GameState.claimed; persistence below still reads/writes them (single writer for now).
 var _loaded_custom := {}      # saved per-ship colour/bell/finish, applied to the ship in _ready
 var _visited := {}            # system id -> true once reached (= DISCOVERED → free fast-travel)
 var _nav_unlocked := {}       # star id -> true: navigation unlocked (paid or chest-dropped) →
@@ -73,11 +73,8 @@ var _ob_done_toast := false   # so the "quest complete" toast fires only once
 var _map_seen := false        # latched true by StarMap when first opened (the map pauses the tree,
 							  #   so _process can't poll map._open — the map notifies us instead)
 const PROFILE_PATH := "user://profile.cfg"
-const CAPTURE_REWARD := 100
-const ARRIVAL_REWARD := 150   # coins granted the FIRST time you reach a new system
-const NAV_COST := 40          # coins to buy a navigator (map Navigate / Auto-pilot)
-const NAV_UNLOCK_BASE := 80   # base coin cost to unlock navigation to a LOCKED star…
-const NAV_UNLOCK_PER_LY := 9  # …plus this per light-year of real distance (far = pricey)
+# Economy consts moved to GameState (Phase 2a): CAPTURE_REWARD, ARRIVAL_REWARD, NAV_COST,
+# NAV_UNLOCK_BASE, NAV_UNLOCK_PER_LY — reference as GameState.NAV_COST etc.
 const WORMHOLE_RADAR := 750.0 # hub range at which your radar finds an undiscovered wormhole
 
 # First-run guided tips. Each step pairs its on-screen tip with the predicate that
@@ -482,7 +479,7 @@ func _process(delta: float) -> void:
 	if ship.firing:
 		_ob_note("fire")
 	hud.firing = want_fire                       # blooms the dynamic crosshair
-	hud.coins = coins
+	hud.coins = GameState.coins
 	hud.set_cancel_nav_visible(_nav_locked != "" or _nav_goal != "" or _active_quest != "" or not _marks.is_empty())
 	# Tell the player (once) when they try to boost in a slow-zone where it does nothing.
 	if ship.boost_blocked and not _was_boost_blocked:
@@ -792,26 +789,25 @@ func start_autopilot(body_name: String) -> void:
 # --- Coins / rewards ---
 # A captured body's 100-coin reward isn't auto-given — the player CLAIMS it from the
 # Details (G) panel. Claimable = captured but not yet claimed.
+# Thin wrappers over GameState's pure economy (kept so external callers + onboarding/persistence
+# side-effects stay here). See GameState.can_claim / claim_reward.
 func can_claim(body_name: String) -> bool:
-	return codex != null and codex.is_discovered(body_name) and not _claimed.has(body_name)
+	return GameState.can_claim(body_name)
 
 func claim_reward(body_name: String) -> int:
-	if not can_claim(body_name):
-		return 0
-	var bounty := MissionDB.reward(body_name)   # per-mission bounty (see MissionDB)
-	coins += bounty
-	_claimed[body_name] = true
-	_ob_note("claim")
-	_save_profile()
+	var bounty := GameState.claim_reward(body_name)
+	if bounty > 0:
+		_ob_note("claim")
+		_save_profile()
 	return bounty
 
 # Map Navigate / Auto-pilot is a PAID navigator service. Returns true if it could pay.
 func buy_navigator() -> bool:
-	if coins < NAV_COST:
-		hud.toast = "Not enough coins for a navigator (%d / %d)" % [coins, NAV_COST]
+	if GameState.coins < GameState.NAV_COST:
+		hud.toast = "Not enough coins for a navigator (%d / %d)" % [GameState.coins, GameState.NAV_COST]
 		hud.toast_t = 2.5
 		return false
-	coins -= NAV_COST
+	GameState.coins -= GameState.NAV_COST
 	_save_profile()
 	return true
 
@@ -832,10 +828,10 @@ func reset_progress() -> void:
 func _load_profile() -> void:
 	var cfg := ConfigFile.new()
 	if cfg.load(PROFILE_PATH) == OK:
-		coins = int(cfg.get_value("player", "coins", 0))
-		_claimed.clear()
+		GameState.coins = int(cfg.get_value("player", "coins", 0))
+		GameState.claimed.clear()
 		for n in cfg.get_value("player", "claimed", []):
-			_claimed[n] = true
+			GameState.claimed[n] = true
 		# Saved per-ship colour/bell/finish choices — applied to the ship once it exists.
 		_loaded_custom = cfg.get_value("player", "customization", {})
 		# Which systems the player has already reached (= discovered → instant fast-travel).
@@ -869,8 +865,8 @@ func _load_profile() -> void:
 func _save_profile() -> void:
 	var cfg := ConfigFile.new()
 	cfg.load(PROFILE_PATH)            # keep any other keys we add later
-	cfg.set_value("player", "coins", coins)
-	cfg.set_value("player", "claimed", _claimed.keys())
+	cfg.set_value("player", "coins", GameState.coins)
+	cfg.set_value("player", "claimed", GameState.claimed.keys())
 	cfg.set_value("player", "visited", _visited.keys())
 	cfg.set_value("player", "nav_unlocked", _nav_unlocked.keys())
 	cfg.set_value("player", "wormholes_found", _wormholes_found.keys())
@@ -909,18 +905,18 @@ func star_state(id: String) -> String:
 # you are now (the far dark is expensive to chart a lane to).
 func nav_cost(id: String) -> int:
 	var d: float = SystemDB.coord(current_system).distance_to(SystemDB.coord(id))
-	return NAV_UNLOCK_BASE + int(d * NAV_UNLOCK_PER_LY)
+	return GameState.NAV_UNLOCK_BASE + int(d * GameState.NAV_UNLOCK_PER_LY)
 
 # Pay to unlock navigation to a locked star (map action). Returns true if it could pay.
 func unlock_nav(id: String) -> bool:
 	if star_state(id) != "locked":
 		return false
 	var cost := nav_cost(id)
-	if coins < cost:
-		hud.toast = "Not enough coins to chart a lane to %s  (%d / %d)" % [SystemDB.display_name(id), coins, cost]
+	if GameState.coins < cost:
+		hud.toast = "Not enough coins to chart a lane to %s  (%d / %d)" % [SystemDB.display_name(id), GameState.coins, cost]
 		hud.toast_t = 2.5
 		return false
-	coins -= cost
+	GameState.coins -= cost
 	_nav_unlocked[id] = true
 	_save_profile()
 	hud.toast = "◇  Navigation unlocked — %s  (-%d coins)" % [SystemDB.display_name(id), cost]
@@ -1780,9 +1776,9 @@ func _arrive(system_id: String, at_pos := Vector3(INF, INF, INF)) -> void:
 	# First time here = the trip paid off: coins, a rank bump, and a lore card. Re-visits
 	# (fast-travel, teleport home) are silent — the reward is for discovery, not commuting.
 	if first_visit and system_id != SystemDB.SOL:
-		coins += ARRIVAL_REWARD
+		GameState.coins += GameState.ARRIVAL_REWARD
 		hud.toast = "✦  NEW SYSTEM — %s   ·   +%d coins   ·   %s (%d charted)" \
-			% [SystemDB.display_name(system_id), ARRIVAL_REWARD, survey_rank_title(), survey_rank()]
+			% [SystemDB.display_name(system_id), GameState.ARRIVAL_REWARD, survey_rank_title(), survey_rank()]
 		hud.toast_t = 5.0
 		var lore: String = SystemDB.lore(system_id)
 		if lore != "":

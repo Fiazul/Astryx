@@ -22,6 +22,7 @@ config/icon="res://icon.svg"
 
 [autoload]
 
+GameState="*res://scripts/core/game_state.gd"
 Ephemeris="*res://scripts/autoload/ephemeris.gd"
 PlanetData="*res://scripts/autoload/planet_data.gd"
 Codex="*res://scripts/autoload/codex.gd"
