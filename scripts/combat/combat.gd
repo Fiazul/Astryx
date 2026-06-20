@@ -131,7 +131,7 @@ var player_max := PLAYER_MAX_HP   # current hull's max HP (set from the active s
 var kills := 0
 var hitmarker := 0.0              # >0 for a moment after a shot lands (HUD reads it)
 
-var audio: GameAudio              # set by main; SFX for fire / explosion
+@onready var audio := GameAudio   # autoload; SFX for fire / explosion
 var planets: PlanetSystem         # set by main; lets gravity wells bend bolts
 
 var _aliens := []                 # { pos, vel, hp, node, fire_cd, alive, respawn }

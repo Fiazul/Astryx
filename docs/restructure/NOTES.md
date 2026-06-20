@@ -107,6 +107,23 @@ File name ≠ class it holds — fixable:
   an isolated-`--check-only` artifact — `_button_at()` has no declared return type. Whole-project
   import accepts it. **Candidate trivial cleanup later:** annotate `_button_at()`'s return type.
 
+## Phase 1 execution log (IN PROGRESS, branch `restructure`)
+
+- **GameAudio ✅ DONE** (pilot). Registered `[autoload] GameAudio="*res://scripts/autoload/game_audio.gd"`;
+  dropped `class_name GameAudio`; consumers (`ship`, `combat`, `tutor`, `main`) now self-source via
+  `@onready var audio := GameAudio` instead of main-injection. Removed main's `.new()/add_child` +
+  `ship.audio=`/`combat.audio=`/`tutor.audio=` wiring. **All ~25 `audio.x()` call sites unchanged**
+  (alias kept) → near-zero behavior risk. `main.audio` external accessors (quest_log/planet_info/
+  star_map) still work because main keeps `audio` as an alias to the autoload.
+- **VERIFICATION METHOD CHANGED:** once an autoload exists, `godot --headless --check-only --script X`
+  gives FALSE "Identifier not found: GameAudio" — isolated compile has no autoload globals. **Use a
+  headless boot instead:** `timeout 30 godot --headless --quit-after 120` and grep for
+  `SCRIPT ERROR|Compile Error|Failed to load`. GameAudio passed (clean boot, exit 0).
+- **TODO remaining services** (same pattern): `Codex`, `PlanetData`, `Ephemeris`. Note `Codex`/
+  `PlanetData` autoload names will collide with their `class_name` until dropped — drop class_name
+  first. `Ephemeris` is used at startup (`eph.scene_pos("Sun")`) — autoload boots before main, fine.
+  Possible future cleanup: migrate the kept `audio`/`eph`/`codex` aliases to direct global calls.
+
 ## Confusions / things to flag (owner asked me to surface these)
 
 - `CLAUDE.FILE` at repo root — unusual name; purpose unknown. (low priority)

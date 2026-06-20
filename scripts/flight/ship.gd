@@ -331,7 +331,7 @@ var dock_approach := 0.0       # 0 outside the station's landing zone, 1 at the 
 var frozen := false            # docked at a station — motion held, mouse freed
 var transiting := false        # in a wormhole tunnel — motion held, view locked forward
 var camera: Camera3D           # assigned by main; driven from fly()
-var audio: GameAudio           # assigned by main; the engine voice is driven from fly()
+@onready var audio := GameAudio   # autoload; the engine voice is driven from fly()
 var mouse_sens := MOUSE_SENS   # live mouse sensitivity (Settings menu adjusts this)
 var warp := 1.0                # per-ship MAX speed multiplier; >1 = breaks physics (Vela)
 var has_galactic_drive := false  # this hull can run the galactic drive (Vela Iron Pulse)

@@ -1,4 +1,5 @@
-class_name GameAudio
+# Autoload singleton (registered as `GameAudio` in project.godot) — reach it from any
+# module as `GameAudio.play_x()`; no injection needed. (class_name dropped per ADR-0001.)
 extends Node
 # Code-spawned SFX, same spirit as everything else in Cold Light: rapid laser fire
 # (pooled so shots overlap), a "crush" boom on alien death, and a three-part

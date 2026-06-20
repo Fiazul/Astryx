@@ -20,7 +20,7 @@ var hud: HUD
 var eph: Ephemeris
 var wormhole: Wormhole
 var combat: Combat
-var audio: GameAudio
+@onready var audio := GameAudio   # autoload (kept as alias so main.audio accessors still work)
 var settings: SettingsMenu
 var map: StarMap
 var platform_tp: PlatformTeleport   # isolated platform fast-travel console (not the star map)
@@ -265,15 +265,12 @@ func _ready() -> void:
 	wormhole.set_ship(ship)
 	wormhole.set_portals(_known_portals(current_system))   # this system's KNOWN neighbour links
 
-	# Code-spawned SFX (fire / engine / explosion).
-	audio = GameAudio.new()
-	add_child(audio)
-	ship.audio = audio   # the ship drives the engine voice from fly()
+	# Code-spawned SFX (fire / engine / explosion) — now the GameAudio autoload;
+	# ship/combat/tutor self-source it via `@onready var audio := GameAudio`.
 
 	# Combat: alien dogfighters + your bolts (left-click to fire).
 	combat = Combat.new()
 	add_child(combat)
-	combat.audio = audio
 	combat.planets = planets                            # bolts curve through gravity wells
 	combat.reset(SystemDB.is_hostile(current_system))   # Sol starts peaceful
 	combat.player_hp = ship.max_hp                      # start at the hull's full defence
@@ -343,7 +340,6 @@ func _ready() -> void:
 	platform_tp.main = self
 	add_child(platform_tp)
 	tutor = Tutor.new()
-	tutor.audio = audio
 	tutor.main = self
 	add_child(tutor)
 	reward_card = RewardCard.new()

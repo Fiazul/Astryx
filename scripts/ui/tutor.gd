@@ -5,7 +5,7 @@ extends CanvasLayer
 # short line; CLICK it to expand the detail; DRAG it off the left edge to dismiss it. They
 # auto-fade after a while. Only runs on a fresh game (main calls start()).
 
-var audio                       # set by main, for the ting-tong chime
+@onready var audio := GameAudio   # autoload, for the ting-tong chime
 var main                        # set by main — lets us pace faster while Sol isn't unlocked
 
 const MARGIN_X := 18.0          # gap from the left edge (resting x)
