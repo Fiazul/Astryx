@@ -44,6 +44,17 @@ var _x_fired := false
 var _rmb_hold := 0.0          # seconds right-click held — ≥1s swaps Raptor's Combat/Warp form
 var _rmb_fired := false
 var _nav_locked := ""         # LOCKED map waypoint (orange) — persists until cancelled
+# Player-placed X marks: up to 3 at once, each its own colour. HOLD X marks the current Tab
+# target (toggle the same one off). Session/system-local — cleared when you change systems.
+# Each entry: { name: String, wh: String } (wh = portal dest when the mark is a wormhole).
+var _marks: Array = []
+const MARK_MAX := 3
+const MARK_COLS := [           # one colour per X-mark slot, by order placed
+	Color(0.30, 0.85, 1.00),   # cyan
+	Color(1.00, 0.84, 0.30),   # gold
+	Color(0.45, 1.00, 0.50),   # green
+]
+const QUEST_COL := Color(0.78, 0.50, 1.00)   # purple — the tracked-quest marker
 var coins := 0                # player currency; persisted to the profile
 var _claimed := {}            # body name -> true once its capture reward is claimed
 var _loaded_custom := {}      # saved per-ship colour/bell/finish, applied to the ship in _ready
@@ -102,6 +113,8 @@ var _last_waves_cleared := 0 # last guardian wave count we announced (for the "W
 var _scan_name := ""
 const SCAN_SECONDS := 3.0     # capture takes a beat longer so the ritual reads + feels earned
 const SCAN_RANGE := 1500.0    # how close you must be to start a capture (generous)
+const STAR_APPROACH_RANGE := 6000.0  # in the hub, flying within this of a real star drops you into
+									 # its LOCAL frame (small coords) so the last stretch is flyable
 const GUARD_RANGE := 2500.0   # approach a guarded body within this → its guardians activate
 const GUARD_COUNT := 5        # guardian aliens per guarded body (placeholder meshes for now)
 var _env: Environment
@@ -139,13 +152,36 @@ var _tp_label := ""
 var _tp_platform := false              # this jump came from the platform network → land beside the dock
 var _tp_ring: MeshInstance3D          # shiny light-ball that wraps the ship
 var _tp_ring_mat: StandardMaterial3D  # additive glowing-orb material (pulses in a light wave)
-var _music: AudioStreamPlayer
+# --- Music: a two-track state machine (lobby ⇄ interstellar) ---
+# Two players that cross-fade with an engine-only GAP between them. Which one is "up"
+# depends purely on game state, not on a drive clock:
+#   LOCAL  (in a star system: docked, hangar, or flying inside the speed-limited zone)
+#          -> the LOBBY track (bgm_lobby.ogg) plays continuously.
+#   INTERSTELLAR (flown OUT of the limited-speed area into open/FTL space)
+#          -> the SHIP track (bgm.ogg / bgm_hani.ogg) plays.
+# Crossing the boundary either way: fade the outgoing track out, hold a brief gap where
+# only the engine is heard, then slowly fade the incoming track in. The engine never
+# ducks under the music (see audio.gd) — it just layers beneath whichever track is up.
+var _music: AudioStreamPlayer          # the SHIP / interstellar track
 var _music_default: AudioStream   # the shared bgm every hull flies to
 var _music_hani: AudioStream      # HaniNebula's dedicated theme (null if missing)
-var _music_track := ""            # which stream is loaded: "default" | "hani"
-const MUSIC_DB := -13.0    # bgm level once faded in — louder/present (engine ducks under it)
-const MUSIC_OFF_DB := -60.0  # silent end of the fade
-const MUSIC_FADE := 1.2    # fade speed (per second) for the gentle in/out
+var _music_track := ""            # which ship stream is loaded: "default" | "hani"
+var _music_lobby: AudioStreamPlayer    # the LOBBY / local track (bgm_lobby.ogg)
+const MUSIC_DB := -13.0    # ship-track level once faded in
+const LOBBY_DB := -18.0    # lobby-track level — a comfortable backdrop the engine sits over
+const MUSIC_OFF_DB := -60.0  # silent end of either fade
+const MUSIC_GAP := 1.8       # engine-only silence between the two tracks (seconds)
+const WANT_DWELL := 0.4      # boundary debounce before committing a track switch
+const MUSIC_FADE_OUT := 0.6  # lobby-track fade-out — longer & smoother (~6s)
+const SHIP_FADE_OUT := 0.6   # ship-track fade-out — longer & smoother (~6s)
+const MUSIC_FADE_IN := 0.7   # incoming fade speed — slow, cinematic swell
+const SHIP_ENGINE_DUCK_DB := 10.0  # dB the engine recedes once the interstellar ship music is up
+# State-machine bookkeeping. _cur_track is the track that's up (or coming up); _xfade_phase
+# walks steady -> fadeout -> gap -> fadein -> steady when the wanted track changes.
+var _cur_track := "lobby"          # "lobby" | "ship"
+var _xfade_phase := "fadein"       # start by swelling the lobby track in at launch
+var _gap_t := 0.0                  # remaining engine-only gap (seconds)
+var _want_dwell := 0.0             # how long the wanted track has differed from _cur_track
 
 # Where the player starts, in absolute scene units (1u = 0.1 AU). You launch
 # FROM Earth (the origin), parked just off it on the side away from the Sun, so
@@ -409,6 +445,13 @@ func _process(delta: float) -> void:
 	ship.nearest_dist = planets.nearest_dist # warp ships ease out of warp on arrival
 	ship.star_field_dist = planets.star_dist # FTL only unlocks beyond the star's gravity field
 	ship.gravity = planets.gravity           # gentle pull toward bodies
+	# Fly-to-arrive: in the deep-space hub, flying within approach range of a REAL star drops you
+	# into its LOCAL frame (small coords, like Sol) so the final stretch is actually flyable — no
+	# float32 freeze, no pinpoint bobbing. Placed at your current offset, so there's no teleport.
+	if not ship.transiting and not docked and not _tp_active and not _core_dying \
+			and planets.hub_star_id != "" and planets.hub_star_id != current_system \
+			and planets.hub_star_dist < STAR_APPROACH_RANGE:
+		_arrive(planets.hub_star_id, -planets.hub_star_rel)
 	# Galactic drive: feed the Iron Pulse's live core-distance scanner, and loom the Milky Way in
 	# at the fixed voyage pace scaled by how directly she's flying coreward (galactic_loom_rate is
 	# signed: toward Sgr A* approaches, flying back out recedes). This is DECOUPLED from her real
@@ -454,7 +497,7 @@ func _process(delta: float) -> void:
 		_ob_note("fire")
 	hud.firing = want_fire                       # blooms the dynamic crosshair
 	hud.coins = coins
-	hud.set_cancel_nav_visible(_nav_locked != "" or _nav_goal != "" or _active_quest != "")
+	hud.set_cancel_nav_visible(_nav_locked != "" or _nav_goal != "" or _active_quest != "" or not _marks.is_empty())
 	# Tell the player (once) when they try to boost in a slow-zone where it does nothing.
 	if ship.boost_blocked and not _was_boost_blocked:
 		hud.toast = "⚠  Boost unavailable here — clear the slow-zone first"
@@ -483,34 +526,98 @@ func _process(delta: float) -> void:
 	hud.refresh()
 
 
-# Music only while you're travelling — pause when you've sat still a moment.
+# Are we "interstellar" — flown out of the limited-speed area into open/FTL space?
+# Not while docked or mid-transit; otherwise it's the ship's open-space signal (every
+# speed cap lifted). Local play (in-system, docked, hangar) returns false -> lobby track.
+func _is_interstellar() -> bool:
+	return not docked and not ship.transiting and ship.in_open_space()
+
+
+# Music state machine: cross-fades the lobby and ship tracks with an engine-only gap.
+# Driven from _process; the players are PROCESS_MODE_ALWAYS so a paused overlay (map,
+# quest log, settings…) never cuts the audio — the fade just holds until the tree resumes.
 func _update_music(delta: float) -> void:
-	if _music == null:
+	if _music == null or _music_lobby == null:
 		return
-	# Swap to the equipped hull's track only while the music is silent (paused or fully
-	# faded out) so the change is never an audible cut. We reset to MUSIC_OFF_DB so the
-	# new track always fades IN from zero (and the old one has already faded OUT before
-	# we get here). HaniNebula flies to her own theme; everyone else shares the bgm.
+	# Keep the ship track on the equipped hull's stream, but only swap while it's silent so
+	# the change is never an audible cut (HaniNebula flies to her own theme, others share bgm).
 	var track := _desired_music_track()
 	if track != _music_track \
 		and (_music.stream_paused or _music.volume_db <= MUSIC_OFF_DB + 1.0):
 		_music_track = track
 		_music.stream = _music_hani if track == "hani" else _music_default
-		_music.volume_db = MUSIC_OFF_DB   # start silent -> _update_music fades it in
-		_music.play()
-		_music.stream_paused = true
-	# The bgm is gated by the engine's continuous-drive clock: silent for the first
-	# MUSIC_IN_TIME (8s) of a run — engine only — then it fades in. It never plays on
-	# the platform or in a wormhole (drive_time resets to 0 there).
-	var want := audio != null and not docked and not ship.transiting \
-		and audio.drive_time() >= GameAudio.MUSIC_IN_TIME
-	if want and _music.stream_paused:
-		_music.stream_paused = false
-	# Fade in/out smoothly rather than snapping on.
-	var target_db := MUSIC_DB if want else MUSIC_OFF_DB
-	_music.volume_db = lerpf(_music.volume_db, target_db, clampf(MUSIC_FADE * delta, 0.0, 1.0))
-	if not want and _music.volume_db <= MUSIC_OFF_DB + 1.0:
-		_music.stream_paused = true   # fully faded out — pause to idle
+
+	var want := "ship" if _is_interstellar() else "lobby"
+	# Debounce the zone boundary: is_inf(speed_limit) can flicker right at a zone edge, so
+	# only treat a differing want as real once it has persisted for WANT_DWELL.
+	if want != _cur_track:
+		_want_dwell += delta
+	else:
+		_want_dwell = 0.0
+
+	match _xfade_phase:
+		"steady":
+			_fade_track(_cur_track, _target_db_for(_cur_track), MUSIC_FADE_IN, delta)
+			if want != _cur_track and _want_dwell >= WANT_DWELL:
+				_xfade_phase = "fadeout"
+		"fadeout":
+			# If the player ducked back before we finished, just swell the current track again.
+			if want == _cur_track:
+				_xfade_phase = "fadein"
+			else:
+				var out_rate := SHIP_FADE_OUT if _cur_track == "ship" else MUSIC_FADE_OUT
+				_fade_track(_cur_track, MUSIC_OFF_DB, out_rate, delta)
+				if _player_for(_cur_track).volume_db <= MUSIC_OFF_DB + 1.0:
+					_player_for(_cur_track).stream_paused = true
+					_gap_t = MUSIC_GAP
+					_xfade_phase = "gap"
+		"gap":
+			# Both tracks silent — only the engine is heard across this brief window.
+			_gap_t -= delta
+			if _gap_t <= 0.0:
+				_cur_track = want   # commit to whatever's wanted now (handles a flip mid-gap)
+				_ready_track(_cur_track)
+				_xfade_phase = "fadein"
+		"fadein":
+			if want != _cur_track and _want_dwell >= WANT_DWELL:
+				_xfade_phase = "fadeout"
+			else:
+				_fade_track(_cur_track, _target_db_for(_cur_track), MUSIC_FADE_IN, delta)
+				if _player_for(_cur_track).volume_db >= _target_db_for(_cur_track) - 0.5:
+					_xfade_phase = "steady"
+
+	# Duck the engine under the interstellar ship music, scaled by how present that track
+	# is (0 when silent — incl. the engine-only gap — full once it's faded in).
+	if audio != null:
+		var ship_presence := clampf(inverse_lerp(MUSIC_OFF_DB, MUSIC_DB, _music.volume_db), 0.0, 1.0)
+		audio.set_engine_duck(SHIP_ENGINE_DUCK_DB * ship_presence)
+
+
+func _player_for(track: String) -> AudioStreamPlayer:
+	return _music if track == "ship" else _music_lobby
+
+
+func _target_db_for(track: String) -> float:
+	return MUSIC_DB if track == "ship" else LOBBY_DB
+
+
+# Unpause/restart a track from silence so it can fade in cleanly.
+func _ready_track(track: String) -> void:
+	var p := _player_for(track)
+	p.volume_db = MUSIC_OFF_DB
+	if not p.playing:
+		p.play()
+	p.stream_paused = false
+
+
+# Ease a track's volume toward a target; unpause it if it needs to be heard.
+func _fade_track(track: String, target_db: float, rate: float, delta: float) -> void:
+	var p := _player_for(track)
+	if target_db > MUSIC_OFF_DB and p.stream_paused:
+		p.stream_paused = false
+		if not p.playing:
+			p.play()
+	p.volume_db = lerpf(p.volume_db, target_db, clampf(rate * delta, 0.0, 1.0))
 
 
 # Which bgm the equipped hull should fly to: the T2 hulls (HaniNebula + Raptor 2 Neo)
@@ -1019,10 +1126,12 @@ func _sol_fully_unlocked() -> bool:
 # Hold-to-act inputs (checked each frame): HOLD X ≥1s locks the current Tab target as an
 # orange waypoint; HOLD right-click ≥1s swaps Raptor's Combat/Warp form (moved off the X tap).
 func _update_holds(delta: float) -> void:
-	if ship.frozen or ship.transiting:
+	if ship.transiting:
 		_x_hold = 0.0; _x_fired = false
 		_rmb_hold = 0.0; _rmb_fired = false
 		return
+	# X-mark works even when frozen — parked at a star (or held by a guardian) is exactly when
+	# you want to mark it. Only mid-wormhole transit blocks it (handled above).
 	if Input.is_physical_key_pressed(KEY_X):
 		_x_hold += delta
 		if _x_hold >= 1.0 and not _x_fired:
@@ -1033,7 +1142,8 @@ func _update_holds(delta: float) -> void:
 	# Feed the crosshair lock ring — only fills when there's actually a Tab target to lock.
 	if hud != null:
 		hud.set_lock_progress(clampf(_x_hold, 0.0, 1.0) if _nav_target != "" else 0.0)
-	if Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT):
+	# Raptor's Combat/Warp swap stays blocked while frozen (no sense changing modes parked).
+	if not ship.frozen and Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT):
 		_rmb_hold += delta
 		if _rmb_hold >= 1.0 and not _rmb_fired:
 			_rmb_fired = true
@@ -1045,21 +1155,47 @@ func _update_holds(delta: float) -> void:
 		_rmb_hold = 0.0; _rmb_fired = false
 
 
-# Promote the current Tab target to a LOCKED orange waypoint (free). Persists through aim
-# changes and Tab presses — only the ✖ CANCEL NAV button clears it (cancel_locked_nav).
+# HOLD X over the current Tab target: drop a coloured X mark (up to 3, each its own colour).
+# Marking the same body again clears that mark. With 3 already placed, the oldest is replaced.
+# Marks coexist with the quest marker and the live Tab marker — all show at once.
 func lock_nav_target() -> void:
 	if _nav_target == "":
-		hud.toast = "Aim at something and press Tab first, then hold X to lock it."
+		hud.toast = "Aim at something and press Tab first, then hold X to mark it."
 		hud.toast_t = 2.0
 		return
-	_active_quest = ""
-	_nav_goal = ""
+	var nm := _nav_target
+	var wh := _nav_wormhole
+	# Quest target? X toggles the quest tracking off (same untrack feel as a mark).
+	if nm != "" and nm == _active_quest:
+		_active_quest = ""
+		_save_profile()
+		_nav_target = ""
+		_tab_index = -1
+		if hud != null:
+			hud.toast = "✖  QUEST UNTRACKED  ·  %s" % _tab_display_name(nm)
+			hud.toast_t = 2.0
+		_update_navigator()
+		return
+	# Already marked? Toggle it off.
+	for i in _marks.size():
+		if _marks[i].name == nm and (nm != "Wormhole" or _marks[i].wh == wh):
+			_marks.remove_at(i)
+			if hud != null:
+				hud.toast = "✖  MARK CLEARED  ·  %s   (%d/%d)" % [_tab_display_name(nm), _marks.size(), MARK_MAX]
+				hud.toast_t = 2.0
+			_update_navigator()
+			return
 	_nav_off = false
-	_nav_locked = _nav_target
-	_locked_wh = _nav_wormhole   # snapshot which portal, so later Tabs don't move the lock
+	if _marks.size() >= MARK_MAX:
+		_marks.pop_front()   # full — drop the oldest to make room
+	_marks.append({ "name": nm, "wh": wh })
+	# Hand the target OVER to the mark: drop the live Tab pick so the teal marker doesn't sit
+	# on top of the new coloured one, and Tab is free to grab the next thing.
+	_nav_target = ""
+	_tab_index = -1
 	if hud != null:
 		hud.set_nav_stopped(false)
-		hud.toast = "◆  NAV LOCKED  ·  %s" % _tab_display_name(_nav_locked)
+		hud.toast = "◆  MARKED  ·  %s   (%d/%d)" % [_tab_display_name(nm), _marks.size(), MARK_MAX]
 		hud.toast_t = 2.2
 	_update_navigator()
 
@@ -1068,6 +1204,7 @@ func cancel_locked_nav() -> void:
 	_nav_locked = ""
 	_nav_goal = ""            # also clear a map "Navigate" guide
 	_active_quest = ""        # and stop tracking a quest
+	_marks.clear()            # and wipe the player's X marks
 	ship.autopilot = false
 	hud.set_nav_stopped(false)
 	_save_profile()
@@ -1134,96 +1271,112 @@ func _tab_display_name(name: String) -> String:
 		_:       return "Unknown Planet"
 
 
+# Slot of an existing X mark matching this target (-1 if not marked).
+func _mark_index(name: String, wh := "") -> int:
+	for i in _marks.size():
+		if _marks[i].name == name and (name != "Wormhole" or _marks[i].wh == wh):
+			return i
+	return -1
+
+
+# Resolve a waypoint entry { name, wh } to its current render-space offset.
+func _waypoint_rel(name: String, wh := "") -> Vector3:
+	if name == "Wormhole":
+		return wormhole.portal_rel_for(wh, ship.true_pos) if wh != "" else wormhole.portal_rel(ship.true_pos)
+	return planets.rel_of(name)
+
+
+# Rebuild EVERY active waypoint each frame and hand the whole set to the navigator, so they
+# all draw at once: the tracked QUEST (purple) + up to 3 player X marks (cyan/gold/green) +
+# the live Tab target (teal) + a single guide (map Navigate / Locked / Survey, orange). The
+# top objective line keeps a priority order (quest > navigate > locked > tab > survey).
 func _update_navigator() -> void:
 	if navigator == null:
 		return
-	var tname: String
-	var rel: Vector3
 	if ship.transiting:
-		navigator.update_nav(ship.camera, false, Vector3.ZERO, "", "")   # gizmo only
+		navigator.set_markers(ship.camera, [])   # gizmo only
 		hud.set_objective("")
 		return
-	elif _active_quest != "" and not _nav_off:
-		# TRACKED QUEST guide (free, top priority): route to the body's system via wormholes,
-		# then point straight at the body once you're in its system. Completion normally clears
-		# it in the capture path; this backstop advances if it's already surveyed.
+	var markers: Array = []
+	var objective := ""
+	var quest_idx := -1   # markers[] slot of the in-system quest marker (for the drop badge)
+
+	# --- the single guide: quest / map-navigate / locked (mutually exclusive) -------------
+	if _active_quest != "" and not _nav_off:
+		# TRACKED QUEST guide: route to the body's system via wormholes, then point straight at
+		# it once in-system. Backstop-advances if it's already surveyed.
 		if codex != null and codex.is_discovered(_active_quest):
 			_advance_quest()
-		if _active_quest == "":
-			navigator.update_nav(ship.camera, false, Vector3.ZERO, "", "")
-			hud.set_objective("")
-			return
-		var qbody := _active_quest
-		var qsys := MissionDB.system_of(qbody)
-		var qtitle := MissionDB.title_for(qbody)
-		if qsys == current_system:
-			rel = planets.rel_of(qbody)
-			navigator.update_nav(ship.camera, true, rel, "QUEST: %s" % qbody, _fmt_nav_dist(rel.length()), true)
-			hud.set_objective("✦  QUEST  %s  —  survey %s   %s" % [qtitle, qbody, _fmt_nav_dist(rel.length())])
-		else:
-			var rt := _route_to(qsys)
-			if not rt.ok:
-				navigator.update_nav(ship.camera, false, Vector3.ZERO, "", "")
-				hud.set_objective("✦  QUEST  %s  —  no known route yet, explore on" % qtitle)
-				return
-			var hopname := SystemDB.display_name(rt.hop)
-			navigator.update_nav(ship.camera, true, rt.rel, "QUEST → %s" % hopname, _fmt_nav_dist(rt.rel.length()), true)
-			hud.set_objective("✦  QUEST  %s  —  %s via %s   %s" % [qtitle, SystemDB.display_name(qsys), hopname, _fmt_nav_dist(rt.rel.length())])
-		return
+		if _active_quest != "":
+			var qbody := _active_quest
+			var qsys := MissionDB.system_of(qbody)
+			var qtitle := MissionDB.title_for(qbody)
+			if qsys == current_system:
+				var qrel := planets.rel_of(qbody)
+				quest_idx = markers.size()
+				markers.append({ "rel": qrel, "name": "QUEST: %s" % qbody, "dist": _fmt_nav_dist(qrel.length()), "color": QUEST_COL })
+				objective = "✦  QUEST  %s  —  survey %s   %s" % [qtitle, qbody, _fmt_nav_dist(qrel.length())]
+			else:
+				var rt := _route_to(qsys)
+				if rt.ok:
+					var hopname := SystemDB.display_name(rt.hop)
+					markers.append({ "rel": rt.rel, "name": "QUEST → %s" % hopname, "dist": _fmt_nav_dist(rt.rel.length()), "color": QUEST_COL })
+					objective = "✦  QUEST  %s  —  %s via %s   %s" % [qtitle, SystemDB.display_name(qsys), hopname, _fmt_nav_dist(rt.rel.length())]
+				else:
+					objective = "✦  QUEST  %s  —  no known route yet, explore on" % qtitle
 	elif _nav_goal != "":
-		# Map "Navigate" guide (orange): route over KNOWN links and point at THIS system's
-		# wormhole leading to the next hop ("go to Proxima first, then Alpha").
+		# Map "Navigate" guide (orange): route over KNOWN links to the next hop's wormhole.
 		var gname := SystemDB.display_name(_nav_goal)
 		var rg := _route_to(_nav_goal)
-		if not rg.ok:
-			navigator.update_nav(ship.camera, false, Vector3.ZERO, "", "")   # gizmo only
-			hud.set_objective("◆  NAVIGATE  %s  —  no known route yet, explore on" % gname)
-			return
-		rel = rg.rel
-		var hopname := SystemDB.display_name(rg.hop)
-		tname = ("WORMHOLE → %s" % hopname) if rg.hop == _nav_goal else ("→ %s  via %s" % [gname, hopname])
-		var gd := _fmt_nav_dist(rel.length())
-		navigator.update_nav(ship.camera, true, rel, tname, gd, true)
-		var via := "" if rg.hop == _nav_goal else "   (next: %s)" % hopname
-		hud.set_objective("◆  NAVIGATE  %s%s   %s" % [gname, via, gd])
-		return
+		if rg.ok:
+			var hopname := SystemDB.display_name(rg.hop)
+			var tname := ("WORMHOLE → %s" % hopname) if rg.hop == _nav_goal else ("→ %s  via %s" % [gname, hopname])
+			markers.append({ "rel": rg.rel, "name": tname, "dist": _fmt_nav_dist(rg.rel.length()), "color": Navigator.LOCK_COL })
+			var via := "" if rg.hop == _nav_goal else "   (next: %s)" % hopname
+			objective = "◆  NAVIGATE  %s%s   %s" % [gname, via, _fmt_nav_dist(rg.rel.length())]
+		else:
+			objective = "◆  NAVIGATE  %s  —  no known route yet, explore on" % gname
 	elif _nav_locked != "":
-		# LOCKED waypoint — orange, top priority, ignores the N toggle and aim/Tab changes,
-		# stays until the ✖ CANCEL NAV button is clicked. Name hidden until scanned.
-		if _nav_locked == "Wormhole":
-			rel = wormhole.portal_rel_for(_locked_wh, ship.true_pos) if _locked_wh != "" else wormhole.portal_rel(ship.true_pos)
+		# LOCKED waypoint (orange) — autopilot / map "navigate to body". Name hidden until scanned.
+		var lrel := _waypoint_rel(_nav_locked, _locked_wh)
+		var lname := _tab_display_name(_nav_locked)
+		markers.append({ "rel": lrel, "name": lname, "dist": _fmt_nav_dist(lrel.length()), "color": Navigator.LOCK_COL })
+		objective = "◆  LOCKED  %s   %s" % [lname, _fmt_nav_dist(lrel.length())]
+
+	# --- player X marks (always on, each its own colour) ---------------------------------
+	var marks_start := markers.size()
+	for i in _marks.size():
+		var m: Dictionary = _marks[i]
+		var mrel := _waypoint_rel(String(m.name), String(m.get("wh", "")))
+		markers.append({ "rel": mrel, "name": "✖ %s" % _tab_display_name(String(m.name)),
+			"dist": _fmt_nav_dist(mrel.length()), "color": MARK_COLS[i % MARK_COLS.size()] })
+
+	# --- live Tab target (teal) ----------------------------------------------------------
+	if _nav_target != "" and not _nav_off:
+		var midx := _mark_index(_nav_target, _nav_wormhole)
+		var tn := _tab_display_name(_nav_target)
+		if _nav_target == _active_quest and quest_idx >= 0:
+			# Tab is on the quest target — badge the purple quest marker, no stacked teal diamond.
+			markers[quest_idx]["drop"] = true
+		elif midx >= 0:
+			# Already marked: don't stack a teal diamond on it — just badge the existing
+			# coloured mark with a water-drop so you can see Tab is sitting on a marked target.
+			markers[marks_start + midx]["drop"] = true
 		else:
-			rel = planets.rel_of(_nav_locked)
-		tname = _tab_display_name(_nav_locked)
-		var ld := _fmt_nav_dist(rel.length())
-		navigator.update_nav(ship.camera, true, rel, tname, ld, true)
-		hud.set_objective("◆  LOCKED  %s   %s" % [tname, ld])
-		return
-	elif _nav_off:
-		navigator.update_nav(ship.camera, false, Vector3.ZERO, "", "")   # gizmo only
-		hud.set_objective("")
-		return
-	elif _nav_target != "":
-		# Tab target (picked by the aim ray). Its real name is hidden until SCANNED — an
-		# undiscovered body reads as "Unknown Planet"/"Unknown Star" so you scan to learn it.
-		if _nav_target == "Wormhole":
-			rel = wormhole.portal_rel_for(_nav_wormhole, ship.true_pos) if _nav_wormhole != "" else wormhole.portal_rel(ship.true_pos)
-		else:
-			rel = planets.rel_of(_nav_target)
-		tname = _tab_display_name(_nav_target)
-	else:
-		# Default: the Survey guide always points at the nearest unclaimed star, so
-		# the player is never lost. Tab overrides it; cycling past the end returns here.
+			var trel := _waypoint_rel(_nav_target, _nav_wormhole)
+			markers.append({ "rel": trel, "name": tn, "dist": _fmt_nav_dist(trel.length()), "color": Navigator.COL })
+		if objective == "":
+			objective = "→  %s   %s" % [tn, _fmt_nav_dist(_waypoint_rel(_nav_target, _nav_wormhole).length())]
+
+	# --- Survey guide fallback: never leave the player lost -------------------------------
+	if markers.is_empty() and not _nav_off:
 		var obj := _current_objective()
-		if obj.is_empty():
-			navigator.update_nav(ship.camera, false, Vector3.ZERO, "", "")
-			hud.set_objective("")
-			return
-		tname = obj.name
-		rel = obj.rel
-	var dist_txt := _fmt_nav_dist(rel.length())
-	navigator.update_nav(ship.camera, true, rel, tname, dist_txt)
-	hud.set_objective("→  %s   %s" % [tname, dist_txt])
+		if not obj.is_empty():
+			markers.append({ "rel": obj.rel, "name": obj.name, "dist": _fmt_nav_dist(obj.rel.length()), "color": Navigator.COL })
+			objective = "→  %s   %s" % [obj.name, _fmt_nav_dist(obj.rel.length())]
+
+	navigator.set_markers(ship.camera, markers)
+	hud.set_objective(objective)
 
 
 # The current guidance objective:
@@ -1603,7 +1756,7 @@ func _core_kill() -> void:
 
 # Emerge from a wormhole in a new system: swap bodies, hard-reset the ship to a
 # small LOCAL coord (so float precision is never stressed), re-aim the portal.
-func _arrive(system_id: String) -> void:
+func _arrive(system_id: String, at_pos := Vector3(INF, INF, INF)) -> void:
 	_core_dying = false              # landed home → the core's grip is broken
 	_core_warned = false
 	_core_dmg_accum = 0.0
@@ -1613,7 +1766,8 @@ func _arrive(system_id: String) -> void:
 	current_system = system_id
 	planets.load_system(SystemDB.bodies(system_id))
 	planets.speed_zones = (system_id == SystemDB.SOL)   # planet safe-zone limits: Sol only
-	ship.true_pos = SystemDB.arrival_pos(system_id)
+	# Fly-arrive passes your preserved local offset (no teleport); wormhole/map use the system's pad.
+	ship.true_pos = at_pos if not is_inf(at_pos.x) else SystemDB.arrival_pos(system_id)
 	ship.transiting = false
 	galaxy.reset_distance()                   # back in a normal system → core is ~26,000 ly away again
 	ship.face_toward(-ship.true_pos)          # look back toward the system's star
@@ -1632,6 +1786,7 @@ func _arrive(system_id: String) -> void:
 	combat.reset(fight, SystemDB.is_hostile(system_id))
 	combat.player_hp = ship.max_hp
 	_nav_target = ""                               # clear the waypoint in the new system
+	_marks.clear()                                 # X marks are system-local — drop them on jump
 	ship.autopilot = false                         # don't keep flying to an old-system target
 	if docked:
 		_set_docked(false)
@@ -1850,24 +2005,42 @@ func _on_ship_finish_pick(key: String) -> void:
 
 # Looping background music, spawned from code like everything else.
 # Mix hierarchy (loudest/most present first): gunfire/SFX > engine > music.
-# Music is a backdrop that only plays while flying outside (not on the platform);
-# the engine has real weight over it (see audio.gd ENGINE_*), SFX punch over both.
+# Two tracks crossfade by game state (see _update_music): the LOBBY track is the local /
+# in-system theme, the SHIP track (bgm/hani) is the interstellar theme. The engine layers
+# beneath whichever is up; SFX punch over both.
 func _setup_music() -> void:
 	# OGG Vorbis, not MP3: MP3 carries encoder padding that leaves an audible gap at
 	# the loop point. Vorbis loops seamlessly, so the track repeats cleanly.
 	_music_default = _load_music("res://assets/bgm.ogg")
 	if _music_default == null:
 		return
-	# HaniNebula gets her own dedicated theme — swapped in while docked (see _update_music).
+	# HaniNebula gets her own dedicated interstellar theme; everyone else shares bgm.ogg.
 	_music_hani = _load_music("res://assets/bgm_hani.ogg")
 	_music = AudioStreamPlayer.new()
 	_music.stream = _music_default
 	_music_track = "default"
-	_music.volume_db = MUSIC_OFF_DB   # starts silent; _update_music fades it in once driving
+	_music.volume_db = MUSIC_OFF_DB
 	_music.bus = "Master"
+	# PROCESS_MODE_ALWAYS: keep playing through a paused tree (map / quest log / settings /
+	# codex all pause the tree) so opening an overlay never cuts the music.
+	_music.process_mode = Node.PROCESS_MODE_ALWAYS
 	add_child(_music)
 	_music.play()
-	_music.stream_paused = true   # silent until you've been flying for MUSIC_IN_TIME
+	_music.stream_paused = true
+
+	# Lobby / local track — same seamless-loop + always-process treatment.
+	var lobby := _load_music("res://assets/bgm_lobby.ogg")
+	if lobby != null:
+		_music_lobby = AudioStreamPlayer.new()
+		_music_lobby.stream = lobby
+		_music_lobby.volume_db = MUSIC_OFF_DB
+		_music_lobby.bus = "Master"
+		_music_lobby.process_mode = Node.PROCESS_MODE_ALWAYS
+		add_child(_music_lobby)
+		_music_lobby.play()
+		# You start LOCAL (in-system) -> the state machine swells the lobby track in (its
+		# _xfade_phase begins at "fadein" with _cur_track = "lobby").
+		_music_lobby.stream_paused = false
 
 
 # Load a bgm track and flag it as a seamless loop (null if the file is missing).

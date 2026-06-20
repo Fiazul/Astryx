@@ -112,6 +112,14 @@ static func display_name(id: String) -> String:
 	var r := _row(id)
 	return str(r.get("name", id)) if not r.is_empty() else id
 
+# Reverse of display_name: a destination id for a star's display name (for fly-to-arrive from the
+# hub, where the sky markers are name-keyed). "" if the name isn't a travel destination.
+static func id_for_name(nm: String) -> String:
+	for id in _rows():
+		if str(_rows()[id].get("name", "")) == nm:
+			return id
+	return ""
+
 static func light_years(id: String) -> float:
 	return float(_row(id).get("ly", 0.0))
 

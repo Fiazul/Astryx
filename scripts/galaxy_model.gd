@@ -25,19 +25,29 @@ const CORE_LY := 26000.0       # real distance to the galactic centre (the scann
 var remaining_ly := CORE_LY    # live distance still to go; CORE_LY = far backdrop, 0 = at the core
 var _dir_n := DIR.normalized() # cached core direction (render space)
 
-# Sagittarius A* — the black hole at the dead centre ("blackhole skyball" by CatLoveCheese,
-# CC-BY 4.0, see CREDITS.md). A skyball: a circle/sphere with the black hole on ONE side.
-# Parented to THIS node, so it sits at the disc centre and looms in as you fly the drive toward it.
-const BLACKHOLE_GLB := "res://assets/blackhole_skyball.glb"
-const BLACKHOLE_RADIUS := 300.0   # fitted on-screen size of the hole at the centre.
-const BH_RISE := 15.0            # lift the hole UP off the dead centre (+ = up, - = down, 0 = centre)
-# >>> ADJUST THE ANGLE HERE <<<  Euler rotation in DEGREES applied to the whole model — pitch (X),
-# yaw (Y), roll (Z). Tweak these three numbers to aim the black-hole side wherever you want it.
-const BH_ROT_DEG := Vector3(-5, 180, -30)
-const BH_BLACKEN := false         # true = paint the whole model pure black; false = keep its own
-								  # textures (so the skyball's painted black hole stays visible)
-const BH_EDGE_FADE := 2.5         # how hard the silhouette edges fade to nothing (higher = softer
-								  # bigger fade ring; ~1 = barely, ~4 = lots). 0 disables the fade.
+# Sagittarius A* — the black hole at the dead centre, rendered to match its REAL Event Horizon
+# Telescope photo: a dominant dark central SHADOW, wrapped by a thin, fuzzy, glowing-orange PHOTON
+# RING, with one side brighter than the other (relativistic Doppler beaming — gas rotating toward us
+# is boosted) plus a few bright clumps. Built procedurally on a flat quad tilted BH_TILT_DEG off the
+# galactic plane (no model — a real BH is bent light, not a solid object): since we sit in the plane,
+# the tilt foreshortens the ring into the iconic "donut from an angle". Parented to THIS node, so it
+# sits at the disc centre and looms in as you fly the drive toward it. The hole is fixed (no spin).
+const BLACKHOLE_RADIUS := 100.0   # on-screen size (half-extent) of the hole at the centre.
+const BH_RISE := 1.0            # lift the hole UP off the dead centre (+ = up, - = down, 0 = centre)
+const BH_ENERGY := 2.0          # ring brightness (drives the bloom halo)
+const BH_SHADOW_FRAC := 0.34    # dark central shadow radius (fraction of the half-size)
+const BH_RING_FRAC := 0.46      # radius of the bright photon-ring peak
+const BH_RING_WIDTH := 0.075    # ring softness / fuzz (bigger = fuzzier, EHT-like)
+const BH_OUTER_FRAC := 0.92     # radius where the glow fades to nothing
+const BH_DOPPLER := 0.6         # brightness asymmetry: 0 = even ring, ~0.7 = strong bright side
+const BH_DOPPLER_DEG := 90.0    # which side is the bright (approaching) side, in degrees
+const BH_KNOTS := 0.35          # bright clumps around the ring (real Sgr A* isn't a smooth band)
+const BH_TILT_DEG := 32.0       # tilt of the disc off the galactic plane. 0 = flat-in-plane (we're
+								# in the plane, so that reads near edge-on); ~30 tips it toward us into
+								# a foreshortened ellipse — the real "donut seen from an angle" look.
+								# 90 = face-on circle. This is the knob for "the angle is off".
+const BH_RING_COLOR := Color(1.0, 0.55, 0.2)    # the orange of the ring body
+const BH_HOT_COLOR := Color(1.0, 0.92, 0.72)    # the hotter white-orange at the ring peak
 const BLACKHOLE_SHOW_LY := 30000.0 # reveal distance. Just under CORE_LY (26000) so it's HIDDEN in
 								   # all normal play (distance sits at 26000 there), but appears as a
 								   # distant speck the moment the voyage starts and looms the whole way.
@@ -48,9 +58,8 @@ const BH_STAR_COUNT := 600
 const BH_STAR_INNER := 1000.0     # cluster starts outside the (big) hole...
 const BH_STAR_OUTER := 2800.0     # ...and thins out to here
 const BH_STAR_SIZE := 16.0        # per-star sprite size
-var _blackhole: Node3D            # the Sgr A* model (a holder we tilt + spin); gated in _apply_loom
+var _blackhole: Node3D            # the Sgr A* holder (camera-facing EHT disc); gated in _apply_loom
 var _starcluster: MultiMeshInstance3D   # the burned-star bulge; gated alongside the hole
-var _bh_fade_shader: Shader       # cached edge-fade shader (built once, shared by every surface)
 
 
 func _ready() -> void:
@@ -105,121 +114,115 @@ func _ready() -> void:
 	_apply_loom()
 
 
-# Build Sgr A* at the disc centre. The model goes inside a HOLDER node we own, so we can:
-#   • centre + fit the model within it,
-#   • aim it via the BH_ROT_DEG angle knob, and lift it with BH_RISE.
-# Then a burned-star bulge is scattered around it (the real nuclear star cluster).
+# The Event Horizon Telescope look, drawn on a camera-facing quad (see BH_EHT_SHADER): a dark
+# central shadow, a thin fuzzy orange photon ring, and a Doppler-bright side. Lives in a HOLDER we
+# own (lifted by BH_RISE); a burned-star bulge (the real nuclear star cluster) rings it.
 func _add_blackhole() -> void:
-	var ps := load(BLACKHOLE_GLB) as PackedScene
-	if ps == null:
-		push_warning("GalaxyModel: %s missing/not imported — open the project in the editor once." % BLACKHOLE_GLB)
-		return
-	var model := ps.instantiate() as Node3D
-	if model == null:
-		return
 	var holder := Node3D.new()
 	add_child(holder)
-	holder.add_child(model)
 	_blackhole = holder
 	holder.visible = false   # _apply_loom turns it on only once the core is close (BLACKHOLE_SHOW_LY)
-	var meshes: Array[MeshInstance3D] = []
-	_gather(model, meshes)
-	var mn := Vector3(INF, INF, INF)
-	var mx := -mn
-	var inv := model.global_transform.affine_inverse()
-	for mi in meshes:
-		if BH_BLACKEN:
-			_blacken(mi)        # paint every surface pure black — the event horizon swallows all light
-		elif BH_EDGE_FADE > 0.0:
-			_fade_edges(mi)     # keep its glowing texture, but melt the silhouette rim into the void
-		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		mi.extra_cull_margin = 20000.0
-		if mi.mesh == null:
-			continue
-		var to_root := inv * mi.global_transform
-		var ab := mi.mesh.get_aabb()
-		for i in range(8):
-			var corner: Vector3 = to_root * (ab.position + ab.size * _CORNER[i])
-			mn = mn.min(corner)
-			mx = mx.max(corner)
-	# Centre + fit the model WITHIN the holder (so the holder spins about the hole's centre).
-	var size := mx - mn
-	var longest: float = maxf(size.x, maxf(size.y, size.z))
-	var msc := (2.0 * BLACKHOLE_RADIUS / longest) if longest > 0.0001 else 1.0
-	model.scale = Vector3.ONE * msc
-	model.position = -((mn + mx) * 0.5) * msc
-	# Orientation: just the BH_ROT_DEG Euler angles (degrees). Tweak that constant up top to aim
-	# the black-hole side of the skyball however you like. Relative to the galactic-plane frame.
-	holder.rotation_degrees = BH_ROT_DEG
+
+	var shader := Shader.new()
+	shader.code = BH_EHT_SHADER
+	var mat := ShaderMaterial.new()
+	mat.shader = shader
+	mat.set_shader_parameter("shadow", BH_SHADOW_FRAC)
+	mat.set_shader_parameter("ring", BH_RING_FRAC)
+	mat.set_shader_parameter("ring_width", BH_RING_WIDTH)
+	mat.set_shader_parameter("outer", BH_OUTER_FRAC)
+	mat.set_shader_parameter("energy", BH_ENERGY)
+	mat.set_shader_parameter("doppler", BH_DOPPLER)
+	mat.set_shader_parameter("doppler_dir", deg_to_rad(BH_DOPPLER_DEG))
+	mat.set_shader_parameter("knots", BH_KNOTS)
+	mat.set_shader_parameter("ring_col", BH_RING_COLOR)
+	mat.set_shader_parameter("hot_col", BH_HOT_COLOR)
+	mat.render_priority = 1   # draw after the galaxy so the shadow occludes the bright core behind
+
+	var quad := QuadMesh.new()
+	quad.size = Vector2(2.0 * BLACKHOLE_RADIUS, 2.0 * BLACKHOLE_RADIUS)
+	var mi := MeshInstance3D.new()
+	mi.mesh = quad
+	mi.material_override = mat
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	mi.extra_cull_margin = 20000.0   # huge on approach — never cull by the tiny quad AABB
+	holder.add_child(mi)
+
 	# Lift it UP off the dead centre (world-up, converted into our local frame since the holder is
-	# our child) — the model hangs low, so raising it puts the body where you're looking.
+	# our child) so the hole sits where you're looking rather than dead-centre.
 	holder.position = (basis.inverse() * Vector3.UP) * BH_RISE
+
+	# Orient the disc: a REAL flat disc (no longer a billboard), laid in the galactic plane and then
+	# tipped BH_TILT_DEG toward us. We sit IN the plane, so a perfectly flat disc would read edge-on;
+	# the tilt swings its normal off the galactic pole, about an axis perpendicular to our line of
+	# sight, so we view it foreshortened into an ellipse — the iconic "donut from an angle".
+	var pole_local := Vector3(0, 0, 1)                       # galactic pole in our local frame (node +Z)
+	var view_local := (basis.inverse() * _dir_n).normalized()  # local direction from us out to the core
+	var tilt_axis := pole_local.cross(view_local)
+	if tilt_axis.length() < 0.001:
+		tilt_axis = Vector3(1, 0, 0)
+	tilt_axis = tilt_axis.normalized()
+	var normal := pole_local.rotated(tilt_axis, deg_to_rad(BH_TILT_DEG)).normalized()  # disc face dir
+	holder.basis = _basis_from_normal(normal, tilt_axis)
 	_build_burned_stars()
 
 
-# Paint a black-hole surface ENTIRELY BLACK: opaque, unshaded, back-face culled. No light, no
-# emission — a pure event-horizon silhouette against the glowing core.
-func _blacken(mi: MeshInstance3D) -> void:
-	var n := mi.mesh.get_surface_count() if mi.mesh != null else 0
-	for s in range(n):
-		var mat := StandardMaterial3D.new()
-		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		mat.albedo_color = Color(0, 0, 0)
-		mat.cull_mode = BaseMaterial3D.CULL_BACK
-		mat.disable_receive_shadows = true
-		mi.set_surface_override_material(s, mat)
+# Build an orthonormal basis whose +Z (a QuadMesh's facing normal) is `normal`, using `ref` as an
+# in-plane hint for the +X axis so the disc's orientation is stable/predictable.
+func _basis_from_normal(normal: Vector3, ref: Vector3) -> Basis:
+	var z := normal.normalized()
+	var x := ref - z * ref.dot(z)
+	if x.length() < 0.001:
+		x = Vector3.RIGHT - z * Vector3.RIGHT.dot(z)
+	x = x.normalized()
+	var y := z.cross(x).normalized()
+	return Basis(x, y, z)
 
 
-# Edge fade: keep the skyball's own look (its albedo + emissive glow) but make the SILHOUETTE melt
-# away — alpha drops to zero where the surface turns edge-on to the camera (a Fresnel term). On the
-# sphere that's exactly its circular rim, so the hard disc edge dissolves into the starfield instead
-# of cutting a sharp circle. Unshaded so it reads the same in the lightless void.
-const BH_FADE_SHADER := """
+# The EHT photo, procedurally. A billboard quad (always face-on, so the ring reads correctly from
+# any angle); the shadow is opaque black (occludes the bright galactic core behind it); the photon
+# ring is a fuzzy gaussian band; Doppler beaming brightens one side. Unshaded, glows via EMISSION.
+const BH_EHT_SHADER := """
 shader_type spatial;
-render_mode blend_mix, unshaded, cull_disabled, depth_draw_opaque, shadows_disabled, fog_disabled;
-uniform sampler2D albedo_tex : source_color;
-uniform sampler2D emission_tex : source_color;
-uniform vec4 albedo_col : source_color = vec4(1.0);
-uniform vec3 emission_col : source_color = vec3(0.0);
-uniform float emission_energy = 1.0;
-uniform bool has_albedo_tex = false;
-uniform bool has_emission_tex = false;
-uniform float fade_power = 2.5;
+render_mode blend_mix, unshaded, cull_disabled, depth_draw_never, shadows_disabled, fog_disabled;
+uniform float shadow = 0.34;
+uniform float ring = 0.46;
+uniform float ring_width = 0.075;
+uniform float outer = 0.92;
+uniform float energy = 2.0;
+uniform float doppler = 0.6;
+uniform float doppler_dir = 1.5708;
+uniform float knots = 0.35;
+uniform vec3 ring_col : source_color = vec3(1.0, 0.55, 0.2);
+uniform vec3 hot_col : source_color = vec3(1.0, 0.92, 0.72);
+// No vertex(): the quad uses its real (tilted) node transform, so the ring foreshortens into an
+// ellipse exactly as a flat accretion disc would when viewed from an angle.
 void fragment() {
-	vec4 a = albedo_col;
-	if (has_albedo_tex) { a *= texture(albedo_tex, UV); }
-	vec3 e = emission_col * emission_energy;
-	if (has_emission_tex) { e *= texture(emission_tex, UV).rgb; }
-	float ndv = clamp(dot(normalize(NORMAL), normalize(VIEW)), 0.0, 1.0);
-	ALBEDO = a.rgb + e;                   // its own colour + glow, unshaded
-	ALPHA = a.a * pow(ndv, fade_power);   // 1 facing you → 0 at the silhouette edge
+	vec2 p = UV - vec2(0.5);
+	float r = length(p) * 2.0;             // 0 at centre → 1 at the edge
+	if (r < shadow) {
+		// the shadow: opaque black, swallows the bright galactic core behind it
+		ALBEDO = vec3(0.0);
+		EMISSION = vec3(0.0);
+		ALPHA = 1.0;
+	} else {
+		float theta = atan(p.y, p.x);
+		float band = exp(-pow((r - ring) / ring_width, 2.0));   // fuzzy photon-ring band
+		float lip = smoothstep(shadow, ring, r);                 // soft ramp off the shadow edge
+		float ofade = 1.0 - smoothstep(ring, outer, r);          // fade out past the ring
+		float glow = band + 0.3 * lip * ofade;
+		glow *= 1.0 + doppler * cos(theta - doppler_dir);        // Doppler: one side blinding-bright
+		glow *= 1.0 + knots * (0.5 + 0.5 * sin(theta * 3.0 + 1.3)); // a few bright clumps round the ring
+		glow = max(glow, 0.0);
+		if (glow < 0.015) discard;
+		vec3 col = mix(ring_col, hot_col, clamp(band, 0.0, 1.0));   // hotter (white) at the ring peak
+		col = mix(vec3(0.25, 0.05, 0.02), col, clamp(lip, 0.0, 1.0)); // dark-red dust at the inner lip
+		ALBEDO = vec3(0.0);
+		EMISSION = col * glow * energy;
+		ALPHA = clamp(glow, 0.0, 1.0);
+	}
 }
 """
-
-
-# Apply the edge fade to one mesh, preserving its original albedo + emission so it looks the same
-# except the rim now dissolves. Reads the imported material per surface and feeds it to the shader.
-func _fade_edges(mi: MeshInstance3D) -> void:
-	if _bh_fade_shader == null:
-		_bh_fade_shader = Shader.new()
-		_bh_fade_shader.code = BH_FADE_SHADER
-	var n := mi.mesh.get_surface_count() if mi.mesh != null else 0
-	for s in range(n):
-		var orig := mi.get_active_material(s)
-		var mat := ShaderMaterial.new()
-		mat.shader = _bh_fade_shader
-		mat.set_shader_parameter("fade_power", BH_EDGE_FADE)
-		if orig is BaseMaterial3D:
-			var bm := orig as BaseMaterial3D
-			mat.set_shader_parameter("albedo_col", bm.albedo_color)
-			mat.set_shader_parameter("albedo_tex", bm.albedo_texture)
-			mat.set_shader_parameter("has_albedo_tex", bm.albedo_texture != null)
-			mat.set_shader_parameter("emission_tex", bm.emission_texture)
-			mat.set_shader_parameter("has_emission_tex", bm.emission_texture != null)
-			if bm.emission_enabled:
-				mat.set_shader_parameter("emission_col", bm.emission)
-				mat.set_shader_parameter("emission_energy", bm.emission_energy_multiplier)
-		mi.set_surface_override_material(s, mat)
 
 
 # Per-star "burning" flicker. Billboard + keep-scale (so the MultiMesh sprites stay round and

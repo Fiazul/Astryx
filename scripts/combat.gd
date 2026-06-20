@@ -19,8 +19,8 @@ const SWARM_COUNT := 14           # "large chunk" of aliens around every non-Sol
 const ALIEN_SIZE := 6.0           # big — longest axis in units
 # Nose laser beam (Raptor II, right-click): a long continuous beam that melts whatever
 # it sweeps over. Damage is applied on a steady tick so it uses integer HP cleanly.
-const LASER_LEN := 5000.0
-const LASER_RADIUS := 22.0        # hit radius around the beam line
+const LASER_LEN := 4000.0
+const LASER_RADIUS := 12.0        # hit radius around the beam line
 const LASER_TICK := 0.08          # seconds between damage ticks
 const LASER_TICK_DMG := 2         # HP per tick (~25 dps)
 # "Ray bullets": each player shot is an instant HITSCAN ray (like the laser, but one

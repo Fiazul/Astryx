@@ -2,23 +2,25 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://b7khiojel5fe"
-path="res://.godot/imported/blackhole_3.png-0ccc728a623387e87e5d8a3049f601dc.ctex"
+uid="uid://xabu28a1mj18"
+path.s3tc="res://.godot/imported/blackhole_2.png-cf4b3a2ba1da2cbde6a7c37280f95a42.s3tc.ctex"
+path.etc2="res://.godot/imported/blackhole_2.png-cf4b3a2ba1da2cbde6a7c37280f95a42.etc2.ctex"
 metadata={
-"vram_texture": false
+"imported_formats": ["s3tc_bptc", "etc2_astc"],
+"vram_texture": true
 }
 generator_parameters={
-"md5": "b81b4927724fc0b621684f78bca8bdf3"
+"md5": "f3581f237735044d30101a9690944830"
 }
 
 [deps]
 
-source_file="res://assets/blackhole_3.png"
-dest_files=["res://.godot/imported/blackhole_3.png-0ccc728a623387e87e5d8a3049f601dc.ctex"]
+source_file="res://assets/blackhole_2.png"
+dest_files=["res://.godot/imported/blackhole_2.png-cf4b3a2ba1da2cbde6a7c37280f95a42.s3tc.ctex", "res://.godot/imported/blackhole_2.png-cf4b3a2ba1da2cbde6a7c37280f95a42.etc2.ctex"]
 
 [params]
 
-compress/mode=0
+compress/mode=2
 compress/high_quality=false
 compress/lossy_quality=0.7
 compress/uastc_level=0
@@ -40,4 +42,4 @@ process/normal_map_invert_y=false
 process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
 process/size_limit=0
-detect_3d/compress_to=1
+detect_3d/compress_to=0

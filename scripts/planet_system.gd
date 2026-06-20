@@ -20,6 +20,9 @@ extends Node3D
 # reach), eased down to a floor that's LOWER for more massive bodies. Zones are finite,
 # so you can always fly back out — and outside every zone you're free to warp.
 const STAR_ZONE_MULT := 120.0    # star slow-zone radius = star radius × this (wider: felt sooner)
+const STAR_ZONE_FLOOR := 45.0    # speed cap at a star's CENTRE. The approach still slows you (warp
+								 # drops at the zone edge), but this floor stays high enough to fly
+								 # straight THROUGH the sun instead of crawling to a near-stop.
 const STAR_EDGE_SPEED := 64.0    # speed cap at a STAR's zone edge — lower than planets, so you
                                  # notice the drag the moment you enter a star's range
 const PLANET_ZONE_MULT := 45.0   # planet/moon slow-zone radius = radius × this
@@ -69,6 +72,11 @@ var speed_limit := INF
 var gravity := Vector3.ZERO
 var star_dist := INF              # distance to this system's primary star (gates FTL / warp)
 var speed_zones := true           # planet "safe zone" speed limit — ON in Sol, OFF elsewhere (set by main)
+# Nearest named hub star you could "fly-arrive" into (id + distance + render offset). main reads
+# these in the hub: fly close enough and it drops you into that star's local frame (see _arrive).
+var hub_star_id := ""
+var hub_star_dist := INF
+var hub_star_rel := Vector3.ZERO   # render-space vector ship→star (so arrival keeps your spot)
 
 var _bodies := []
 var _stars := []        # named real stars as floating-origin destinations
@@ -359,7 +367,8 @@ func _build_star_shell() -> void:
 		add_child(label)
 
 		_stars.append({
-			"name": s.name, "true_pos": eph.star_true_pos(s), "ly": s.ly,
+			"name": s.name, "id": SystemDB.id_for_name(s.name),
+			"true_pos": eph.star_true_pos(s), "ly": s.ly,
 			"mass": float(s.get("mass", 333000.0)),
 			"dot": dot, "sphere": sphere, "label": label,
 		})
@@ -371,6 +380,8 @@ func refresh(ship_pos: Vector3, delta: float) -> void:
 	speed_limit = INF
 	gravity = Vector3.ZERO
 	star_dist = INF
+	hub_star_dist = INF
+	hub_star_id = ""
 	nearest_radius = 1.0
 
 	# Render positions computed THIS frame, by name. Moons read their parent from here so
@@ -416,13 +427,15 @@ func refresh(ship_pos: Vector3, delta: float) -> void:
 			var a := minf(GRAV_G * float(b.mass) / (dist * dist), GRAVITY_MAX_ACCEL)
 			gravity += (rel / dist) * a
 
-		# Force-slow safe-zone (NO pull): cap speed within a mass/size-scaled radius,
-		# eased from the edge speed down to a mass-based floor at the body.
+		# Force-slow safe-zone (NO pull): cap speed within a mass/size-scaled radius, eased from
+		# the edge speed down to a floor at the body. Stars use a HIGHER floor (STAR_ZONE_FLOOR)
+		# so you still decelerate on approach but can fly THROUGH the sun, not crawl to a stop.
 		var zone: float = rad * (STAR_ZONE_MULT if b.star else PLANET_ZONE_MULT)
 		if dist < zone:
 			var zt := dist / zone
 			var edge: float = STAR_EDGE_SPEED if b.star else ZONE_EDGE_SPEED
-			speed_limit = minf(speed_limit, lerpf(_slow_min(float(b.mass)), edge, zt))
+			var floor_spd: float = STAR_ZONE_FLOOR if b.star else _slow_min(float(b.mass))
+			speed_limit = minf(speed_limit, lerpf(floor_spd, edge, zt))
 
 		b.dot.position = rel
 		b.label.position = rel + Vector3(0.0, vrad * 1.5 + 0.5, 0.0)
@@ -496,11 +509,17 @@ func refresh(ship_pos: Vector3, delta: float) -> void:
 			nearest_dist = sdist
 			nearest_name = st.name
 			nearest_radius = STAR_RADIUS
+		# Nearest star you could fly-arrive into (must be a real travel destination).
+		if st.get("id", "") != "" and sdist < hub_star_dist:
+			hub_star_dist = sdist
+			hub_star_id = str(st.id)
+			hub_star_rel = srel
 		# Force-slow safe-zone around the star (no pull) — this is what eases you out
 		# of warp as you arrive, scaled by the star's mass.
 		var szone := STAR_RADIUS * STAR_ZONE_MULT
 		if sdist < szone:
-			speed_limit = minf(speed_limit, lerpf(_slow_min(float(st.mass)), STAR_EDGE_SPEED, sdist / szone))
+			# Higher floor (STAR_ZONE_FLOOR) than planets so you fly THROUGH the star, not crawl.
+			speed_limit = minf(speed_limit, lerpf(STAR_ZONE_FLOOR, STAR_EDGE_SPEED, sdist / szone))
 		var sdir: Vector3 = srel.normalized()
 		if sdist < STAR_NEAR:
 			st.sphere.visible = true

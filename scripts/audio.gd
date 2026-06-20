@@ -29,23 +29,14 @@ const ENGINE_PITCH_BOOST := 1.10
 # Slow eases so the engine swells in/out gently — never a sudden, jarring change.
 const ENGINE_SMOOTH := 4.5      # normal ease toward target volume/pitch (per second)
 const ENGINE_SMOOTH_BOOST := 2.5  # gentler ease while boosting -> "even smoother"
-# Continuous-drive arc — the longer you hold a run, the more the mix moves from
-# engine to music. This same clock (drive_time()) gates the bgm fade-in, and the
-# engine fade-out is coupled to it: the moment the music starts coming up, the
-# engine starts backing off, so they cross over as one motion (every ship):
-#   0 .. MUSIC_IN_TIME (8s)   engine only, no music
-#   MUSIC_IN_TIME ..          music fades IN  *and* engine starts fading OUT
-#   ENGINE_DUCK_FULL          engine fully ducked; music leads
-# The clock climbs while driving and unwinds when you ease off (no hard reset, so a
-# brief coast doesn't restart the whole arc).
-const MUSIC_IN_TIME := 8.0          # music only after this many seconds of steady drive
+# Continuous-drive clock: climbs while driving, unwinds when you ease off (no hard reset,
+# so a brief coast doesn't restart it). It now only shapes the engine's pitch SPOOL — the
+# old music duck/crossover is gone; music is a state machine in main.gd and the engine just
+# layers beneath it, never ducking out (per the audio rules).
 const DRIVE_MAX := 20.0             # clock cap (seconds)
 const DRIVE_DECAY := 2.0            # how fast the clock unwinds when you let off
 const ENGINE_SPOOL_TIME := 12.0     # pitch spools up to its cruise note over this long
 const ENGINE_SUSTAIN_PITCH := 0.12  # pitch climbed at full cruise (×pitch_mul per ship)
-const ENGINE_DUCK_START := MUSIC_IN_TIME        # engine fades out exactly as the music fades in
-const ENGINE_DUCK_FULL := MUSIC_IN_TIME + 5.0   # fully ducked ~5s later, as the music settles
-const ENGINE_SUSTAIN_DUCK := 32.0   # dB the engine drops — once music is in, it's near-silent
 
 var _fire: Array[AudioStreamPlayer] = []
 var _fire_i := 0
@@ -72,6 +63,14 @@ var _eng_streams := {}          # ship name -> looping AudioStream
 var _eng_default: AudioStream   # shared fallback loop
 var _eng_ship := ""             # which ship's loop is currently loaded into _eng_loop
 var _eng_sustain := 0.0         # seconds of continuous driving (drives cruise settle)
+var _engine_duck_db := 0.0      # dB the engine is pulled back (set by main while ship music is up)
+
+
+# Pull the engine back under the interstellar ship music. Main feeds this each frame,
+# scaled by how present the ship track is, so the engine eases down/up with the music
+# (and stays full during the engine-only gap, when the ship track is silent).
+func set_engine_duck(db: float) -> void:
+	_engine_duck_db = maxf(db, 0.0)
 
 
 const MASTER_DB := 4.0   # slight overall lift on everything (all audio routes here)
@@ -209,9 +208,9 @@ func update_engine(ship_name: String, thrusting: bool, intensity: float, boost: 
 		_eng_sustain = minf(_eng_sustain + delta, DRIVE_MAX)
 	else:
 		_eng_sustain = maxf(_eng_sustain - delta * DRIVE_DECAY, 0.0)
-	# Pitch spools up over the first ~12s; volume ducks only across the 12..15s window.
+	# Pitch spools up over the first ~12s of a steady run (character only — volume no longer
+	# ducks for the music; the engine just layers under whichever track is up, see main.gd).
 	var spool := smoothstep(0.0, ENGINE_SPOOL_TIME, _eng_sustain)
-	var duck := smoothstep(ENGINE_DUCK_START, ENGINE_DUCK_FULL, _eng_sustain)
 
 	# Targets: silent when off; otherwise volume tracks throttle, boost adds punch.
 	var target_db := ENGINE_OFF_DB
@@ -224,8 +223,9 @@ func update_engine(ship_name: String, thrusting: bool, intensity: float, boost: 
 			target_pitch = ENGINE_PITCH_BOOST   # revved up — faster, higher
 		else:
 			target_pitch += ENGINE_SUSTAIN_PITCH * spool   # cruise spools pitch up a touch
-		# Once the music is in, the engine recedes to near-silent — boost included.
-		target_db -= ENGINE_SUSTAIN_DUCK * duck
+		# State-driven duck: main pulls the engine back under the interstellar ship music
+		# (0 while the lobby track is up, so the engine stays present in local flight).
+		target_db -= _engine_duck_db
 	target_pitch *= pitch_mul
 
 	# Ease toward the targets; boost uses a gentler rate for that smooth swell.
@@ -239,8 +239,8 @@ func update_engine(ship_name: String, thrusting: bool, intensity: float, boost: 
 		_eng_loop.stop()
 
 
-# Seconds of continuous driving so far (0 when stopped/docked). Main reads this to
-# gate the bgm fade-in; the engine reads it for the cruise spool/duck.
+# Seconds of continuous driving so far (0 when stopped/docked). Now only feeds the
+# engine's own cruise pitch-spool (the music no longer reads it).
 func drive_time() -> float:
 	return _eng_sustain
 

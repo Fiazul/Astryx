@@ -251,6 +251,26 @@ const BRAKE_RATE := 3.0       # Vela's air-brake (R): eases velocity to ~0 over 
 const STEER_SMOOTH := 9.0     # mouse-steer inertia: lower = heavier, more turn coast
 const STRAFE_SMOOTH := 5.0    # A/D & up/down (strafe/lift) input inertia: lower = heavier
 const MOUSE_SENS := 0.0022    # default; runtime value lives in `mouse_sens` (Settings menu)
+# --- Continuous "follow-up" steering: mouse motion winds a PERSISTENT turn rate that keeps the
+# ship rotating after you stop moving your hand (no rotating-forever fatigue). Move the same way
+# = faster; move opposite = smoothly winds down THROUGH centre and reverses (no sticky middle —
+# we deliberately do NOT snap to zero). Idle jitter under the dead zone is ignored.
+const MOUSE_DEADZONE := 0.6   # px/frame below this = idle jitter, ignored (so a still hand holds the turn)
+const RATE_ACCEL := 3.4       # how fast mouse motion winds the turn-rate up (× mouse_sens). Higher =
+							  # the auto-rotate engages in a quick move instead of a long hold
+const MAX_YAW_RATE := 3.2     # top yaw turn speed (rad/s) — higher = big turns need much less mouse
+							  # sweep (fine aim is unaffected: small moves never reach the cap)
+const MAX_PITCH_RATE := 2.6   # top pitch turn speed (rad/s)
+const PITCH_LEVEL := 3.0      # pitch self-levels to 0 when idle (so the nose settles, never backflips)
+const REVERSE_BOOST := 2.6    # (A/D keyboard) opposing the current spin winds it down this much faster
+const REVERSE_BRAKE := 6.0    # mouse opposing the spin brakes it toward 0 this fast (rad/s²) — makes
+							  # reversing IMMEDIATE even with a gentle move (kills full spin in ~0.27s)
+const YAW_LEVEL := 2.0        # when the mouse goes idle the yaw rate COASTS to 0 this fast — the turn
+							  # carries a moment (heavy-ship follow-through) then settles, so it never
+							  # spins forever. Higher = stops sooner/snappier; lower = longer coast.
+const YAW_KEY_RATE := 0.6     # A/D also steer the yaw from the keyboard: they INTERRUPT the mouse
+							  # auto-rotate and drive the turn this fast (rad/s²) so you can break a
+							  # spin and change direction with a key (they still strafe too).
 const ROLL_RATE := 1.8        # manual Q/E roll (rad/s)
 const FLIP_TIME := 3.4        # cinematic drift-flip duration — long & SLOW, a heavy lazy roll (W+C)
 const FLIP_CRUISE := 340.0    # steady glide speed DURING the flip so it travels across space
@@ -263,8 +283,15 @@ const FLIP_LEAP_BOOST := 0.9  # extra speed at the START of the flip → a quick
 # it arrives instead of blasting past (and the star has time to bloom into a sphere).
 const WARP_ARRIVE_TIME := 2.0      # seconds-to-arrival at which warp starts easing out
 const WARP_ARRIVE_SPEED := 400.0   # gentle speed warp bleeds down to (slow enough to scan)
-const BANK_ANGLE := 0.5       # max cosmetic bank into turns (rad)
+const BANK_ANGLE := 0.8       # max cosmetic bank into turns (rad ≈ 46°) — a clear, visible roll
+const BANK_GAIN := 0.7        # bank per unit yaw-RATE (rad/s); full bank ≈ at MAX_YAW_RATE
 const BANK_SMOOTH := 5.0
+# Cosmetic nose-lean into vertical mouse: a big ship doesn't snap up/down, it tips its nose
+# and the whole hull leans into the climb/dive. Pure mesh tilt (heading/aim untouched), eased
+# in slowly so it reads as mass, not a flick.
+const LEAN_PITCH := 0.5       # max nose-lean into a climb/dive (rad ≈ 29°)
+const LEAN_PITCH_GAIN := 0.6  # lean per unit pitch-RATE (rad/s)
+const LEAN_SMOOTH := 4.0      # lower = heavier/slower lean (the big-ship weight)
 # Cinematic cruise sway: after holding a straight line for SWAY_DELAY seconds the hull
 # starts a slow, gentle roll left↔right (cosmetic, on the mesh only — the actual heading
 # never changes, so you stay on the same line). Steering resets it instantly.
@@ -278,6 +305,10 @@ const MUZZLE_BANK_FOLLOW := 0.0
 const CAM_OFFSET := Vector3(0.0, 0.33, 1.0)  # behind (+Z) and above the ship; the higher Y
 											 # drops the hull lower in frame → a bigger gap
 											 # between the ship's nose and the centre crosshair
+# Orbit the whole camera rig this many degrees so you view the ship from slightly BELOW (a low,
+# heroic angle that shows a bit of the belly). + = bottom view (look up), - = top view (look down).
+# Rig position + aim rotate together, so the ship stays framed where it is — only the angle shifts.
+const CAM_VIEW_PITCH_DEG := 0.0
 const CAM_LAG := 6.0
 # Free-look (hold RMB or T): mouse orbits the camera instead of steering; the ship
 # holds its heading and flies on. Released, the view eases back behind the ship.
@@ -381,6 +412,11 @@ func is_hypersonic() -> bool:
 func warp_ready() -> bool:
 	return warp > 1.0 and is_inf(speed_limit)
 
+# In open/FTL deep space: every speed cap (body gravity zone, station/probe/wormhole
+# slow-zone) is lifted. This is the "interstellar" signal the music state machine reads.
+func in_open_space() -> bool:
+	return is_inf(speed_limit) and is_inf(struct_limit)
+
 # Raptor only: toggle between Combat mode (machine-gun, normal flight) and Warp
 # mode (Vela-style FTL). Returns the new mode name for HUD feedback.
 func toggle_warp_mode() -> String:
@@ -448,12 +484,15 @@ var _cam_zoom := 1.0          # target zoom (mouse wheel)
 var _cam_zoom_smooth := 1.0   # eased toward _cam_zoom
 var _cam_basis := Basis()
 var _bank := 0.0
+var _lean := 0.0              # eased cosmetic nose-lean into a climb/dive (mesh-only)
 var _flip_t := 0.0            # remaining cinematic flip time (0 = not flipping)
 var _flip_dir := 1.0          # +1 roll/drift right · -1 left
 var _flip_yaw := 0.0          # accumulated swerve of the drift heading during the flip
 var _cruise_t := 0.0           # seconds held on a straight cruise (drives the cinematic sway)
 var _mouse_delta := Vector2.ZERO
 var _steer := Vector2.ZERO     # eased mouse-steer (rotational inertia for curving turns)
+var _yaw_rate := 0.0           # yaw turn-rate (rad/s) — eases to 0 when the mouse is idle (heading-hold)
+var _pitch_rate := 0.0         # pitch turn-rate (rad/s) — self-levels to 0 when the mouse is idle
 var _strafe := 0.0             # eased A/D lateral input (heavy, drifting thrust)
 var _lift := 0.0              # eased Space/Ctrl vertical input
 var _mouse_captured := false
@@ -501,6 +540,10 @@ func fly(delta: float) -> void:
 		_lift = 0.0
 		_look_yaw = 0.0
 		_look_pitch = 0.0
+		_yaw_rate = 0.0
+		_pitch_rate = 0.0
+		_bank = 0.0
+		_lean = 0.0
 		# Face the nose INTO the tunnel (the tunnel renders ahead at local -Z). Flip 180°
 		# so the ship dives forward instead of riding through tail-first. The hull holds
 		# STABLE facing the portal — only a faint breathing roll/pitch so it isn't dead
@@ -525,6 +568,10 @@ func fly(delta: float) -> void:
 		_lift = 0.0
 		_look_yaw = 0.0
 		_look_pitch = 0.0
+		_yaw_rate = 0.0
+		_pitch_rate = 0.0
+		_bank = 0.0
+		_lean = 0.0
 		_mesh_root.rotate_y(DOCK_SPIN * delta)
 		_update_boosters(0.0, delta)
 		_update_streaks(0.0)   # docked — no motion streaks
@@ -542,24 +589,51 @@ func fly(delta: float) -> void:
 	var md := _mouse_delta
 	_mouse_delta = Vector2.ZERO
 	var turn := 0.0   # this frame's mouse yaw (drives cosmetic banking below)
+	var lean := 0.0   # this frame's mouse pitch (drives the cosmetic nose-lean below)
 
 	if autopilot:
 		_autopilot_steer(delta)
 		_steer = Vector2.ZERO
+		_yaw_rate = 0.0
+		_pitch_rate = 0.0
 		_look_yaw = 0.0
 		_look_pitch = 0.0
 	elif _free_look:
 		_steer = Vector2.ZERO
+		_yaw_rate = 0.0
+		_pitch_rate = 0.0
 		_look_yaw -= md.x * mouse_sens
 		_look_pitch = clampf(_look_pitch - md.y * mouse_sens, -LOOK_PITCH_LIMIT, LOOK_PITCH_LIMIT)
 	else:
-		# Normal steering: mouse aims, Q/E roll. View eases back behind the ship.
-		# The steer input is low-passed so the hull ramps into a turn and coasts out
-		# of it — a heavier, curving feel rather than an instant snap.
-		_steer = _steer.lerp(md, clampf(STEER_SMOOTH * delta, 0.0, 1.0))
-		turn = _steer.x * mouse_sens
-		rotate_object_local(Vector3.UP, -_steer.x * mouse_sens)
-		rotate_object_local(Vector3.RIGHT, -_steer.y * mouse_sens)
+		# Heading steering with inertia: mouse motion winds a turn rate (so it has weight and curves),
+		# but when you STOP moving, the rate eases back to 0 — the ship SETTLES on its heading instead
+		# of spinning forever. So you can fix a direction; a stray nudge just nudges, it can't lock a
+		# runaway spin. Reversing brakes hard so flipping direction is immediate. Idle jitter ignored.
+		if absf(md.x) > MOUSE_DEADZONE:
+			if _yaw_rate * md.x < 0.0:
+				_yaw_rate = move_toward(_yaw_rate, 0.0, REVERSE_BRAKE * delta)
+			_yaw_rate = clampf(_yaw_rate + md.x * mouse_sens * RATE_ACCEL, -MAX_YAW_RATE, MAX_YAW_RATE)
+		else:
+			# Mouse idle → settle: ease the turn rate to 0 so the ship holds its heading.
+			_yaw_rate = lerpf(_yaw_rate, 0.0, clampf(YAW_LEVEL * delta, 0.0, 1.0))
+		# A/D INTERRUPT the auto-rotate and steer the yaw directly — break a spin and change
+		# direction from the keyboard. Opposing the current spin winds it down/reverses faster.
+		var kyaw := 0.0
+		if Input.is_physical_key_pressed(KEY_A):
+			kyaw -= 1.0
+		if Input.is_physical_key_pressed(KEY_D):
+			kyaw += 1.0
+		if kyaw != 0.0:
+			var kax := YAW_KEY_RATE * (REVERSE_BOOST if _yaw_rate * kyaw < 0.0 else 1.0)
+			_yaw_rate = clampf(_yaw_rate + kyaw * kax * delta, -MAX_YAW_RATE, MAX_YAW_RATE)
+		if absf(md.y) > MOUSE_DEADZONE:
+			_pitch_rate = clampf(_pitch_rate + md.y * mouse_sens * RATE_ACCEL, -MAX_PITCH_RATE, MAX_PITCH_RATE)
+		else:
+			_pitch_rate = lerpf(_pitch_rate, 0.0, clampf(PITCH_LEVEL * delta, 0.0, 1.0))
+		turn = _yaw_rate     # banking reads the turn RATE (rad/s) so the bank holds with the turn
+		lean = _pitch_rate
+		rotate_object_local(Vector3.UP, -_yaw_rate * delta)
+		rotate_object_local(Vector3.RIGHT, -_pitch_rate * delta)
 		var roll := 0.0
 		if Input.is_physical_key_pressed(KEY_Q):
 			roll += 1.0
@@ -717,7 +791,7 @@ func fly(delta: float) -> void:
 	true_pos += velocity * delta
 
 	# --- Cosmetic banking (on the mesh only, so the camera stays steady) ---
-	var target_bank := clampf(-turn * 7.0 - _strafe * 0.35, -BANK_ANGLE, BANK_ANGLE)
+	var target_bank := clampf(-turn * BANK_GAIN - _strafe * 0.35, -BANK_ANGLE, BANK_ANGLE)
 	# Cinematic cruise sway: hold a straight line (forward thrust, no steer/strafe input)
 	# and after a beat the hull breathes a slow roll left↔right. Any steer/strafe input
 	# unwinds it fast so it never fights real control.
@@ -736,7 +810,12 @@ func fly(delta: float) -> void:
 		var sway := (sin(st * 0.9 * rate) + 0.4 * sin(st * 0.37 * rate + 1.1)) / 1.4
 		target_bank = clampf(target_bank + sway * amp * sway_ramp, -BANK_ANGLE, BANK_ANGLE)
 	_bank = lerpf(_bank, target_bank, clampf(BANK_SMOOTH * delta, 0.0, 1.0))
-	_mesh_root.rotation = Vector3(0.0, 0.0, _bank)   # clear any transit flip/wobble
+	# Nose-lean into a climb/dive: vertical mouse leans the whole hull (mesh only; the real
+	# pitch already happened on the transform above). Eased slowly so the big ship tips its
+	# nose with weight instead of snapping. +lean (mouse down → nose-down dive) reads natural.
+	var target_lean := clampf(lean * LEAN_PITCH_GAIN, -LEAN_PITCH, LEAN_PITCH)
+	_lean = lerpf(_lean, target_lean, clampf(LEAN_SMOOTH * delta, 0.0, 1.0))
+	_mesh_root.rotation = Vector3(_lean, 0.0, _bank)   # clear any transit flip/wobble
 	# Cinematic drift-flip: a full 360° barrel roll layered on the bank (cosmetic — heading
 	# is untouched). The sideways drift kick was added to velocity in do_flip().
 	if _flip_t > 0.0:
@@ -810,15 +889,23 @@ func _update_boosters(throttle: float, delta: float) -> void:
 	#   L2 slow-zone + Shift        : fatter + longer (clear gap from L1)
 	#   L3 interstellar, no Shift   : brighter / stronger (hot-shifted glow)
 	#   L4 interstellar + Shift     : max — biggest + brightest
-	var interstellar := is_hypersonic()
+	# The booster LEADS the speed: it powers up with the warp SPOOL (which starts the instant you
+	# hold W in open space), not with the final velocity — so the plume strengthens FIRST and the
+	# interstellar speed builds in behind it. `spool_s` ramps to full by ~55% charge (faster than
+	# the speed, which keeps climbing to 100%), giving the clear "booster, THEN ship boost" order.
+	var spool := _warp_charge if (warp > 1.0 and warp_ready()) else 0.0
+	var spool_s := smoothstep(0.0, 0.55, spool)
+	var interstellar := spool_s > 0.01
 	var tier_w := 1.0
 	var tier_len := 1.0
 	var tier_bright := 1.0
 	var tier_hot := 0.0
-	if interstellar and is_boosting:          # L4
-		tier_w = 1.6; tier_len = 1.25; tier_bright = 1.9; tier_hot = 0.6
-	elif interstellar:                         # L3
-		tier_w = 1.4; tier_len = 1.2; tier_bright = 1.5; tier_hot = 0.4
+	if interstellar:                           # L3 (base) → L4 (with Shift), scaled by the spool
+		var l4 := 1.0 if is_boosting else 0.0
+		tier_w      = lerpf(1.0, lerpf(1.4, 1.6, l4), spool_s)
+		tier_len    = lerpf(1.0, lerpf(1.2, 1.25, l4), spool_s)
+		tier_bright = lerpf(1.0, lerpf(1.5, 1.9, l4), spool_s)
+		tier_hot    = lerpf(0.0, lerpf(0.4, 0.6, l4), spool_s)
 	elif is_boosting or boost_blocked:         # L2 (Shift in a slow-zone)
 		tier_w = 1.5; tier_len = 1.2; tier_bright = 1.18; tier_hot = 0.0
 	var ks := clampf(6.0 * delta, 0.0, 1.0)    # tiers ease a touch slower than the flicker
@@ -833,7 +920,7 @@ func _update_boosters(throttle: float, delta: float) -> void:
 	_plume_len_s = lerpf(_plume_len_s, (0.35 + throttle * 0.7) * deploy * sputter, k)
 	_plume_a_s = lerpf(_plume_a_s, clampf((0.05 + throttle * 0.45) * (1.7 if fire else 1.0) * sputter, 0.0, max_alpha), k)
 	_core_a_s = lerpf(_core_a_s, clampf((0.12 + throttle * 0.5) * sputter, 0.0, 0.95), k)
-	var hot_col: Color = _booster_color.lerp(Color.WHITE, _tier_hot_s * 0.7)   # interstellar runs hotter/whiter
+	var hot_col: Color = _booster_color.darkened(_tier_hot_s * 0.5)   # interstellar runs DARKER/deeper, not washed-out white
 	# Bell + ring grow WITH the plume (gentler than the plume so the nozzle stays in proportion).
 	var bell_w := 1.0 + (_tier_w_s - 1.0) * 0.7
 	for b in _boosters:
@@ -876,7 +963,9 @@ func _update_camera(delta: float) -> void:
 	var lk := clampf(LOOK_RETURN * delta, 0.0, 1.0)
 	_look_yaw_s = lerpf(_look_yaw_s, _look_yaw, lk)
 	_look_pitch_s = lerpf(_look_pitch_s, _look_pitch, lk)
-	var basis := _cam_basis * (Basis(Vector3.UP, _look_yaw_s) * Basis(Vector3.RIGHT, _look_pitch_s))
+	# CAM_VIEW_PITCH orbits the rig (position + aim together) so the ship is seen from slightly below.
+	var basis := _cam_basis * Basis(Vector3.RIGHT, deg_to_rad(CAM_VIEW_PITCH_DEG)) \
+		* (Basis(Vector3.UP, _look_yaw_s) * Basis(Vector3.RIGHT, _look_pitch_s))
 	var cam_pos := basis * (CAM_OFFSET * _cam_zoom_smooth)  # ship at origin -> global
 	# Wormhole transit: only a SLIGHT, slow buffet (gentle position drift + a touch of
 	# roll/pitch) and a restrained FOV lean → the dive feels tense and dark, not stormy.
