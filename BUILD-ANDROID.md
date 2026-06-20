@@ -12,7 +12,7 @@ SDK + a JDK + the export templates. This walks you through it end to end.
 ## What's already done (no action needed)
 - `rendering/renderer/rendering_method.mobile = "mobile"` (Vulkan) + `scaling_3d/scale.mobile = 0.75` (phone perf). Desktop is unchanged.
 - Landscape orientation (`window/handheld/orientation = 4`, sensor-landscape).
-- Touch controls (`scripts/touch.gd`), auto-enabled on mobile. Drag empty space to steer; buttons: **THRUST** (toggle auto-fly), **BOOST**, **FIRE**, **CAP** (capture/survey, hold), **INTERACT** (F — wormholes/dock), **MAP** (M), **HOME** (H emergency return).
+- Touch controls (`scripts/flight/touch_controls.gd`), auto-enabled on mobile. Drag empty space to steer; buttons: **THRUST** (toggle auto-fly), **BOOST**, **FIRE**, **CAP** (capture/survey, hold), **INTERACT** (F — wormholes/dock), **MAP** (M), **HOME** (H emergency return).
 - `Android` export preset (arm64-v8a, package `com.fiazul.astryx`, `builds/android/Astryx.apk`).
 
 You can preview the touch layout on desktop right now:
@@ -58,7 +58,7 @@ godot --headless --export-debug "Android" builds/android/Astryx.apk
 - `adb install -r builds/android/Astryx.apk`  (or copy the APK over and tap it).
 
 ## Tuning notes (on-device)
-- **Look sensitivity**: `LOOK_SENS` in `scripts/touch.gd`.
+- **Look sensitivity**: `LOOK_SENS` in `scripts/flight/touch_controls.gd`.
 - **Performance**: lower `scaling_3d/scale.mobile` (e.g. 0.6) if the frame rate drags; raise toward 1.0 if it's smooth.
 - **Button layout/size**: the `Rect2(...)` values in `touch.gd::_build()` (1280×720 reference space, auto-scaled).
 - None of the touch feel could be tested off-device — expect to adjust `LOOK_SENS` and button sizes after the first run.

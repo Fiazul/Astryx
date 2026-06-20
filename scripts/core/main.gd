@@ -393,7 +393,7 @@ func _ready() -> void:
 	# Desktop keyboard+mouse play is completely unaffected when this is off.
 	_touch = OS.has_feature("mobile") or OS.get_cmdline_user_args().has("--touch")
 	if _touch:
-		touch_controls = load("res://scripts/touch.gd").new()
+		touch_controls = load("res://scripts/flight/touch_controls.gd").new()
 		touch_controls.ship = ship
 		touch_controls.main = self
 		add_child(touch_controls)

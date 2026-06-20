@@ -93,6 +93,20 @@ File name ≠ class it holds — fixable:
 - Q-E: **Ordering** — what's the safe sequence (autoloads first? split main.gd first?).
 - Q-F: **Verification** — how do we prove we didn't break the game at each step?
 
+## Phase 0 execution log (DONE 2026-06-20, branch `restructure`)
+
+- Moved all 29 `.gd` **+ their `.gd.uid`** into `core/autoload/flight/world/travel/combat/ui/`
+  with the D4 renames. Fixed the 2 `load()` paths (`main.gd`, `hud.gd`), `scenes/Main.tscn`
+  script path, and `BUILD-ANDROID.md` prose path. Deleted orphan root `Main.tscn`.
+- **GOTCHA (important for any future file move):** Godot caches the global class→path map in
+  `.godot/global_script_class_cache.cfg`. After moving files it's STALE → `--check-only` floods
+  "Class X hides a global script class" / "Could not find script for class Y". **Fix: run
+  `godot --headless --import` once** to rebuild the registry (or open the editor). Not a real error.
+- After rebuild: **28/29 scripts parse clean.** The 1 residual (`touch_controls.gd`:
+  "Cannot infer the type of 'hit'") is **pre-existing** (present in baseline `touch.gd`) and only
+  an isolated-`--check-only` artifact — `_button_at()` has no declared return type. Whole-project
+  import accepts it. **Candidate trivial cleanup later:** annotate `_button_at()`'s return type.
+
 ## Confusions / things to flag (owner asked me to surface these)
 
 - `CLAUDE.FILE` at repo root — unusual name; purpose unknown. (low priority)

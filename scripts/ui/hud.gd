@@ -257,7 +257,7 @@ func _ready() -> void:
 	_guardian_label.visible = false
 
 	# Dynamic aiming reticle (custom-drawn): blooms while firing, kicks on a hit.
-	_reticle = load("res://scripts/crosshair.gd").new()
+	_reticle = load("res://scripts/ui/crosshair.gd").new()
 	_reticle.size = Vector2(80, 80)
 	_reticle.position = Vector2(640.0 - 40.0, 360.0 - 40.0)
 	_canvas.add_child(_reticle)
