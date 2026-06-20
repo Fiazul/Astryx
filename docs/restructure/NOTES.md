@@ -211,6 +211,23 @@ Order: pilot with the cleanest self-contained seam, then bigger ones. Verify eac
   done. `combat.gd` (and likely `ship.gd`/`hud.gd`) interweave VFX + gameplay + shared mutable state,
   so they need a **deliberate per-file design pass** (decide the VFX/gameplay boundary, maybe a damage
   callback or an FX node that combat drives) — NOT quick lifts. Best done fresh, file by file.
+- **combat material builders — looked pure, AREN'T quite.** `_trail_material` reads the instance var
+  `_trail_grad`; `_menace_paint` needs `ALIEN_SIZE`. So a `combat/combat_fx.gd` static helper must
+  thread those deps (pass `_trail_grad` / `ALIEN_SIZE` as params). Doable but fiddly — a careful job,
+  not a tail-of-session lift. `_bolt_material` and `_rand_dir` ARE pure.
+
+## ▶ NEXT SESSION — start here
+
+Verified base: branch `restructure`, all green (P0/P1/P2/P3a/P3b playtested OK). main.gd 2093→1780.
+Recommended next steps, in order:
+1. **(optional) Merge or keep `restructure`** — decide whether to merge into `main` now (it's a solid,
+   verified improvement) or keep stacking Phase 3 first.
+2. **combat.gd design pass** — first easy win: `combat/combat_fx.gd` static helper for the pure-ish
+   builders (`_bolt_material`, `_rand_dir`, + `_trail_material`/`_menace_paint`/`_flash_mat` with their
+   deps threaded). Then tackle the bigger clusters (guardian-waves, laser weapon-vs-VFX split).
+3. **Then** ship.gd (1626) and hud.gd (1449) — map them first.
+4. **Separately from the restructure:** the pre-existing bugs (scan, planet-positions, buy-navigation)
+   and the **#1 save/load "needs rework"** item (get specifics from owner first).
 - **REMINDER:** the "buy navigation missing" bug is still open and lives in the nav-economy area —
   worth bisecting vs `407e32c` before more nav-adjacent work.
 - **Playtest (3a):** music still cross-fades lobby⇄ship when flying out to open space / back; HaniNebula
