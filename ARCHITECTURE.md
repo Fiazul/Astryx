@@ -58,6 +58,8 @@ the static `SystemDB` / `MissionDB` data classes.
 | File | Responsibility |
 |---|---|
 | `combat.gd` | Dogfight: hitscan bolts, alien AI, named bosses, finite guardian waves |
+| `combat_fx.gd` | `CombatFX`: transient combat visuals (booms/sparks/flashes) + bolt/flash materials |
+| `enemy_factory.gd` | `EnemyFactory`: loads/normalizes/paints the monster GLBs + packs each into a unit dict |
 
 ### `ui/`
 | File | Responsibility |

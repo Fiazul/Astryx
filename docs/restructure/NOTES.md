@@ -225,16 +225,30 @@ Order: pilot with the cleanest self-contained seam, then bigger ones. Verify eac
   **combat.gd 1352 → 1225 (−127).** Clean boot. **Playtest: fire bolts (cyan/pink), get hit (sparks),
   kill enemies (boom), Lyra red lasers, HaniStar pink bolts — all VFX should look identical.**
 
+- **3d ✅ DONE — EnemyFactory** (combat.gd). Extracted the unit-builder cluster (model loaders
+  `load_alien_model`/`load_boss_model`/`find_mesh`, builders `make_alien`/`make_boss`/`make_enemy`,
+  `menace_paint`, `_enemy_name`, geometry helpers `_meshes`/`_aabb`/`_fit_and_light`, plus all the
+  alien/boss size·HP·speed consts + the `BOSS_NAMES` pool) into `combat/enemy_factory.gd` (218 lines,
+  `class_name EnemyFactory`, Node3D spawned by combat **at the origin** so loaded models share combat's
+  floating-origin frame). combat calls `_factory.make_alien()` etc.; the guardian-wave cluster (still
+  in combat) uses `_factory.{load_alien_model,load_boss_model,make_enemy,menace_paint}` as primitives;
+  `_spawn_guard_wave` reads `EnemyFactory.BOSS_NAMES`. Kept a private `_rand_dir` copy in combat (still
+  used by _revive/_step_pickups/guardian spawns). Removed **dead** `_boss_name_for` (no callers).
+  **combat.gd 1225 → 1031 (−194).** Clean import (no class-cache warnings) + clean boot.
+  **Playtest: enter a hostile star (swarm spawns + look right), fight a guardian body (boss + minions
+  spawn, menace red-glow throb, capture on clear), Vortex in the Alien zone — all enemies build/scale
+  as before.**
+
 ## ▶ NEXT SESSION — start here
 
-Verified base: branch `restructure`, all green (P0/P1/P2/P3a/P3b playtested; P3c boot-verified).
-main.gd 2093→1780, combat.gd 1352→1225.
+Verified base: branch `restructure`, all green (P0/P1/P2/P3a/P3b playtested; P3c/P3d boot-verified).
+main.gd 2093→1780, combat.gd 1352→1031 (CombatFX 149 + EnemyFactory 218 split out).
 Recommended next steps, in order:
 1. **(optional) Merge or keep `restructure`** — decide whether to merge into `main` now (it's a solid,
    verified improvement) or keep stacking Phase 3 first.
-2. **More combat.gd:** next clusters — `enemy_factory.gd` (model loaders + make_alien/boss/enemy +
-   menace_paint + geometry helpers), then the guardian-waves/boss cluster, then the laser
-   weapon-vs-VFX split (tracer is pure, nose-laser does damage).
+2. **More combat.gd:** next clusters — the guardian-waves/boss cluster (`set_guardians`/`_spawn_guard_wave`/
+   `_update_guard_waves`/`_step_boss`/`_boss_burst`/`_make_guardian_boss`/`_summon_minion` → a
+   `guardian_waves.gd`), then the laser weapon-vs-VFX split (tracer is pure, nose-laser does damage).
 3. **Then** ship.gd (1626) and hud.gd (1449) — map them first.
 4. **Separately from the restructure:** the pre-existing bugs (scan, planet-positions, buy-navigation)
    and the **#1 save/load "needs rework"** item (get specifics from owner first).
@@ -264,12 +278,12 @@ Recommended next steps, in order:
   `GameState.coins`/`GameState.NAV_*`). Could also be pre-existing (the restored v0.11.5 baseline
   was WIP).
   - **Where to look:** the "CHART LANE — %d coins" button in `ui/star_map.gd` (~line 345, calls
-    `main.nav_cost(sys)`); the button only shows when `main.star_state(id) == "locked"`
-    (`core/main.gd`), which depends on `_nav_unlocked` / `is_visited` / wormhole-found state.
-    Also `main.buy_navigator()` (map Navigate / autopilot) and `start_autopilot`.
+	`main.nav_cost(sys)`); the button only shows when `main.star_state(id) == "locked"`
+	(`core/main.gd`), which depends on `_nav_unlocked` / `is_visited` / wormhole-found state.
+	Also `main.buy_navigator()` (map Navigate / autopilot) and `start_autopilot`.
   - **Bisect:** compare against `407e32c` (pre-2a) — `git stash` then
-    `git checkout 407e32c` and see if the option is present there. If yes → 2a caused it; if no →
-    pre-existing in the v0.11.5 baseline.
+	`git checkout 407e32c` and see if the option is present there. If yes → 2a caused it; if no →
+	pre-existing in the v0.11.5 baseline.
   - **Status:** deferred per owner ("keep a note and move on"). Verify before merging `restructure`.
 
 ## Confusions / things to flag (owner asked me to surface these)

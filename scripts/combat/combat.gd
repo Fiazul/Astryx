@@ -8,15 +8,9 @@ extends Node3D
 # big GLB ships that drift toward you and auto-fire. Bolt↔target hits are simple
 # sphere checks. Dead aliens pop and respawn after a beat.
 
-# The monster roster — guardians/swarm pick one at random per spawn, so stars,
-# planets and moons are defended by a mix of UFOs, blobs, demons, ghosts, etc.
-const ALIEN_MODELS := [
-	"res://assets/ufo.glb", "res://assets/blob.glb", "res://assets/demon.glb", "res://assets/ghost.glb",
-	"res://assets/enemy_small.glb", "res://assets/mushnub.glb", "res://assets/alien_ship.glb",
-]
+# Enemy rosters, sizes/HP/speeds and the boss-name pool live in EnemyFactory (the unit builder).
 const ALIEN_COUNT := 3
 const SWARM_COUNT := 14           # "large chunk" of aliens around every non-Sol star
-const ALIEN_SIZE := 6.0           # big — longest axis in units
 # Nose laser beam (Raptor II, right-click): a long continuous beam that melts whatever
 # it sweeps over. Damage is applied on a steady tick so it uses integer HP cleanly.
 const LASER_LEN := 4000.0
@@ -31,11 +25,6 @@ const SHOT_HIT_RADIUS := 3.0      # aim forgiveness around the ray line for a hi
 const SHOT_FLASH_TIME := 0.06     # how long each ray pulse stays visible
 const SHOT_BEAM_RADIUS := 0.06    # tracer beam thickness
 const SHOT_TRACER_MISS_LEN := 800.0   # visible tracer length on a miss (gameplay reach stays SHOT_RANGE)
-const ALIEN_HP := 3
-const ALIEN_SPEED := 14.0
-const ALIEN_KEEP_DIST := 30.0     # they hover around this range and strafe
-const ALIEN_FIRE_EVERY := 1.4         # more aggressive (was 2.2)
-const RESPAWN_AFTER := 4.0
 const COMBAT_HOLD := 10.0          # stay "in combat" this long after the last attack (either way)
 # Energy: two auto-regen bars (weapon + boost). Caps + consume rate are PER-SHIP
 # (ship.energy_max / ship.energy_use): Raptor = big tank, low burn; Stella = small
@@ -58,19 +47,6 @@ const PICKUP_LIFE := 14.0
 const PICKUP_REFILL := 70.0        # energy restored to BOTH bars
 const PICKUP_HEAL := 14            # hull restored
 const PICKUP_CAP := 1              # only ever one in the air — it homes, you always get it
-# Probes: rare beacons far out in empty space — fly to one for a big refuel.
-const SPAWN_RADIUS := 60.0        # where new aliens appear around the player
-
-# --- VORTEX: the boss. Vortex's own ship hull, scaled up huge and menacing. ---
-const BOSS_MODEL := "res://assets/Spaceship (1).glb"   # Vortex's hull, kept as the boss design
-const BOSS_SIZE := 60.0           # extremely big
-const BOSS_HP := 60
-const BOSS_SPEED := 7.0           # slow and heavy
-const BOSS_KEEP_DIST := 80.0
-const BOSS_FIRE_EVERY := 1.2
-const BOSS_RESPAWN_AFTER := 9.0
-const BOSS_SPAWN_DIST := 160.0
-
 # --- Guardian boss: ONE per guarded body, a distinct monster GLB with its own design
 # (raw colours), that summons small "old vortex" minions (BOSS_MODEL) as its army.
 # Clear the boss to capture the body. ---
@@ -153,6 +129,7 @@ var _laser_bolt_mesh: CapsuleMesh
 var _strong_bolt_mesh: CapsuleMesh   # compact, round, "filled" bullet (HaniStar)
 var _trail_mesh: CylinderMesh
 var fx: CombatFX                # transient VFX + bolt/flash materials (Phase 3)
+var _factory: EnemyFactory      # builds enemy units (model load + paint + state dict) (Phase 3)
 var _bolt_trail_mat: StandardMaterial3D
 var _abolt_trail_mat: StandardMaterial3D
 var _laser_trail_mat: StandardMaterial3D
@@ -167,6 +144,8 @@ var _laser_bolt_mat: StandardMaterial3D   # Lyra's red laser bolts
 func _ready() -> void:
 	fx = CombatFX.new()   # owns the baked glow/splatter/plume textures + builds them in its _ready
 	add_child(fx)
+	_factory = EnemyFactory.new()   # at the origin → models it loads share our floating-origin frame
+	add_child(_factory)
 	# Slim tracer capsules (stretched along travel), shared by all bolts. Small world
 	# size -> perspective shrinks them downrange instead of them filling the lens.
 	_bolt_mesh = CapsuleMesh.new()
@@ -221,7 +200,7 @@ func _ready() -> void:
 	var smg_packed = load("res://assets/smg_bullet.glb")
 	if smg_packed:
 		var tmp: Node = smg_packed.instantiate()
-		_smg_mesh = _find_mesh(tmp)
+		_smg_mesh = _factory.find_mesh(tmp)
 		if _smg_mesh != null:
 			var sz: Vector3 = _smg_mesh.get_aabb().size
 			var longest: float = maxf(sz.x, maxf(sz.y, sz.z))
@@ -268,9 +247,9 @@ func reset(active := false, with_boss := false, count := SWARM_COUNT) -> void:
 	player_hp = PLAYER_MAX_HP
 	if active:
 		for i in count:
-			_aliens.append(_make_alien())
+			_aliens.append(_factory.make_alien())
 		if with_boss:
-			_aliens.append(_make_boss())   # Vortex
+			_aliens.append(_factory.make_boss())   # Vortex
 
 
 # Called by main each frame. `pressed` = left fire held; `laser` = right-click beam.
@@ -705,17 +684,7 @@ var e_max := ENERGY_MAX        # current per-ship cap for BOTH bars (set each fr
 var _pickups := []             # { pos, node, life } — interstellar energy pickups
 var _pickup_cd := PICKUP_EVERY
 
-# Boss names — one gets stuck to each guarded body (deterministic by name, so a body always
-# faces the same warlord). Crude/savage tone to match the mission log.
-const BOSS_NAMES := [
-	"Gut-Render", "Skullfister", "Lord Ballsack", "The Anal Vortex", "Cunthammer",
-	"Pisslord Vex", "Maggot-King", "Shitslinger", "The Choad Reaver", "Arsemaw",
-	"Bonegrinder", "Twatcrusher", "Rotgut the Foul", "Spunkbubble", "The Festering Hole",
-	"Knobrot", "Dr. Fuckwidget", "Smegmar the Vile", "Cock-Mortis", "Bumghoul",
-]
-
-func _boss_name_for(body: String) -> String:
-	return BOSS_NAMES[(hash(body) % BOSS_NAMES.size() + BOSS_NAMES.size()) % BOSS_NAMES.size()]
+# Boss names live in EnemyFactory.BOSS_NAMES; _spawn_guard_wave picks one per wave from there.
 
 # `power` ~ the body's size; bigger bodies get more waves + tougher bosses. Spawns wave 1.
 func set_guardians(center: Vector3, body: String, power := 1.0) -> void:
@@ -737,8 +706,8 @@ func set_guardians(center: Vector3, body: String, power := 1.0) -> void:
 func _spawn_guard_wave() -> void:
 	guard_wave += 1
 	var boss := _make_guardian_boss(_guard_center, _zone_power)
-	var idx := (hash(guard_body) + guard_wave * 7) % BOSS_NAMES.size()
-	boss["boss_name"] = BOSS_NAMES[(idx + BOSS_NAMES.size()) % BOSS_NAMES.size()]
+	var idx := (hash(guard_body) + guard_wave * 7) % EnemyFactory.BOSS_NAMES.size()
+	boss["boss_name"] = EnemyFactory.BOSS_NAMES[(idx + EnemyFactory.BOSS_NAMES.size()) % EnemyFactory.BOSS_NAMES.size()]
 	boss["name"] = boss["boss_name"]
 	_aliens.append(boss)
 	for _i in GUARD_WAVE_MINIONS:        # fixed swarm size per wave
@@ -783,8 +752,8 @@ func abandon_combat() -> void:
 # Reuses the alien-model loader at boss scale. Its swarm is spawned alongside it per wave.
 func _make_guardian_boss(center: Vector3, power := 1.0) -> Dictionary:
 	var size := GUARD_BOSS_SIZE * clampf(power, 1.0, 1.8)   # bigger stars = bigger boss
-	var node := _load_alien_model(size)
-	var a := _make_enemy(node, {
+	var node := _factory.load_alien_model(size)
+	var a := _factory.make_enemy(node, {
 		"size": size, "hp": int(GUARD_BOSS_HP * power), "speed": GUARD_BOSS_SPEED,
 		"keep": GUARD_BOSS_KEEP, "fire_every": GUARD_BOSS_FIRE, "respawn_after": -1.0,
 		"spawn_dist": 0.0, "is_boss": false,
@@ -795,15 +764,15 @@ func _make_guardian_boss(center: Vector3, power := 1.0) -> Dictionary:
 	a["fast_cd"] = BOSS_FAST_EVERY
 	a["telegraph_t"] = 0.0
 	a["enraged"] = false
-	a["menace_mats"] = _menace_paint(node)   # dark hull + red-hot glow → reads as a threat
+	a["menace_mats"] = _factory.menace_paint(node)   # dark hull + red-hot glow → reads as a threat
 	a["base_scale"] = a.node.scale
 	a.pos = center + _rand_dir() * (size * 2.0 + GUARD_SPAWN_CLEAR)   # clear of the star core
 	a.node.position = a.pos
 	return a
 
 func _summon_minion(center: Vector3, boss_size := 0.0) -> void:
-	var node := _load_boss_model(MINION_SIZE)   # small "old vortex"
-	var a := _make_enemy(node, {
+	var node := _factory.load_boss_model(MINION_SIZE)   # small "old vortex"
+	var a := _factory.make_enemy(node, {
 		"size": MINION_SIZE, "hp": MINION_HP, "speed": MINION_SPEED, "keep": MINION_KEEP,
 		"fire_every": MINION_FIRE, "respawn_after": -1.0, "spawn_dist": 0.0, "is_boss": false,
 	})
@@ -975,135 +944,9 @@ func _clear_minions() -> void:
 	_aliens = keep
 
 
-# ---------------------------------------------------------------------------
-func _make_alien() -> Dictionary:
-	var node := _load_alien_model()   # already added to the tree (so fit can measure it)
-	return _make_enemy(node, {
-		"size": ALIEN_SIZE, "hp": ALIEN_HP, "speed": ALIEN_SPEED, "keep": ALIEN_KEEP_DIST,
-		"fire_every": ALIEN_FIRE_EVERY, "respawn_after": RESPAWN_AFTER,
-		"spawn_dist": SPAWN_RADIUS, "is_boss": false,
-	})
-
-
-# VORTEX — the boss. Vortex's own hull, scaled up huge with a red-hot menace tint.
-func _make_boss() -> Dictionary:
-	var node := _load_boss_model()
-	var b := _make_enemy(node, {
-		"size": BOSS_SIZE, "hp": BOSS_HP, "speed": BOSS_SPEED, "keep": BOSS_KEEP_DIST,
-		"fire_every": BOSS_FIRE_EVERY, "respawn_after": BOSS_RESPAWN_AFTER,
-		"spawn_dist": BOSS_SPAWN_DIST, "is_boss": true,
-	})
-	b["boss_name"] = "Vortex"
-	b["name"] = "Vortex"
-	return b
-
-
-func _load_boss_model(size := BOSS_SIZE) -> Node3D:
-	var packed := load(BOSS_MODEL) as PackedScene
-	if packed != null:
-		var holder := Node3D.new()
-		add_child(holder)                       # in tree BEFORE fitting (needs global xform)
-		var inst := packed.instantiate() as Node3D
-		holder.add_child(inst)
-		_fit_and_light(holder, inst, size)
-		# Overpaint with a menacing red-hot emission so the boss reads as a threat.
-		for mi in _meshes(inst):
-			for si in mi.mesh.get_surface_count():
-				var o = mi.get_active_material(si)
-				var m: BaseMaterial3D = o.duplicate() if o is BaseMaterial3D else StandardMaterial3D.new()
-				m.metallic = 0.6
-				m.emission_enabled = true
-				m.emission = Color(0.95, 0.12, 0.15)
-				m.emission_energy_multiplier = 1.0
-				mi.set_surface_override_material(si, m)
-		return holder
-	# fallback: a big red box if the GLB can't load
-	var mi := MeshInstance3D.new()
-	var box := BoxMesh.new(); box.size = Vector3(BOSS_SIZE, BOSS_SIZE, BOSS_SIZE)
-	mi.mesh = box
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(0.06, 0.06, 0.08)
-	mat.emission_enabled = true
-	mat.emission = Color(0.95, 0.15, 0.2)
-	mat.emission_energy_multiplier = 1.3
-	mi.material_override = mat
-	add_child(mi)
-	return mi
-
-
-# Build an enemy state dict (regular alien or boss) around an already-added node.
-func _make_enemy(node: Node3D, cfg: Dictionary) -> Dictionary:
-	var sd: float = cfg.spawn_dist
-	var a := {
-		"pos": _rand_dir() * sd, "vel": Vector3.ZERO, "hp": cfg.hp, "max_hp": cfg.hp,
-		"node": node, "fire_cd": randf_range(0.5, cfg.fire_every), "alive": true,
-		"respawn": 0.0, "phase": randf_range(0.0, TAU),
-		"size": cfg.size, "speed": cfg.speed, "keep": cfg.keep,
-		"fire_every": cfg.fire_every, "respawn_after": cfg.respawn_after,
-		"spawn_dist": sd, "is_boss": cfg.is_boss,
-		"name": _enemy_name(),   # so the HUD can show WHO you're hitting (overridden for bosses)
-	}
-	node.position = a.pos
-	return a
-
-
-# A crude/savage name for an ordinary hostile (reuses the boss-name pool for flavour).
-func _enemy_name() -> String:
-	return BOSS_NAMES[randi() % BOSS_NAMES.size()]
-
-
-# Make a guardian boss read as DANGEROUS: near-black metallic hull with a red-hot emissive
-# glow. Returns the override materials so _step_boss can pulse them (a menacing throb).
-func _menace_paint(node: Node3D) -> Array:
-	var mats := []
-	for mi in _meshes(node):
-		for si in mi.mesh.get_surface_count():
-			var m := StandardMaterial3D.new()
-			m.albedo_color = Color(0.05, 0.04, 0.06)     # near-black hull
-			m.metallic = 0.7
-			m.roughness = 0.35
-			m.emission_enabled = true
-			m.emission = Color(1.0, 0.18, 0.12)          # red-hot menace
-			m.emission_energy_multiplier = 2.0
-			mi.set_surface_override_material(si, m)
-			mats.append(m)
-	return mats
-
-
-func _load_alien_model(size := ALIEN_SIZE) -> Node3D:
-	var paths := ALIEN_MODELS.duplicate()
-	paths.shuffle()                  # random monster type per spawn → variety
-	for path in paths:
-		var packed := load(path) as PackedScene
-		if packed != null:
-			var holder := Node3D.new()
-			add_child(holder)                        # in tree BEFORE fitting (needs global xform)
-			var inst := packed.instantiate() as Node3D
-			holder.add_child(inst)
-			_fit_and_light(holder, inst, size)
-			return holder
-	# fallback: a menacing emissive prism if the GLBs aren't there yet
-	var mi := MeshInstance3D.new()
-	var m := BoxMesh.new(); m.size = Vector3(ALIEN_SIZE, ALIEN_SIZE * 0.4, ALIEN_SIZE * 0.7)
-	mi.mesh = m
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(0.3, 0.9, 0.4)
-	mat.emission_enabled = true
-	mat.emission = Color(0.2, 0.8, 0.3)
-	mat.emission_energy_multiplier = 0.6
-	mi.material_override = mat
-	add_child(mi)
-	return mi
-
-
-func _find_mesh(node: Node) -> Mesh:
-	if node is MeshInstance3D:
-		return node.mesh
-	for child in node.get_children():
-		var m = _find_mesh(child)
-		if m:
-			return m
-	return null
+# Enemy units (model load + paint + state dict) are built by EnemyFactory (Phase 3): see
+# _factory.make_alien / make_boss / make_enemy / load_alien_model / load_boss_model /
+# menace_paint / find_mesh. The guardian-wave bosses/minions assemble from those primitives above.
 
 
 func _spawn_bolt(list: Array, pos: Vector3, vel: Vector3, mat: StandardMaterial3D, scale := 1.0, dmg := 1, laser := false, aim := Vector3.ZERO, reach_speed := -1.0) -> void:
@@ -1184,42 +1027,5 @@ func _rand_dir() -> Vector3:
 	return Vector3(randf_range(-1, 1), randf_range(-0.5, 0.5), randf_range(-1, 1)).normalized()
 
 
-func _fit_and_light(holder: Node3D, model: Node3D, target: float) -> void:
-	var box := _aabb(holder)
-	var longest := maxf(box.size.x, maxf(box.size.y, box.size.z))
-	if longest > 0.0001:
-		var f := target / longest
-		model.scale = model.scale * f
-		model.position -= (box.position + box.size * 0.5) * f
-	# Keep each monster's AUTHORED design/colours — render unshaded so the GLB's own
-	# albedo/texture/vertex-colours show in our light-less scene (no purple overpaint).
-	for mi in _meshes(model):
-		for si in mi.mesh.get_surface_count():
-			var o = mi.get_active_material(si)
-			var m: BaseMaterial3D = o.duplicate() if o is BaseMaterial3D else StandardMaterial3D.new()
-			m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-			m.vertex_color_use_as_albedo = true
-			m.emission_enabled = false
-			mi.set_surface_override_material(si, m)
-
-
-func _aabb(root: Node3D) -> AABB:
-	var out := AABB(); var first := true
-	var inv := root.global_transform.affine_inverse()
-	for mi in _meshes(root):
-		var b: AABB = (inv * mi.global_transform) * mi.get_aabb()
-		out = b if first else out.merge(b)
-		first = false
-	return out
-
-
-func _meshes(n: Node) -> Array:
-	var out := []
-	if n is MeshInstance3D and n.mesh != null:
-		out.append(n)
-	for c in n.get_children():
-		out.append_array(_meshes(c))
-	return out
-
-
-# (_make_glow / _make_splatter moved to CombatFX)
+# (_make_glow / _make_splatter moved to CombatFX; model loaders + _meshes/_aabb/_fit_and_light
+#  moved to EnemyFactory)
