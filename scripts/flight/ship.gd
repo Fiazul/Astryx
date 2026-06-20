@@ -394,7 +394,7 @@ const WARP_DECAY_TIME := 3.5   # seconds to spool back down when you ease off
 # this just advances the bounded voyage. Only while in deep space (warp_ready) and spooled up.
 const GALACTIC_SEC_PER_LY := 0.08      # LOCKED voyage pace — the tuned 0.08 s/ly (do not drift)
 const GALACTIC_LOOM_LY_PER_S := 1.0 / GALACTIC_SEC_PER_LY   # = 12.5 ly/s → ~26,000 ly in ~34.7 min
-const GALACTIC_TEST_MULT := 10.0  # ⚠ TEST ONLY — set back to 1.0 before shipping. 10× the loom
+const GALACTIC_TEST_MULT := 1.0  # ⚠ TEST ONLY — set back to 1.0 before shipping. 10× the loom
 								  # → core run in ~3.5 min instead of ~35, so the voyage is testable.
 
 # Station landing zone: speed is force-reduced as you near the pad so you can
