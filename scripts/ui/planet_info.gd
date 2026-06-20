@@ -4,10 +4,10 @@ extends CanvasLayer
 # with G or the HUD "Details" button; pauses flight + frees the cursor while you
 # read, like the other overlays. process_mode = ALWAYS so it runs while paused.
 
-var data: PlanetData
+@onready var data := PlanetData   # autoload
 var planets: PlanetSystem
 var ship: Ship
-var codex: Codex            # gate facts behind discovery
+@onready var codex := Codex   # autoload; gate facts behind discovery
 var main: Node              # for the capture-reward Claim button
 
 var _root: Control

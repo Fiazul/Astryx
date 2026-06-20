@@ -4,7 +4,7 @@ extends CanvasLayer
 # (click to read full data) and the rest shown as locked "◌ ???". Pauses while
 # open like the other overlays. main wires `codex`, `info` (PlanetInfo), `ship`.
 
-var codex: Codex
+@onready var codex := Codex   # autoload
 var info: PlanetInfo
 var ship: Ship
 

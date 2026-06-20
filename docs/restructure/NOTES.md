@@ -119,10 +119,15 @@ File name ≠ class it holds — fixable:
   gives FALSE "Identifier not found: GameAudio" — isolated compile has no autoload globals. **Use a
   headless boot instead:** `timeout 30 godot --headless --quit-after 120` and grep for
   `SCRIPT ERROR|Compile Error|Failed to load`. GameAudio passed (clean boot, exit 0).
-- **TODO remaining services** (same pattern): `Codex`, `PlanetData`, `Ephemeris`. Note `Codex`/
-  `PlanetData` autoload names will collide with their `class_name` until dropped — drop class_name
-  first. `Ephemeris` is used at startup (`eph.scene_pos("Sun")`) — autoload boots before main, fine.
-  Possible future cleanup: migrate the kept `audio`/`eph`/`codex` aliases to direct global calls.
+- **Codex / PlanetData / Ephemeris ✅ DONE** (same pattern). Registered all in `[autoload]`; dropped
+  their `class_name`; consumers self-source (`@onready var codex := Codex`, etc.); removed main's
+  `.new()/add_child` + every injection (`hud.codex=`, `planet_info.data=`/`.codex=`, `codex_panel.codex=`,
+  `quest_log.codex=`, `planets.eph=`). No `is/as` or type-annotation uses of the dropped names existed.
+- **Phase 1 COMPLETE.** 4 autoloads: `Ephemeris`, `PlanetData`, `Codex`, `GameAudio`. `SystemDB`/
+  `MissionDB` left as-is (already global static classes — no autoload needed). `main.gd` 2093 → 2079.
+  Verified by clean headless boot (exit 0, no script errors). **Owner playtest pending before Phase 2.**
+- Future cleanup (low priority): the kept `audio`/`eph`/`codex`/`data` aliases could migrate to direct
+  `GameAudio.x()` / `Ephemeris.x()` global calls; redundant `if audio != null` guards can go.
 
 ## Confusions / things to flag (owner asked me to surface these)
 

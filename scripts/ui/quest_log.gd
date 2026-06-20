@@ -17,7 +17,7 @@ const PANEL := Vector2(1010, 560)
 const PANEL_POS := Vector2((1280 - 1010) * 0.5, (720 - 560) * 0.5)
 
 var main: Node
-var codex: Node
+@onready var codex := Codex   # autoload
 
 var _root: Control
 var _panel: PanelContainer

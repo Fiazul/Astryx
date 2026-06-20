@@ -61,7 +61,7 @@ const STAR_GRAVITY_RANGE := 90000.0    # the well reaches out far enough to "cal
 const STAR_GRAVITY_MAX := 160.0        # ceiling (units/s²); thrust (~1650) still wins
 
 # Assigned by main before this node enters the tree.
-var eph: Ephemeris
+@onready var eph := Ephemeris   # autoload
 
 # Filled in by refresh(), read by the HUD / ship.
 var nearest_name := ""

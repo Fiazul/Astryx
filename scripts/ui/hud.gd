@@ -36,7 +36,7 @@ var ship: Ship
 var planets: PlanetSystem
 var combat: Combat           # for HP / kills readout
 var coins := 0               # player currency, shown beside KILLS (set by main)
-var codex: Codex             # discovery progress (set by main)
+@onready var codex := Codex   # autoload; discovery progress
 var origin_name := "Earth"   # what the distance readout measures from (per system)
 
 # Scan/discovery state, fed by main each frame.

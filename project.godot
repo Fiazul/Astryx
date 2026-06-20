@@ -22,6 +22,9 @@ config/icon="res://icon.svg"
 
 [autoload]
 
+Ephemeris="*res://scripts/autoload/ephemeris.gd"
+PlanetData="*res://scripts/autoload/planet_data.gd"
+Codex="*res://scripts/autoload/codex.gd"
 GameAudio="*res://scripts/autoload/game_audio.gd"
 
 [display]

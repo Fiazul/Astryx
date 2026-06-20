@@ -1,4 +1,4 @@
-class_name PlanetData
+# Autoload singleton (registered as `PlanetData` in project.godot). class_name dropped per ADR-0001.
 extends Node
 # Real planetary facts for the Details panel. Two layers:
 #   1) BUNDLED — curated from NASA fact sheets (static; always available offline).

@@ -1,4 +1,4 @@
-class_name Codex
+# Autoload singleton (registered as `Codex` in project.godot). class_name dropped per ADR-0001.
 extends Node
 # Tracks which bodies the player has personally scanned/discovered. Persists to
 # user://codex.json so progress survives restarts. The Details panel reveals full

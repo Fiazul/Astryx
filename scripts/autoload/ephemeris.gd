@@ -1,4 +1,4 @@
-class_name Ephemeris
+# Autoload singleton (registered as `Ephemeris` in project.godot). class_name dropped per ADR-0001.
 extends Node
 # REAL positions for Cold Light. Earth is the anchor at the scene origin (0,0,0) —
 # every coordinate here is GEOCENTRIC, the frame NASA RA/Dec are measured in.

@@ -17,7 +17,7 @@ var galaxy: GalaxyModel              # the Milky Way backdrop; loomed toward the
 var planets: PlanetSystem
 var props: Props
 var hud: HUD
-var eph: Ephemeris
+@onready var eph := Ephemeris   # autoload (alias so main.eph accessors still work)
 var wormhole: Wormhole
 var combat: Combat
 @onready var audio := GameAudio   # autoload (kept as alias so main.audio accessors still work)
@@ -28,11 +28,11 @@ var tutor: Tutor                    # new-game onboarding tip notifications
 var reward_card: RewardCard         # capture celebration card (auto-reward + fade-out)
 var _fresh_game := false            # true when there was no save → start the tutorial
 var quest_log: QuestLog
-var planet_data: PlanetData
+@onready var planet_data := PlanetData   # autoload
 var planet_info: PlanetInfo
 var navigator: Navigator
 var minimap: MiniMap
-var codex: Codex
+@onready var codex := Codex   # autoload (alias so main.codex accessors still work)
 var _nav_target := ""         # Tab target: the object the aim ray passes nearest to
 var _tab_index := -1          # which of the 4 ray-closest targets is selected (Tab cycles)
 var _tab_aim := Vector3.ZERO  # nose dir at the last Tab — moving the cursor restarts the cycle
@@ -226,12 +226,10 @@ func _ready() -> void:
 	ship.camera = cam
 
 	# Real positions: live JPL Horizons for Sun+planets, catalog for stars.
-	eph = Ephemeris.new()
-	add_child(eph)
+	# Ephemeris is now the autoload; planets self-source it via `@onready var eph := Ephemeris`.
 
-	# Planets / stars as dot->body LOD (reads real positions from eph).
+	# Planets / stars as dot->body LOD (reads real positions from Ephemeris).
 	planets = PlanetSystem.new()
-	planets.eph = eph
 	add_child(planets)
 
 	# Two shadowless lights give the ship/Earth/station CONTRAST and form without
@@ -292,22 +290,15 @@ func _ready() -> void:
 	hud.open_teleport_map.connect(_on_open_teleport_map)    # dock → open the teleport-network map
 
 	# Discovery progress (persisted) + real planet facts + the Details panel.
-	codex = Codex.new()
-	add_child(codex)
-	hud.codex = codex
-	planet_data = PlanetData.new()
-	add_child(planet_data)
+	# Codex and PlanetData are now autoloads; consumers self-source them.
 	planet_info = PlanetInfo.new()
-	planet_info.data = planet_data
 	planet_info.planets = planets
 	planet_info.ship = ship
-	planet_info.codex = codex
 	planet_info.main = self
 	add_child(planet_info)
 	hud.details_button.pressed.connect(planet_info.open_for_nearest)
 	# Codex logbook (L): browse discovered bodies, click to read.
 	var codex_panel := CodexPanel.new()
-	codex_panel.codex = codex
 	codex_panel.info = planet_info
 	codex_panel.ship = ship
 	add_child(codex_panel)
@@ -349,7 +340,6 @@ func _ready() -> void:
 	# Mission log (J): every body is a mission — browse the story + navigate to it.
 	quest_log = QuestLog.new()
 	quest_log.main = self
-	quest_log.codex = codex
 	add_child(quest_log)
 	hud.log_button.pressed.connect(quest_log.toggle)
 	hud.settings_button.pressed.connect(settings.toggle)
