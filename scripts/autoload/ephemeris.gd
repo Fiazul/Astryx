@@ -34,7 +34,12 @@ const PLANETS := [
 	# Bigger now, with REAL masses (Earth = 1) so gravity is mass-based: the giants and
 	# the Sun grab hard, Mercury/Mars barely tug. Radii follow real size order, gently
 	# compressed so they read as dominant without engulfing neighbours.
-	{ "name": "Earth",   "id": "399", "eq": Vector3(0, 0, 0),               "radius": 5.6,  "mass": 1.0,      "color": Color(0.169, 0.510, 0.788), "model": "res://assets/earth.glb", "glow": 0.12, "fixed": true },
+	# AWE PASS (feat/scale-and-awe): Earth blown up 30× (5.6 → 170) so it OVERWHELMS the view from
+	# the start, like looking down from a station. Moon scaled with it (see MOONS). The rest of Sol
+	# is still at the old scale for now — the Sol-step rescales AU_TO_UNITS to match. Known temporary
+	# artifact: the Sun (~130u out) now sits inside Earth's 170u radius — you start looking AWAY from
+	# it, so it's hidden until we spread Sol out.
+	{ "name": "Earth",   "id": "399", "eq": Vector3(0, 0, 0),               "radius": 170.0, "mass": 1.0,      "color": Color(0.169, 0.510, 0.788), "model": "res://assets/earth.glb", "glow": 0.12, "fixed": true },
 	{ "name": "Sun",     "id": "10",  "eq": Vector3( 0.1640,  0.9194,  0.3985), "radius": 14.0, "mass": 333000.0, "color": Color(1.00, 0.85, 0.30), "star": true, "model": "res://assets/sol.obj", "glow": 2.0 },
 	{ "name": "Mercury", "id": "199", "eq": Vector3(-0.2269,  0.7801,  0.3646), "radius": 2.2,  "mass": 0.055,    "color": Color(0.533, 0.533, 0.533) },
 	{ "name": "Venus",   "id": "299", "eq": Vector3(-0.5535,  0.9404,  0.4534), "radius": 5.3,  "mass": 0.815,    "color": Color(0.890, 0.831, 0.714) },
@@ -57,7 +62,7 @@ const PLANETS := [
 # Horizons). orbit_r is in scene units, EXAGGERATED for visibility like the planets
 # (true lunar distances are sub-planet-radius at this scale). orbit_speed = rad/s.
 const MOONS := [
-	{ "name": "Moon",     "parent": "Earth",   "radius": 1.6, "mass": 0.0123, "orbit_r": 16.0, "orbit_speed": 0.45, "color": Color(0.78, 0.78, 0.80) },
+	{ "name": "Moon",     "parent": "Earth",   "radius": 48.0, "mass": 0.0123, "orbit_r": 480.0, "orbit_speed": 0.45, "color": Color(0.78, 0.78, 0.80) },   # AWE PASS: scaled 30× with Earth (1.6→48, 16→480) so it clears the giant Earth
 	# Mars's two tiny captured-asteroid moons. Real radii are ~11 km / ~6 km — invisible at
 	# true scale, so radius is artistic (clearly smaller than the Moon). Phobos orbits faster
 	# than Mars spins (7.6 h), so it gets the higher orbit_speed; masses are real (≈0, no pull).

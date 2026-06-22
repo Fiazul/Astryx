@@ -145,7 +145,7 @@ var music: MusicDirector
 # FROM Earth (the origin), parked just off it on the side away from the Sun, so
 # you open looking at Earth up close with the Sun a bright disc in the distance
 # beyond it (~13u). (Sun direction in scene ≈ (0.16, 0.39, 0.91).)
-const START_POS := Vector3(-0.81, -1.97, -4.53)
+const START_POS := Vector3(-39.0, -95.0, -218.6)   # AWE PASS (feat/scale-and-awe): same look-direction, pushed out to ~240u (~1.4× Earth's new 170u radius) so you open floating just off a giant Earth
 # Largest sane true_pos magnitude (units). In-system play keeps true_pos to ~1e5 units at most
 # (it resets to a small local coord on every arrival), and the galactic drive no longer moves it.
 # ~1e10 (≈1200 ly) is far above anything legitimate yet far below a corrupt ~8.7e11; a saved
